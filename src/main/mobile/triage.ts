@@ -9,6 +9,7 @@ import {
 import { AppErrorCode, type TaskTriageParams } from '../../../protocol/ts/index.ts'
 import { findTaskInProject, mapTaskInProject } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
+import { startQueuedNow } from '../../shared/queued-tasks'
 
 /**
  * `task.triage` (SPEC.md §8.11): the inbox's row actions from the phone, through the
@@ -40,6 +41,11 @@ export function triageTaskInData(data: ProjectsData, params: TaskTriageParams, n
     const task = findTaskInProject(project, params.taskId)
     if (!task) continue
     if (!isVisibleOnMobile(project)) break
+    if (params.action === 'unsnooze' && task.queued) {
+      // Waking a queued task starts it now (main's queued-task runner).
+      if (task.queued.now) return { ok: true, data, changed: false }
+      return { ok: true, data: { ...data, projects: data.projects.map((p) => (p !== project ? p : startQueuedNow(p, task.id))) }, changed: true }
+    }
     const inbox = nextInbox(task, params, now)
     if (!inbox) return { ok: true, data, changed: false }
     const next: ProjectsData = {

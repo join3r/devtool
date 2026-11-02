@@ -34,6 +34,11 @@ export interface NewTaskSubmission {
   terminal?: { command?: string }
   /** Autopilot (desk only, a Claude chat start): main takes the task to Done by itself. */
   autopilot?: { review: boolean }
+  /**
+   * Queue it (same-folder warning): a chat `start` waits, snoozed, until no other
+   * agent works in its folder, and main sends the prompt then (`Task.queued`).
+   */
+  queue?: boolean
 }
 
 export interface NewTaskDraft {

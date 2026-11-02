@@ -14,6 +14,7 @@ import {
   type TaskEventKind
 } from './inbox'
 import { deskEvents } from '../../components/desk/deskEvents'
+import { startQueuedNow } from '../../../shared/queued-tasks'
 
 export interface TaskInboxActions {
   markTaskInteracted: (projectId: string, taskId: string) => void
@@ -84,8 +85,13 @@ export function useTaskInbox(core: AppStateCore): TaskInboxActions {
   }, [updateTaskInbox])
 
   const unsnoozeTask = useCallback((projectId: string, taskId: string) => {
+    // Waking a queued task starts it now, whoever else works in its folder.
+    if (findTaskInProject(projectsRef.current.find(p => p.id === projectId), taskId)?.queued) {
+      mutateProjects(prev => ({ ...prev, projects: prev.projects.map(p => (p.id === projectId ? startQueuedNow(p, taskId) : p)) }))
+      return
+    }
     updateTaskInbox(projectId, taskId, inboxUnsnoozed)
-  }, [updateTaskInbox])
+  }, [updateTaskInbox, mutateProjects])
 
   const endAutopilot = useCallback((projectId: string, taskId: string) => {
     mutateProjects(prev => mapTask(prev, projectId, taskId, task => {

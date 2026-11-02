@@ -1,4 +1,5 @@
 import type { AppConfig, DeskScope, Project, PromptBoxAgent, Stream, Task } from '../../../shared/types'
+import { isChatTabType } from '../../../shared/types'
 import type { ChatImage } from '../../../shared/claude-chat'
 import { findMainStream, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
 import { isTaskWorking, type StatusOf } from '../sidebar/closeRules'
@@ -109,6 +110,15 @@ export function busyInSameFolder(project: Project, stream: Stream | undefined, s
   const dir = streamDirectory(project, target)
   return project.streams.flatMap(candidate => candidate.tasks)
     .filter(task => isTaskWorking(task, statusOf) && taskDirectory(project, task) === dir)
+}
+
+/**
+ * Whether a start can be queued behind the agents in its folder instead: main
+ * sends a chat its first prompt by itself, so a chat can wait; a terminal can't,
+ * and pictures don't wait in the queue.
+ */
+export function canQueueStart(agent: PromptBoxAgent | null, images = 0): boolean {
+  return !!agent && isChatTabType(agent) && images === 0
 }
 
 /** The warning's one line: who works where, and what to do about it. */

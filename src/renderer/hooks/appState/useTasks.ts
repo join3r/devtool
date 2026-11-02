@@ -62,7 +62,7 @@ export interface ReopenedStreamSetup {
 export interface TasksActions {
   /** A task in stream `streamId` (`main` when absent), selected in this window. */
   /** `extra`: what the task is born with besides its tabs (Autopilot). */
-  addTask: (projectId: string, name: string, initialTabs?: Tab[], streamId?: string | null, extra?: Pick<Task, 'autopilot'>) => Task
+  addTask: (projectId: string, name: string, initialTabs?: Tab[], streamId?: string | null, extra?: Pick<Task, 'autopilot' | 'queued'>) => Task
   addTaskInDirectory: (directory: string, name: string, initialTabs?: Tab[]) => Task
   /** A new stream at the end of the project's list: a worktree's, or the project folder's. */
   addStream: (projectId: string, name: string, workspace?: WorkspaceConfig) => Stream
@@ -151,10 +151,15 @@ export function useTasks(
   // `initialTabs` exists so a task can be born with its tabs: calling `addTab` right
   // after this would read a `projectsRef` that hasn't seen the task yet and clobber
   // the view state written below.
-  const addTask = useCallback((projectId: string, name: string, initialTabs: Tab[] = [], streamId?: string | null, extra?: Pick<Task, 'autopilot'>) => {
-    const task: Task = { ...makeTask(name, initialTabs), ...(extra?.autopilot ? { autopilot: extra.autopilot } : {}) }
+  const addTask = useCallback((projectId: string, name: string, initialTabs: Tab[] = [], streamId?: string | null, extra?: Pick<Task, 'autopilot' | 'queued'>) => {
+    const task: Task = {
+      ...makeTask(name, initialTabs),
+      ...(extra?.autopilot ? { autopilot: extra.autopilot } : {}),
+      ...(extra?.queued ? { queued: extra.queued } : {})
+    }
     mutateProjects(prev => appendTaskToProject(prev, projectId, task, streamId))
-    updateWindowViewState(prev => selectNewTaskView(prev, projectId, task))
+    // A queued task waits in Snoozed: you stay where you were.
+    if (!task.queued) updateWindowViewState(prev => selectNewTaskView(prev, projectId, task))
     return task
   }, [mutateProjects, updateWindowViewState])
 

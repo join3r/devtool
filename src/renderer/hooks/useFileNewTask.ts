@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { NEW_TASK_NAME, type Task } from '../../shared/types'
+import { NEW_TASK_NAME, isChatTabType, type Task, type TaskQueuedStart } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { terminalTaskName, type NewTaskSubmission } from '../components/newTask'
 import { setPendingCommand } from '../components/terminalStartup'
@@ -13,7 +13,21 @@ import { agentTakesMode, setPendingPrompt, taskNameFromPrompt } from '../compone
  */
 export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
   const { addTask, addTaskInDirectory, titleTaskFromPrompt, updateConfig } = useApp()
-  return useCallback(({ target, streamId, start, terminal, autopilot }: NewTaskSubmission) => {
+  return useCallback(({ target, streamId, start, terminal, autopilot, queue }: NewTaskSubmission) => {
+    if (queue && start && target.kind === 'project' && isChatTabType(start.agent)) {
+      // No pending prompt: main sends it once the folder is free. Autopilot and
+      // pictures don't wait in the queue.
+      const tab = createTab(start.agent)
+      const name = taskNameFromPrompt(start.prompt.text)
+      const queued: TaskQueuedStart = {
+        prompt: start.prompt.text,
+        ...(start.agent === 'claude-chat' && start.prompt.mode ? { mode: start.prompt.mode } : {}),
+        at: Date.now()
+      }
+      const task = addTask(target.projectId, name, [tab], streamId, { queued })
+      titleTaskFromPrompt(task.id, name, start.prompt.text)
+      return task
+    }
     let tabs: ReturnType<typeof createTab>[] = []
     let name = NEW_TASK_NAME
     if (terminal) {

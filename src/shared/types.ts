@@ -250,6 +250,25 @@ export interface Task {
   landing?: TaskLanding
   /** Autopilot (desk redesign decision 7): main takes the task from its first turn to Done by itself. */
   autopilot?: TaskAutopilot
+  /**
+   * Queued from the same-folder warning: the task waits (listed as snoozed) until
+   * no other agent works in its folder, then main sends it `prompt`
+   * (`main/queued-task-runner.ts`).
+   */
+  queued?: TaskQueuedStart
+}
+
+/** A queued task's first prompt, held until its folder is free (see `Task.queued`). */
+export interface TaskQueuedStart {
+  prompt: string
+  /** Claude chat only: the permission mode the prompt starts with. */
+  mode?: string
+  /** When it was queued: the oldest of a folder's queued tasks starts first. */
+  at: number
+  /** Start it now, whoever else works there (Wake / Start now). */
+  now?: true
+  /** Why the last start failed; it waits for Start now instead of retrying. */
+  error?: string
 }
 
 /**

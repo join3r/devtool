@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { v4 as uuid } from 'uuid'
 import type { Project, PromptBoxAgent, Task } from '../../../shared/types'
 import { isEphemeralProject } from '../../../shared/types'
 import { findTaskInProject, streamDirectory, taskDirectory } from '../../../shared/streams'
@@ -22,10 +21,10 @@ import { createTab } from '../newTaskTabs'
 import { inboxApps } from '../inbox'
 import { openBench } from './benchState'
 import { openRunLog } from './DeskStatusBar'
-import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, canQueueStart, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
 import AutopilotChips from './AutopilotChips'
 import {
-  barSections, canQueue, completeToken, queuedPromptFor, resolveBar, targetLabel, targetStreamName,
+  barSections, completeToken, resolveBar, targetLabel,
   type BarHere, type BarItem, type BarSection, type BarTarget, type ResolvedBar
 } from './commandBar'
 
@@ -33,15 +32,15 @@ const MAX_INPUT_HEIGHT = 160
 
 /**
  * The desk's ⌘K bar (change 5 of the redesign; logic in `commandBar.ts`). One
- * input: plain words jump or start a task (↵), ⌘↵ queues them in the stream's
- * prompt queue instead, `@project` / `#stream` aim it, `>` runs a command, `/`
+ * input: plain words jump or start a task (↵), ⌘↵ queues it behind the agents
+ * already working in its folder (when there are some), `@project` / `#stream` aim it, `>` runs a command, `/`
  * opens a file or note, `*` searches every project. Classic keeps the palette.
  */
 export default function DeskCommandBar(): React.ReactElement | null {
   const actions = useApp()
   const {
     projects, projectOrder, notes, config, desk, selectedProjectId, selectedTaskId, effectiveTheme,
-    switchToTask, selectProjectHome, updatePromptQueue, openOrFocusNoteTab, openOrFocusEditorTab, taskForTab
+    switchToTask, selectProjectHome, openOrFocusNoteTab, openOrFocusEditorTab, taskForTab
   } = actions
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
@@ -120,6 +119,14 @@ export default function DeskCommandBar(): React.ReactElement | null {
     return () => { cancelled = true }
   }, [filesDir, files?.dir])
 
+  const { agents, agent } = config && bar.target ? deskAgents(config, bar.target.project, agentOverride) : { agents: [], agent: null }
+  const statuses = useAllTabStatuses()
+  const busy = useMemo(
+    () => (open && agent && bar.target && input.trim() ? busyInSameFolder(bar.target.project, bar.target.stream, (tabId) => statuses[tabId]) : []),
+    [open, agent, bar.target, input, statuses]
+  )
+  const queueable = busy.length > 0 && canQueueStart(agent)
+
   const sections = useMemo<BarSection[]>(() => {
     if (!open) return []
     return barSections(bar, {
@@ -128,22 +135,16 @@ export default function DeskCommandBar(): React.ReactElement | null {
       apps: inboxApps(projects, runs, dismissed),
       commands: paletteCommandEntities(actions),
       notes,
-      files: filesDir && files?.dir === filesDir.dir ? files.list : null
+      files: filesDir && files?.dir === filesDir.dir ? files.list : null,
+      queueable
     }, here, frecency, Date.now())
-  }, [open, bar, projects, composeProjects, runs, dismissed, actions, notes, filesDir, files, here, frecency])
+  }, [open, bar, projects, composeProjects, runs, dismissed, actions, notes, filesDir, files, here, frecency, queueable])
   const flat = useMemo(() => sections.flatMap(section => section.items), [sections])
 
   useEffect(() => { setSelected(0) }, [input])
   useEffect(() => {
     listRef.current?.querySelector(`[data-bar-index="${selected}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [selected])
-
-  const { agents, agent } = config && bar.target ? deskAgents(config, bar.target.project, agentOverride) : { agents: [], agent: null }
-  const statuses = useAllTabStatuses()
-  const busy = useMemo(
-    () => (open && agent && bar.target && input.trim() ? busyInSameFolder(bar.target.project, bar.target.stream, (tabId) => statuses[tabId]) : []),
-    [open, agent, bar.target, input, statuses]
-  )
 
   // The input grows with the prompt; the mirror behind it (token colours) follows its scroll.
   useLayoutEffect(() => {
@@ -162,9 +163,11 @@ export default function DeskCommandBar(): React.ReactElement | null {
     close()
   }
 
+  /** Filed snoozed: main starts it once the agents in its folder finish. */
   const queueTask = (target: BarTarget, prompt: string): void => {
-    updatePromptQueue(target.project.id, { op: 'add', item: queuedPromptFor(target, uuid(), prompt) })
-    showToast(`Queued in ${targetLabel(target)}`)
+    writeLastWhere(target.project, target.stream)
+    fileNewTask({ ...deskSubmission(target.project, target.stream, agent, prompt), queue: true })
+    showToast(`Queued in ${targetLabel(target)}: it starts when the other agents there finish`)
     close()
   }
 
@@ -189,8 +192,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
       case 'task': switchToTask(item.project.id, item.task.id); break
       // A project or stream opens its Project map; the column's scope filter stays as it was.
       case 'project':
-      case 'stream':
-      case 'queued': selectProjectHome(item.project.id); break
+      case 'stream': selectProjectHome(item.project.id); break
       case 'app': openRunLog(item.app, { selectedProjectId, selectedTaskId, switchToTask }); break
       case 'command': runPaletteCommand(item.id, actions); break
       case 'note': {
@@ -225,7 +227,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
     }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      if (bar.mode === 'plain' && bar.query.trim() && bar.target && canQueue(bar.target)) queueTask(bar.target, bar.query.trim())
+      if (bar.mode === 'plain' && bar.query.trim() && bar.target && queueable) queueTask(bar.target, bar.query.trim())
       return
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(flat[selected]); return }
@@ -442,7 +444,7 @@ function BarRow({ item, index, selected, agent, busy, theme, onHover, onClick }:
       return (
         <div {...common} className={`${ROW} py-2 ${bg}`}>
           <span className="w-[22px] text-center text-text-muted">⇥</span>
-          <span className="flex-1 truncate">Add to the <span className="font-mono">{targetStreamName(item.target)}</span> queue instead</span>
+          <span className="flex-1 truncate">Queue it: start when {busy.length === 1 ? `"${busy[0].name}" finishes` : 'they finish'}</span>
           {kbd(formatShortcutForApp('CmdOrCtrl+Enter').replace('Enter', '↵'))}
         </div>
       )
@@ -487,14 +489,6 @@ function BarRow({ item, index, selected, agent, busy, theme, onHover, onClick }:
           <span className={`size-[7px] mx-[7px] rounded-full shrink-0 ${item.app.crashed ? 'bg-crashed' : 'bg-running'}`} />
           <span className="flex-1 min-w-0 truncate">Open <span className="font-mono">{item.title}</span> logs · {where(item.app.project, item.app.stream.name, item.app.stream.isMain)}</span>
           <span className="text-sm text-text-muted">{item.app.crashed ? 'Crashed' : 'App'}</span>
-        </div>
-      )
-    case 'queued':
-      return (
-        <div {...common} className={`${ROW} py-2 ${bg}`}>
-          <span className="size-[7px] mx-[7px] rounded-full shrink-0 bg-status-exited" />
-          <span className="flex-1 min-w-0 truncate">{item.title}</span>
-          <span className="text-sm text-text-muted truncate max-w-[40%]">Queued · {item.stream?.name ?? 'main'}</span>
         </div>
       )
     case 'command':

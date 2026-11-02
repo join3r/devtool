@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   barSections,
-  canQueue,
   completeToken,
   parseBar,
   prefersJump,
-  queuedPromptFor,
   resolveBar,
   targetLabel,
   tokenKey,
@@ -108,10 +106,12 @@ describe('barSections', () => {
   const sections = (input: string, here = nowhere, extra: Partial<BarSources> = {}) =>
     barSections(resolveBar(input, projects, here), sources(extra), here, {}, NOW)
 
-  it('offers Start task and the queue first for a prompt', () => {
+  it('offers Start task first for a prompt, and queueing only when the folder is busy', () => {
     const result = sections('refactor the whole settings page please')
     expect(result[0].key).toBe('start')
-    expect(result[0].items.map(i => i.kind)).toEqual(['start', 'queue'])
+    expect(result[0].items.map(i => i.kind)).toEqual(['start'])
+    const busy = sections('refactor the whole settings page please', nowhere, { queueable: true })
+    expect(busy[0].items.map(i => i.kind)).toEqual(['start', 'queue'])
   })
 
   it('puts a match first when the words name it', () => {
@@ -168,12 +168,6 @@ describe('helpers', () => {
   it('labels targets project-first, main omitted', () => {
     expect(targetLabel({ project: devtool, stream: beta })).toBe('devtool › 0.7.0')
     expect(targetLabel({ project: devtool, stream: devtool.streams[0] })).toBe('devtool')
-  })
-
-  it('queues main prompts without a stream', () => {
-    expect(queuedPromptFor({ project: devtool, stream: devtool.streams[0] }, 'q', 'x')).toEqual({ id: 'q', text: 'x' })
-    expect(queuedPromptFor({ project: devtool, stream: beta }, 'q', 'x')).toEqual({ id: 'q', text: 'x', streamId: 'beta' })
-    expect(canQueue({ project: { ...devtool, shellCommand: { command: 'bash' } } as unknown as Project, stream: undefined })).toBe(false)
   })
 
   it('jumps only for a few words a title contains', () => {

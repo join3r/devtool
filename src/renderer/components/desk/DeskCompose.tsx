@@ -7,7 +7,7 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { composeTarget } from './deskInbox'
 import { deskEvents } from './deskEvents'
-import { autopilotAvailable, busyInSameFolder, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, writeLastWhere, type WhereOption } from './deskStart'
+import { autopilotAvailable, busyInSameFolder, canQueueStart, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, writeLastWhere, type WhereOption } from './deskStart'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import SameFolderWarning from './SameFolderWarning'
@@ -112,11 +112,15 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     })
   }
 
-  const fire = (onAutopilot: boolean): void => {
+  const fire = (onAutopilot: boolean, queue = false): void => {
     const prompt = text.trim()
     if (!prompt || !target) return
     writeLastWhere(target.project, target.stream)
-    onCompose(deskSubmission(target.project, target.stream, agent, prompt, onAutopilot && canAutopilot ? { on: true, review: config.autopilotReview } : null, toChatImages(images)))
+    if (queue) {
+      onCompose({ ...deskSubmission(target.project, target.stream, agent, prompt), queue: true })
+    } else {
+      onCompose(deskSubmission(target.project, target.stream, agent, prompt, onAutopilot && canAutopilot ? { on: true, review: config.autopilotReview } : null, toChatImages(images)))
+    }
     edit('', 0)
     attachments.clear()
     setOverride(null)
@@ -206,7 +210,14 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
           ↵ fire{canAutopilot && ' · ⌘↵ autopilot'}
         </span>
       </div>
-      {target && text.trim() !== '' && <SameFolderWarning project={target.project} stream={target.stream} busy={busy} />}
+      {target && text.trim() !== '' && (
+        <SameFolderWarning
+          project={target.project}
+          stream={target.stream}
+          busy={busy}
+          onQueue={canQueueStart(agent, images.length) ? () => fire(false, true) : undefined}
+        />
+      )}
       <WhereMenu
         anchor={anchor}
         options={options}

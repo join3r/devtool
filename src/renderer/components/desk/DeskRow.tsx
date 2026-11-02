@@ -17,6 +17,7 @@ import type { InboxRename } from './deskInbox'
 import { autopilotActive, autopilotLine, autopilotNeedsYou } from '../../../shared/autopilot'
 import { wakeHint } from './deskSnooze'
 import type { TaskBackground } from './deskInbox'
+import { queuedLine } from '../../../shared/queued-tasks'
 
 /** Which list a row sits in; it decides the preview line and the hover actions. */
 export type DeskRowKind = 'needsYou' | 'answered' | 'waiting' | 'working' | 'snoozed'
@@ -58,6 +59,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
     return { text: `${line ?? agent.line ?? 'Working'}${elapsed}` }
   }
   if (kind === 'snoozed') {
+    if (entry.task.queued) return { text: `${queuedLine(entry.task.queued)} · ${entry.task.queued.prompt}` }
     const inbox = inboxState(entry.task)
     const wake = inbox.snoozeUntilAttention
       ? 'Snoozed until it needs you'
@@ -244,7 +246,9 @@ export default function DeskRow({
       >
         <button type="button" className={actionCls} title="Done: land the work and close (E)" onClick={onDone} data-testid="desk-row-done">✓ Done</button>
         {kind === 'snoozed'
-          ? <button type="button" className={actionCls} title="Wake now (W)" onClick={onWake}>Wake</button>
+          ? entry.task.queued
+            ? <button type="button" className={actionCls} title="Start it now, alongside the other agents (W)" onClick={onWake} data-testid="desk-row-start-queued">Start now</button>
+            : <button type="button" className={actionCls} title="Wake now (W)" onClick={onWake}>Wake</button>
           : <button type="button" className={actionCls} title="Snooze (S)" onClick={onSnooze} data-testid="desk-row-snooze">Snooze</button>}
         <button type="button" className={actionCls} aria-label="More" onClick={(e) => onContextMenu(e)}><MoreHorizontal size={13} /></button>
       </div>

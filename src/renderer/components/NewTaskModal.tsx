@@ -12,7 +12,7 @@ import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickProm
 import { currentStreamId } from '../../shared/streams'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
 import AutopilotChips from './desk/AutopilotChips'
-import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, type DeskAutopilot } from './desk/deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, canQueueStart, type DeskAutopilot } from './desk/deskStart'
 import SameFolderWarning from './desk/SameFolderWarning'
 import { useAllTabStatuses } from '../context/TabStatusContext'
 
@@ -278,6 +278,17 @@ export default function NewTaskModal({
     onCreate({ target, ...where, start, ...(run && start ? { autopilot: { review: run.review } } : {}) })
   }
 
+  /** The warning's Queue: the chat starts once the agents in its folder finish. */
+  const handleQueue = (): void => {
+    if (!valid || !target || target.kind !== 'project' || !agent || !promptText) return
+    onCreate({
+      target,
+      ...(streamId ? { streamId } : {}),
+      start: { agent, prompt: { text: promptText, ...(takesMode && mode ? { mode } : {}) } },
+      queue: true
+    })
+  }
+
   const onPromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
       e.preventDefault()
@@ -454,7 +465,15 @@ export default function NewTaskModal({
             </button>
           </header>
 
-          {project && prompt.trim() !== '' && <SameFolderWarning project={project} stream={stream} busy={busy} offerStream={false} />}
+          {project && prompt.trim() !== '' && (
+            <SameFolderWarning
+              project={project}
+              stream={stream}
+              busy={busy}
+              offerStream={false}
+              onQueue={canQueueStart(agent ?? null, images.length) ? handleQueue : undefined}
+            />
+          )}
 
           <div
             className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)"

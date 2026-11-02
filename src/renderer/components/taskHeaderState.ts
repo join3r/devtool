@@ -49,6 +49,7 @@ export function taskStatusChip(
   if (landing === 'fixing') return { label: 'Fixing conflicts', tone: 'working' }
   if (status === 'working') return { label: 'Working', tone: 'working' }
   if (landing === 'landing') return { label: task.landing?.intent === 'update' ? 'Updating…' : 'Landing…', tone: 'working' }
+  if (task.queued) return { label: 'Queued', tone: 'quiet' }
   if (isSnoozed(task, now)) return { label: 'Snoozed', tone: 'quiet' }
   if (isYourTurn(task, status)) return { label: 'Your turn', tone: 'turn' }
   return null

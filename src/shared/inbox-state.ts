@@ -34,6 +34,8 @@ export function isUnread(task: Task): boolean {
  * finished" does not.
  */
 export function isSnoozed(task: Task, now: number): boolean {
+  // A queued task sleeps until its folder is free and main starts it.
+  if (task.queued) return true
   const inbox = inboxState(task)
   if (!inbox.snoozeUntilAttention && typeof inbox.snoozedUntil !== 'number') return false
   const snoozedAt = inbox.snoozedAt ?? 0

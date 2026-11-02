@@ -3,8 +3,9 @@
  * means and what the list shows. One input replaces the palette, the ⌘P
  * switcher, New task and New stream:
  *
- * - Plain words jump somewhere (tasks, projects, streams, running apps, queued
- *   prompts) or start a task with those words as its prompt.
+ * - Plain words jump somewhere (tasks, projects, streams, running apps) or
+ *   start a task with those words as its prompt; when other agents work in the
+ *   folder it would start in, it can be queued behind them instead.
  * - `@project` and `#stream` pick where the task goes and narrow the matches. A
  *   token that names nothing stays part of the prompt ("fix #123").
  * - `>` lists commands, `/` files and notes, `*` widens matches to all projects.
@@ -12,10 +13,9 @@
  * Without tokens the task goes where you are: the open task's project and
  * stream, else the column's scope, else the project you last fired into.
  */
-import type { DeskScope, Project, QueuedPrompt, Stream, Task } from '../../../shared/types'
-import { isEphemeralProject, isShellCommandProject } from '../../../shared/types'
-import { findMainStream, findStreamOfTask, findTaskInProject } from '../../../shared/streams'
-import { promptQueue, queuedPromptStream } from '../../../shared/prompt-queue'
+import type { DeskScope, Project, Stream, Task } from '../../../shared/types'
+import { isEphemeralProject } from '../../../shared/types'
+import { findStreamOfTask, findTaskInProject } from '../../../shared/streams'
 import { fuzzyMatch, FUZZY_SCORE_FLOOR } from '../../palette/fuzzy'
 import { computeFrecencyMultiplier, type FrecencyState } from '../../palette/frecency'
 import type { InboxApp } from '../inbox'
@@ -103,7 +103,7 @@ export interface ResolvedBar extends ParsedBar {
   query: string
   /** The pieces that resolved as tokens, for highlighting. */
   tokens: Array<BarPiece & { kind: 'project' | 'stream' }>
-  /** Where ↵ starts the task (and ⌘↵ queues it). */
+  /** Where ↵ starts the task (and ⌘↵ queues it, when the folder is busy). */
   target: BarTarget | null
 }
 
@@ -187,20 +187,6 @@ export function targetLabel(target: BarTarget): string {
   return target.stream && !target.stream.isMain ? `${target.project.name} › ${target.stream.name}` : target.project.name
 }
 
-/** The stream a target's queue entry runs in, by name ("main" when none). */
-export function targetStreamName(target: BarTarget): string {
-  return target.stream?.name ?? findMainStream(target.project)?.name ?? 'main'
-}
-
-/** ⌘↵ adds to the project's prompt queue, which runs Claude chat tasks: not for a custom-shell project. */
-export function canQueue(target: BarTarget | null): boolean {
-  return !!target && !isShellCommandProject(target.project)
-}
-
-/** The queue entry ⌘↵ adds: the main stream's entries carry no stream. */
-export function queuedPromptFor(target: BarTarget, id: string, text: string): QueuedPrompt {
-  return { id, text, ...(target.stream && !target.stream.isMain ? { streamId: target.stream.id } : {}) }
-}
 
 export type BarItem =
   | { kind: 'start'; id: 'start'; target: BarTarget }
@@ -210,7 +196,6 @@ export type BarItem =
   | { kind: 'project'; id: string; title: string; project: Project }
   | { kind: 'stream'; id: string; title: string; project: Project; stream: Stream }
   | { kind: 'app'; id: string; title: string; app: InboxApp }
-  | { kind: 'queued'; id: string; title: string; project: Project; stream: Stream | undefined; item: QueuedPrompt }
   | { kind: 'command'; id: string; title: string; shortcut?: string }
   | { kind: 'note'; id: string; title: string; projectId: string; noteId: string; detail?: string }
   | { kind: 'file'; id: string; title: string; projectId: string; path: string }
@@ -231,6 +216,11 @@ export interface BarSources {
   notes: Readonly<Record<string, ReadonlyArray<{ id: string; name: string; content: string }>>>
   /** The target project's files (relative paths), once loaded; `/` mode only. */
   files: readonly string[] | null
+  /**
+   * Other agents work in the folder the started task would go to and it is a
+   * chat: offer queueing it behind them (`Task.queued`).
+   */
+  queueable?: boolean
 }
 
 type Ranked = { item: BarItem; score: number }
@@ -256,7 +246,7 @@ function rank(query: string, items: ReadonlyArray<{ item: BarItem; searchable: s
 
 const notEphemeral = (p: Project): boolean => !isEphemeralProject(p)
 
-/** Tasks, projects, streams, running apps and queued prompts the matches may show. */
+/** Tasks, projects, streams and running apps the matches may show. */
 function jumpCandidates(bar: ResolvedBar, sources: BarSources, here: BarHere): Array<{ item: BarItem; searchable: string }> {
   // Matches cover the named project (or stream), else the column's scope, else everything; `*` is everything.
   const scopeId = bar.allProjects ? null : bar.stream?.project.id ?? bar.project?.id ?? here.scope?.projectId ?? null
@@ -282,11 +272,6 @@ function jumpCandidates(bar: ResolvedBar, sources: BarSources, here: BarHere): A
     for (const stream of project.streams) {
       if (stream.isMain || bar.stream?.stream.id === stream.id) continue
       out.push({ item: { kind: 'stream', id: `stream:${project.id}:${stream.id}`, title: stream.name, project, stream }, searchable: `${stream.name} ${project.name}` })
-    }
-    for (const item of promptQueue(project)) {
-      const stream = queuedPromptStream(project, item)
-      if (!streamOk(stream)) continue
-      out.push({ item: { kind: 'queued', id: `queued:${project.id}:${item.id}`, title: item.text, project, stream, item }, searchable: item.text })
     }
   }
   for (const app of sources.apps) {
@@ -398,7 +383,7 @@ export function barSections(bar: ResolvedBar, sources: BarSources, here: BarHere
         label: null,
         items: [
           { kind: 'start', id: 'start', target: bar.target },
-          ...(canQueue(bar.target) ? [{ kind: 'queue' as const, id: 'queue' as const, target: bar.target }] : [])
+          ...(sources.queueable ? [{ kind: 'queue' as const, id: 'queue' as const, target: bar.target }] : [])
         ]
       }
     : null

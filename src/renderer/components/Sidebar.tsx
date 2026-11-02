@@ -27,6 +27,7 @@ import { openEntityDialog } from '../entityActions'
 import { findTaskInProject, taskTabs } from '../../shared/streams'
 import DeskColumn from './desk/DeskColumn'
 import { deskEvents } from './desk/deskEvents'
+import { showToast } from '../toasts'
 import { useDeskDone } from './desk/useDeskDone'
 
 /**
@@ -219,7 +220,8 @@ export default function Sidebar(): React.ReactElement {
   /** File what the compose box, the bar or the full form asked for (see `useFileNewTask`). */
   const fileNewTask = useFileNewTask()
   const handleComposedTask = (submission: NewTaskSubmission) => {
-    fileNewTask(submission)
+    const task = fileNewTask(submission)
+    if (task.queued) showToast(`Queued "${task.name}": it starts when the other agents there finish`)
     // The form compose's Options… opened took compose's text with it.
     if (newTaskForm?.prompt !== undefined) deskEvents.clearCompose()
     setNewTaskForm(null)

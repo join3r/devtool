@@ -86,6 +86,7 @@ import { registerTaskWorktreeHandlers } from '../ipc/task-worktrees'
 import { registerTaskLandingHandlers } from '../ipc/task-landing'
 import { registerPromptQueueHandlers } from '../ipc/prompt-queue'
 import { PromptQueueRunner } from '../prompt-queue-runner'
+import { QueuedTaskRunner } from '../queued-task-runner'
 import { AutopilotRunner } from '../autopilot'
 import { runCodexReview } from '../codex-review'
 import { findAgentCli } from '../agent-clis'
@@ -290,6 +291,7 @@ export class HostServices {
     () => this.mobileService?.hasPairedPhone() ?? false
   )
   private readonly promptQueue: PromptQueueRunner
+  private readonly queuedTasks: QueuedTaskRunner
   /** Autopilot tasks, from their first turn to Done (desk redesign decision 7). */
   private readonly autopilot: AutopilotRunner
   private readonly notesStore: RevisionStore<NotesRecord>
@@ -431,6 +433,20 @@ export class HostServices {
       sendFirstPrompt: (projectId, taskId, tabId, prompt) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt),
       log: (message) => this.logDebug(message)
     })
+    this.queuedTasks = new QueuedTaskRunner({
+      peek: () => this.projectsStore.peek(),
+      commit: (data) => { this.commitProjects(data) },
+      subscribeProjects: (listener) => this.projectsStore.subscribe(() => listener()),
+      statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+      subscribe: (listener) => this.activityRegistry.subscribe(listener),
+      blocker: (project) => this.chatTaskBlocker(project),
+      ensureWorktree: async (projectId, taskId) => {
+        const result = await this.taskWorktrees.ensureTaskWorktree(projectId, taskId)
+        return result.status === 'failed' ? { ok: false, error: result.error } : { ok: true }
+      },
+      sendFirstPrompt: (projectId, taskId, tabId, prompt, mode) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt, mode),
+      log: (message) => this.logDebug(message)
+    })
     this.forgetArchivesOfVanishedProjects()
     this.config = this.storage.loadConfig()
     this.scheduleDonePrune(DONE_PRUNE_FIRST_MS)
@@ -532,6 +548,7 @@ export class HostServices {
     this.registerEventForwarders()
     void this.taskLanding.reconcile()
     this.promptQueue.start()
+    this.queuedTasks.start()
     this.autopilot.start()
     this.missingFolders.start()
     this.taskDiffs.start()
@@ -1029,13 +1046,13 @@ export class HostServices {
   }
 
   /** A chat task main just added: start its runtime and send the first prompt, no window needed. */
-  private async sendFirstChatPrompt(projectId: string, taskId: string, tabId: string, prompt: string): Promise<void> {
+  private async sendFirstChatPrompt(projectId: string, taskId: string, tabId: string, prompt: string, permissionMode?: string): Promise<void> {
     const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
     const task = findTaskInProject(project, taskId)
     const tab = task ? taskTabs(task).find(t => t.id === tabId) : undefined
     if (!project || !task || !tab) throw new Error('The task is gone')
     // The permission mode the New task composer last used, as a window's first prompt carries it.
-    const mode = this.config.promptBoxMode
+    const mode = permissionMode ?? this.config.promptBoxMode
     if (mode && tab.sessionId && tab.type === 'claude-chat') {
       if (!this.chatManager.snapshot(tab.id)) {
         const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
@@ -1117,6 +1134,7 @@ export class HostServices {
     this.taskDiffs.stop()
     this.streamRunsUnsub?.()
     this.promptQueue.dispose()
+    this.queuedTasks.dispose()
     this.autopilot.dispose()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
