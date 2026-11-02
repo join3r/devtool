@@ -39,7 +39,8 @@ export interface ChatToolItem {
 
 /** Every row may carry `at`: when it first appeared (live only; history rows have none). */
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string; images: number; queued?: boolean; failed?: boolean; at?: number }
+  /** `images` counts what was attached; `pictures` holds the ones we can draw (up to USER_IMAGE_LIMIT). */
+  | { kind: 'user'; id: string; text: string; images: number; pictures?: ChatImage[]; queued?: boolean; failed?: boolean; at?: number }
   | { kind: 'text'; id: string; text: string; streaming?: boolean; at?: number }
   | { kind: 'thinking'; id: string; text: string; streaming?: boolean; at?: number }
   | ChatToolItem
@@ -289,7 +290,7 @@ export interface ChatLogin {
 export type ChatEvent =
   | { t: 'sdk'; m: unknown; at?: number }
   | { t: 'history'; messages: unknown[] }
-  | { t: 'sent'; uuid: string; text: string; images: number; at?: number }
+  | { t: 'sent'; uuid: string; text: string; images: number; pictures?: ChatImage[]; at?: number }
   | { t: 'prompt'; prompt: ChatPrompt }
   | { t: 'prompt-done'; id: string; allowed: boolean }
   | { t: 'process'; state: ChatProcessState; error?: string; at?: number }
@@ -337,6 +338,8 @@ export const RESULT_TEXT_LIMIT = 20_000
 /** Images kept per tool result, and the largest one kept (base64 chars, ~7.5 MB decoded). */
 export const RESULT_IMAGE_LIMIT = 4
 export const RESULT_IMAGE_CHARS = 10_000_000
+/** How many of a user message's own attachments it keeps to draw as thumbnails. */
+export const USER_IMAGE_LIMIT = 8
 const SHOWN_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 const INPUT_STRING_LIMIT = 50_000
 
@@ -381,7 +384,7 @@ function clampInput(input: unknown): Record<string, unknown> {
 }
 
 /** A base64 image block we can draw, or undefined (URL sources, unknown or oversized data). */
-function imageBlock(block: Json): ChatImage | undefined {
+export function imageBlock(block: Json): ChatImage | undefined {
   const source = obj(block.source)
   const data = str(source?.data)
   if (!source || source.type !== 'base64' || !data || data.length > RESULT_IMAGE_CHARS) return undefined
@@ -926,11 +929,16 @@ function applyUserMessage(draft: Draft, m: Json, history: boolean): Partial<Chat
 
   const texts: string[] = []
   let images = 0
+  const pictures: ChatImage[] = []
   for (const raw of blocks) {
     const block = obj(raw)
     if (!block) continue
     if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text)
-    else if (block.type === 'image') images++
+    else if (block.type === 'image') {
+      images++
+      const picture = pictures.length < USER_IMAGE_LIMIT ? imageBlock(block) : undefined
+      if (picture) pictures.push(picture)
+    }
   }
   if (texts.length === 0 && images === 0) return {}
 
@@ -964,7 +972,7 @@ function applyUserMessage(draft: Draft, m: Json, history: boolean): Partial<Chat
   const userText = shown.flatMap((entry) => entry.kind === 'user' ? [entry.text] : []).join('\n')
   if (userText || images > 0) {
     if (uuid && draft.items.some((item) => item.kind === 'user' && item.id === uuid)) return {}
-    draft.push({ kind: 'user', id: uuid ?? draft.nextId(), text: userText, images })
+    draft.push({ kind: 'user', id: uuid ?? draft.nextId(), text: userText, images, ...(pictures.length > 0 ? { pictures } : {}) })
   }
   for (const entry of shown) {
     if (entry.kind === 'notice') draft.push({ kind: 'notice', id: draft.nextId(), text: entry.text, tone: 'muted' })
@@ -1482,7 +1490,14 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
     }
     case 'sent': {
       const draft = new Draft(state, 's', event.at)
-      draft.push({ kind: 'user', id: event.uuid, text: event.text, images: event.images, queued: true })
+      draft.push({
+        kind: 'user',
+        id: event.uuid,
+        text: event.text,
+        images: event.images,
+        ...(event.pictures?.length ? { pictures: event.pictures.slice(0, USER_IMAGE_LIMIT) } : {}),
+        queued: true
+      })
       return draft.result({ busy: true, turnStartedAt: state.busy ? state.turnStartedAt : (event.at ?? Date.now()), coldCache: undefined })
     }
     case 'prompt': {

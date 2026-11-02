@@ -321,9 +321,13 @@ export function chatDetail(state: ChatState, itemId: string): ChatDetailResult |
   return { kind: 'text', markdown: capText(item.text, ChatLimits.detail).text }
 }
 
-/** `chat.image` (§8.9): image `index` of tool item `itemId`, or null when there is none. */
+/**
+ * `chat.image` (§8.9): image `index` of tool item `itemId`, or of user item
+ * `itemId`'s own attachments, or null when there is none.
+ */
 export function toolImage(state: ChatState, itemId: string, index: number): ChatImage | null {
   const item = state.items.find((i) => i.id === itemId)
+  if (item?.kind === 'user') return item.pictures?.[index] ?? null
   if (item?.kind !== 'tool' || index >= ChatLimits.toolImages) return null
   return item.images?.[index] ?? null
 }

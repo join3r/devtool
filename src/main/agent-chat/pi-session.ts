@@ -303,7 +303,7 @@ export class PiChatSession implements AgentChatSession {
 
   send(text: string, images: ChatImage[] = [], context: string[] = []): string {
     const uuid = randomUUID()
-    this.options.onEvent({ t: 'sent', uuid, text, images: images.length, at: Date.now() })
+    this.options.onEvent({ t: 'sent', uuid, text, images: images.length, ...(images.length > 0 ? { pictures: images } : {}), at: Date.now() })
     const steering = this.streaming
     if (!steering) {
       this.streaming = true

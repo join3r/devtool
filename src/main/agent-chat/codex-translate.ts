@@ -1,5 +1,5 @@
 import { summarizeTool } from '../../shared/agent-activity'
-import { RESULT_TEXT_LIMIT, type ChatItem, type ChatLimitWindow, type ChatModelOption, type ChatToolItem, type ChatToolStatus, type ChatUsage } from '../../shared/claude-chat'
+import { RESULT_TEXT_LIMIT, USER_IMAGE_LIMIT, imageBlock, type ChatImage, type ChatItem, type ChatLimitWindow, type ChatModelOption, type ChatToolItem, type ChatToolStatus, type ChatUsage } from '../../shared/claude-chat'
 
 /**
  * `codex app-server` thread items as chat rows. Pure, and lenient on purpose: the
@@ -138,11 +138,16 @@ export function codexItemRows(raw: unknown): ChatItem[] {
     case 'userMessage': {
       const content = Array.isArray(item.content) ? item.content : []
       const text = content.map((block) => str(obj(block)?.text)).filter(Boolean).join('\n')
-      const images = content.filter((block) => {
+      const blocks = content.filter((block) => {
         const type = obj(block)?.type
         return type === 'image' || type === 'localImage'
-      }).length
-      return [{ kind: 'user', id, text, images }]
+      })
+      const pictures = blocks.slice(0, USER_IMAGE_LIMIT).flatMap((block): ChatImage[] => {
+        const match = /^data:([^;,]+);base64,(.*)$/s.exec(str(obj(block)?.url) ?? '')
+        const picture = match ? imageBlock({ source: { type: 'base64', media_type: match[1], data: match[2] } }) : undefined
+        return picture ? [picture] : []
+      })
+      return [{ kind: 'user', id, text, images: blocks.length, ...(pictures.length > 0 ? { pictures } : {}) }]
     }
     case 'agentMessage': {
       const text = str(item.text) ?? ''

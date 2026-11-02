@@ -148,9 +148,14 @@ function UserMessage({ item }: { item: Extract<ChatItem, { kind: 'user' }> }): R
     <div className={`mt-3 first:mt-0 flex gap-2 ${item.queued ? 'opacity-60' : ''}`}>
       <div className="flex-1 min-w-0 rounded-lg bg-surface-2 border-[0.5px] border-border px-3 py-2 text-base text-text whitespace-pre-wrap break-words">
         {item.text || (item.images > 0 ? '' : ' ')}
-        {item.images > 0 && (
+        {item.pictures && item.pictures.length > 0 && (
+          <ToolImages images={item.pictures} className={item.text ? 'mt-2' : ''} />
+        )}
+        {item.images > (item.pictures?.length ?? 0) && (
           <span className="inline-block mt-0.5 mr-1 text-xs text-text-muted">
-            {item.images === 1 ? '1 image' : `${item.images} images`}
+            {item.pictures?.length
+              ? `+${item.images - item.pictures.length} more`
+              : item.images === 1 ? '1 image' : `${item.images} images`}
           </span>
         )}
         {(item.queued || item.failed) && (
@@ -289,13 +294,13 @@ const ToolRow = memo(function ToolRow({ tool, inGroup }: { tool: ChatToolItem; i
   )
 })
 
-/** Result images in one row of thumbnails; click one to see it full width below. */
-function ToolImages({ images }: { images: ChatImage[] }): React.ReactElement {
+/** Images in one row of thumbnails; click one to see it full width below. */
+function ToolImages({ images, className = 'ml-5 mt-1 mb-1.5' }: { images: ChatImage[]; className?: string }): React.ReactElement {
   const [expanded, setExpanded] = useState<number | null>(null)
   const urls = useMemo(() => images.map((image) => `data:${image.mediaType};base64,${image.data}`), [images])
   const shown = expanded !== null ? urls[expanded] : undefined
   return (
-    <div className="ml-5 mt-1 mb-1.5 flex flex-col gap-1.5">
+    <div className={`${className} flex flex-col gap-1.5 whitespace-normal`}>
       <div className="flex flex-wrap gap-1.5">
         {urls.map((url, index) => (
           <button

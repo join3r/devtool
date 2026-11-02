@@ -213,6 +213,8 @@ public enum DesktopFeature {
     public static let tabClose = "tab.close"
     /// The desktop answers `chat.image` and counts tool items' `images` (§8.9).
     public static let chatImage = "chat.image"
+    /// `chat.image` also serves a user item's own attached images.
+    public static let chatImageUser = "chat.image.user"
     /// The desktop answers `pin.set` (§8.10).
     public static let pin = "pin"
     /// The desktop answers `task.triage` and sends the triage fields (§8.11, §4.4).

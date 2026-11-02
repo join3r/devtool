@@ -212,7 +212,7 @@ struct ChatScreen: View {
                         loadEarlierButton(proxy)
                     }
                     ForEach(model.view?.items ?? []) { item in
-                        ChatItemRow(item: item, images: imageActions) { detailItem = $0 }
+                        ChatItemRow(item: item, images: imageActions, userImages: userImageActions) { detailItem = $0 }
                             .id(item.id)
                     }
                     // A saved transcript's status is stale: don't show it as running.
@@ -421,6 +421,12 @@ struct ChatScreen: View {
             load: { [model] ref, side in try await model.image(ref, maxSide: side) },
             open: { viewerImage = $0 }
         )
+    }
+
+    /// Your own attached images, for a desktop that also lists `chat.image.user`.
+    private var userImageActions: ChatImageActions? {
+        guard app.supports(DesktopFeature.chatImageUser, on: route.desktopId) else { return nil }
+        return imageActions
     }
 
     /// The desktop answers `chat.settings` and is reachable.

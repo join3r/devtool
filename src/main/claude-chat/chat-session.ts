@@ -736,7 +736,7 @@ export class ChatSession {
           })),
           ...(text ? [{ type: 'text' as const, text }] : [])
         ]
-    this.options.onEvent({ t: 'sent', uuid, text, images: images.length, at: Date.now() })
+    this.options.onEvent({ t: 'sent', uuid, text, images: images.length, ...(images.length > 0 ? { pictures: images } : {}), at: Date.now() })
     this.input.push({
       type: 'user',
       uuid: uuid as SDKUserMessage['uuid'],

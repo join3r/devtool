@@ -337,6 +337,8 @@ export interface ChatSettingsParams { tabId: string; mode?: ChatSettingsMode; mo
 export const CHAT_IMAGE_OP = 'chat.image'
 /** The handshake feature (§8.1) a desktop lists when it answers `chat.image` and counts `tool.images`. */
 export const CHAT_IMAGE_FEATURE = 'chat.image'
+/** The handshake feature a desktop lists when `chat.image` also serves a user item's own attached images. */
+export const CHAT_IMAGE_USER_FEATURE = 'chat.image.user'
 /** The image types `chat.image` answers with. */
 export const CHAT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 

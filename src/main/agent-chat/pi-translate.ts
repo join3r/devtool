@@ -1,5 +1,5 @@
 import { summarizeTool } from '../../shared/agent-activity'
-import { RESULT_TEXT_LIMIT, type ChatCommand, type ChatItem, type ChatModelOption, type ChatToolItem, type ChatToolStatus, type ChatUsage } from '../../shared/claude-chat'
+import { RESULT_TEXT_LIMIT, USER_IMAGE_LIMIT, imageBlock, type ChatCommand, type ChatImage, type ChatItem, type ChatModelOption, type ChatToolItem, type ChatToolStatus, type ChatUsage } from '../../shared/claude-chat'
 
 /**
  * Pi's RPC messages as chat rows. Pure and lenient, like the Codex translator.
@@ -76,12 +76,16 @@ export function piToolRow(id: string, name: string, args: unknown, status: ChatT
   }
 }
 
-function userText(content: unknown): { text: string; images: number } {
-  if (typeof content === 'string') return { text: content, images: 0 }
-  if (!Array.isArray(content)) return { text: '', images: 0 }
+function userText(content: unknown): { text: string; images: number; pictures: ChatImage[] } {
+  if (typeof content === 'string') return { text: content, images: 0, pictures: [] }
+  if (!Array.isArray(content)) return { text: '', images: 0, pictures: [] }
   const text = content.map((block) => (obj(block)?.type === 'text' ? str(obj(block)?.text) : undefined)).filter(Boolean).join('\n')
-  const images = content.filter((block) => obj(block)?.type === 'image').length
-  return { text, images }
+  const blocks = content.map(obj).filter((block): block is Json => block?.type === 'image')
+  const pictures = blocks.slice(0, USER_IMAGE_LIMIT).flatMap((block) => {
+    const picture = imageBlock({ source: { type: 'base64', data: block.data, media_type: block.mimeType } })
+    return picture ? [picture] : []
+  })
+  return { text, images: blocks.length, pictures }
 }
 
 /** An assistant message's rows: text, thinking and tool calls, plus its error when it failed. */
@@ -118,8 +122,8 @@ export function piHistoryRows(messages: unknown): ChatItem[] {
     const key = `pi-h${index}`
     switch (message.role) {
       case 'user': {
-        const { text, images } = userText(message.content)
-        if (text || images) rows.push({ kind: 'user', id: key, text, images })
+        const { text, images, pictures } = userText(message.content)
+        if (text || images) rows.push({ kind: 'user', id: key, text, images, ...(pictures.length > 0 ? { pictures } : {}) })
         return
       }
       case 'assistant':

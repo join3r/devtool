@@ -427,7 +427,7 @@ export class CodexChatSession implements AgentChatSession {
 
   send(text: string, images: ChatImage[] = [], context: string[] = []): string {
     const uuid = randomUUID()
-    this.options.onEvent({ t: 'sent', uuid, text, images: images.length, at: Date.now() })
+    this.options.onEvent({ t: 'sent', uuid, text, images: images.length, ...(images.length > 0 ? { pictures: images } : {}), at: Date.now() })
     const input: Json[] = [
       { type: 'text', text: withContext(text, context), text_elements: [] },
       ...images.map((image) => ({ type: 'image', url: `data:${image.mediaType};base64,${image.data}` }))

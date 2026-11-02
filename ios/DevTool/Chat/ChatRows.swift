@@ -6,12 +6,14 @@ struct ChatItemRow: View {
     let item: ChatItem
     /// Fetches and opens tool-result images; nil shows only how many there are.
     var images: ChatImageActions? = nil
+    /// Fetches and opens your own attached images; nil shows only how many there are.
+    var userImages: ChatImageActions? = nil
     let onOpenDetail: (ChatItem) -> Void
 
     var body: some View {
         switch item.content {
         case .user(let text, let images, let queued, let failed):
-            UserBubble(text: text, images: images ?? 0, queued: queued, failed: failed)
+            UserBubble(itemId: item.id, text: text, images: images ?? 0, queued: queued, failed: failed, actions: userImages)
         case .text(let markdown, let streaming):
             AssistantText(markdown: markdown, streaming: streaming)
         case .thinking(let preview, let streaming):
@@ -34,30 +36,38 @@ struct ChatItemRow: View {
 }
 
 struct UserBubble: View {
+    let itemId: String
     let text: String
     let images: Int
     let queued: Bool
     let failed: Bool
+    var actions: ChatImageActions? = nil
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            VStack(alignment: .leading, spacing: 6) {
-                if images > 0 {
-                    Label(images == 1 ? "1 image" : "\(images) images", systemImage: "photo")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-                LinkText(
-                    text: NSAttributedString(string: text, attributes: [
-                        .font: UIFont.preferredFont(forTextStyle: .body),
-                        .foregroundColor: UIColor.white,
-                    ]),
-                    linkColor: .white
-                )
+            if images > 0, let actions {
+                ToolImages(itemId: itemId, count: min(images, 8), actions: actions)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.accentColor.opacity(queued ? 0.55 : 1), in: BubbleShape())
+            if !text.isEmpty || images == 0 || actions == nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    if images > 0, actions == nil {
+                        Label(images == 1 ? "1 image" : "\(images) images", systemImage: "photo")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    LinkText(
+                        text: NSAttributedString(string: text, attributes: [
+                            .font: UIFont.preferredFont(forTextStyle: .body),
+                            .foregroundColor: UIColor.white,
+                        ]),
+                        linkColor: .white
+                    )
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.accentColor.opacity(queued ? 0.55 : 1), in: BubbleShape())
+            }
             if queued || failed {
                 Label(failed ? "Not sent" : "Queued", systemImage: failed ? "exclamationmark.circle" : "clock")
                     .font(.caption2)
