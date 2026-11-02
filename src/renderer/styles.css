@@ -275,8 +275,14 @@
   .note-preview strong { font-weight: 600; }
   .note-preview em { font-style: italic; }
 
-  .note-preview a { color: var(--color-accent); text-decoration: none; }
-  .note-preview a:hover { text-decoration: underline; }
+  /* Underlined at rest: the accent can sit close to the text colour, and a link must still read as one. */
+  .note-preview a {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+    text-underline-offset: 2px;
+  }
+  .note-preview a:hover { text-decoration-color: currentColor; }
 
   .note-preview ul, .note-preview ol { margin-bottom: 12px; padding-left: 24px; }
   .note-preview li { margin-bottom: 4px; }

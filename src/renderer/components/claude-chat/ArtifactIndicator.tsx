@@ -22,7 +22,9 @@ export default function ArtifactIndicator({ artifacts, onOpen, onOpenExternal }:
   usePillDismiss(open, setOpen, rootRef)
 
   if (artifacts.length === 0) return null
-  const label = `${artifacts.length} ${artifacts.length === 1 ? 'artifact' : 'artifacts'}`
+  const label = artifacts.length === 1 ? 'Open artifact' : `${artifacts.length} artifacts`
+  // Brighter than the task pill: this one is something to open, not a status.
+  const cls = pillCls.replace('text-text-muted', 'text-text font-medium')
 
   return (
     <div ref={rootRef} className="relative">
@@ -30,10 +32,10 @@ export default function ArtifactIndicator({ artifacts, onOpen, onOpenExternal }:
         type="button"
         aria-expanded={open}
         aria-haspopup="true"
-        aria-label={`Artifacts: ${label}`}
+        aria-label={`Artifacts: ${artifacts.length} ${artifacts.length === 1 ? 'artifact' : 'artifacts'}`}
         title="Pages Claude published in this session"
         onClick={() => setOpen(!open)}
-        className={pillCls}
+        className={cls}
       >
         <PanelsTopLeft size={12} aria-hidden />
         <span className="tabular-nums whitespace-nowrap">{label}</span>
