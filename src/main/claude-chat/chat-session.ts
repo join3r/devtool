@@ -150,8 +150,9 @@ export interface BackgroundTaskEntry {
  * The live background tasks that hold the agent's turn open, from a
  * `background_tasks_changed` level, or null for any other message. Every
  * non-ambient task counts, shells too: a build or a test run in the background is
- * work, and a dev server that never ends shows as Background with a Stop, not as
- * idle. Ambient ones (watchers, skip-transcript tasks) are not activity.
+ * work. A shell that turns out to be a server (`detectServers`) drops out of the
+ * level later, and the chat still lists it with a Stop. Ambient ones (watchers,
+ * skip-transcript tasks) are not activity.
  */
 export function backgroundTasksOf(message: unknown): BackgroundTaskEntry[] | null {
   const m = message as { type?: unknown; subtype?: unknown; tasks?: unknown } | null
@@ -177,6 +178,10 @@ export function backgroundTasksOf(message: unknown): BackgroundTaskEntry[] | nul
  * and must not hold the tab "working" for that long.
  */
 export const HOOK_WAIT_MAX_MS = 5 * 60_000
+
+/** How soon after a background shell starts to look whether it is a server, and how often after. */
+export const SERVER_CHECK_FIRST_MS = 2000
+export const SERVER_CHECK_MS = 5000
 
 /**
  * Command hooks Claude Code started and has not reported finished
@@ -319,6 +324,12 @@ export interface ChatSessionOptions {
   appendSystemPrompt?: string
   /** Remote projects spawn through ssh; local ones let the SDK spawn. */
   spawn?: (options: SpawnOptions) => SpawnedProcess
+  /**
+   * The background shell tasks that are servers (something under them listens
+   * on a TCP port), by task id; null when it can't be told. Local sessions only:
+   * a server the agent left running is not work that holds the task open.
+   */
+  detectServers?: () => Promise<Set<string> | null>
   onEvent: (event: ChatEvent) => void
   onHook: (body: Record<string, unknown>) => void
   onPromptResolved: (prompt: ChatPrompt, allowed: boolean) => void
@@ -397,6 +408,10 @@ export class ChatSession {
   private readonly pendingHooks = new PendingHooks()
   private hookExpiry: ReturnType<typeof setTimeout> | null = null
   private reportedBackground = ''
+  /** Background shell tasks found to be servers: they don't count as work. */
+  private serverTasks = new Set<string>()
+  private serverCheck: ReturnType<typeof setTimeout> | null = null
+  private serverChecking = false
 
   constructor(private readonly options: ChatSessionOptions) {}
 
@@ -490,6 +505,7 @@ export class ChatSession {
         if (background !== null) {
           this.sdkBackground = background
           this.reportBackground()
+          this.scheduleServerCheck(SERVER_CHECK_FIRST_MS)
         }
         if (this.pendingHooks.apply(message, Date.now())) this.reportBackground()
         if ((message as { type?: string }).type === 'result' && this.turnStop.result()) {
@@ -525,7 +541,7 @@ export class ChatSession {
     if (this.ended) return
     if (this.hookExpiry) clearTimeout(this.hookExpiry)
     this.hookExpiry = null
-    const tasks = [...this.sdkBackground, ...this.pendingHooks.entries(this.turnStop.turnOpen)]
+    const tasks = [...this.sdkBackground.filter(t => !this.serverTasks.has(t.id)), ...this.pendingHooks.entries(this.turnStop.turnOpen)]
     const key = JSON.stringify(tasks)
     if (key !== this.reportedBackground) {
       this.reportedBackground = key
@@ -539,6 +555,51 @@ export class ChatSession {
         this.reportBackground()
       }, Math.max(0, expiry - Date.now()))
     }
+  }
+
+  /**
+   * While background shells run, look now and then which of them are servers.
+   * One that is drops out of the level main sees, so a dev server left running
+   * doesn't hold the task "working"; one that stops listening counts again.
+   */
+  private scheduleServerCheck(delay: number): void {
+    if (this.ended || !this.options.detectServers || this.serverCheck || this.serverChecking) return
+    if (!this.sdkBackground.some(t => t.type === 'local_bash')) {
+      if (this.serverTasks.size > 0) {
+        this.serverTasks = new Set()
+        this.reportBackground()
+      }
+      return
+    }
+    this.serverCheck = setTimeout(() => {
+      this.serverCheck = null
+      void this.checkServers()
+    }, delay)
+  }
+
+  private async checkServers(): Promise<void> {
+    const detect = this.options.detectServers
+    if (this.ended || !detect) return
+    this.serverChecking = true
+    let found: Set<string> | null
+    try {
+      found = await detect()
+    } catch {
+      found = null
+    } finally {
+      this.serverChecking = false
+    }
+    if (this.ended) return
+    const live = new Set(this.sdkBackground.filter(t => t.type === 'local_bash').map(t => t.id))
+    // Can't tell: whatever was known stays known until a look succeeds.
+    const next = found ? new Set([...found].filter(id => live.has(id))) : new Set([...this.serverTasks].filter(id => live.has(id)))
+    const changed = next.size !== this.serverTasks.size || [...next].some(id => !this.serverTasks.has(id))
+    this.serverTasks = next
+    if (changed) {
+      this.options.log(`chatBackgroundServers servers=${[...next].join(',') || '-'}`)
+      this.reportBackground()
+    }
+    this.scheduleServerCheck(SERVER_CHECK_MS)
   }
 
   private markRunning(): void {
@@ -557,6 +618,8 @@ export class ChatSession {
     this.pendingHooks.clear()
     if (this.hookExpiry) clearTimeout(this.hookExpiry)
     this.hookExpiry = null
+    if (this.serverCheck) clearTimeout(this.serverCheck)
+    this.serverCheck = null
     this.input.end()
     this.options.onEvent({ t: 'process', state: 'exited', at: Date.now(), ...(error ? { error } : {}) })
     this.options.onExit(error)

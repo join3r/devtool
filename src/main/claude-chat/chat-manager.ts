@@ -1,4 +1,5 @@
 import type { SshConfig } from '../../shared/types'
+import { detectServerTasks } from './background-servers'
 import {
   artifactSources,
   bashContextBlocks,
@@ -581,6 +582,8 @@ export class ClaudeChatManager {
       effort: runtime.effort,
       appendSystemPrompt: this.deps.agentContext?.(tabId) ?? undefined,
       spawn,
+      // A remote session's processes are on the other machine.
+      ...(remote ? {} : { detectServers: () => detectServerTasks(config.sessionId) }),
       onEvent,
       onHook: (body) => {
         if (runtime.session === session) this.deps.onHook(tabId, body)
