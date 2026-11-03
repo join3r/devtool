@@ -61,6 +61,8 @@ import { registerGitHandlers } from '../ipc/git'
 import { TaskDiffWatch } from '../task-diff-watch'
 import { PlanLimits } from '../plan-limits'
 import { registerPlanLimitsHandlers } from '../ipc/plan-limits'
+import { registerTaskUsageHandlers } from '../ipc/task-usage'
+import { TaskUsage } from '../task-usage'
 import { registerNotebookHandlers } from '../ipc/notebooks'
 import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
@@ -147,7 +149,7 @@ import {
   SERVER_APP_NAME
 } from '../../../protocol/ts/index.ts'
 import { normalizeMobileConfig, normalizeRelayUrl, type MobileConfig } from '../../shared/mobile'
-import { SERVER_MOBILE_STATE_CHANNEL, SERVER_PLAN_LIMITS_CHANNEL } from '../../shared/servers'
+import { SERVER_MOBILE_STATE_CHANNEL, SERVER_PLAN_LIMITS_CHANNEL, SERVER_TASK_USAGE_CHANNEL } from '../../shared/servers'
 import { LOCAL_SOURCE } from '../../shared/projects-sources'
 import type {
   AppConfig,
@@ -236,6 +238,15 @@ export class HostServices {
   private readonly paletteFrecencyStorage: PaletteFrecencyStorage
   private readonly tokenUsage: TokenUsageIndex
   private readonly ptyManager = new PtyManager()
+  /** CPU and memory per tab, for the desk: a desktop's own and its servers'; a server sends its own. */
+  readonly taskUsage = new TaskUsage({
+    ptyRoots: () => this.ptyManager.pids(),
+    localLabel: process.platform === 'darwin' ? 'This Mac' : 'This computer',
+    onChange: () => {
+      if (this.isServer) this.clients.broadcast(SERVER_TASK_USAGE_CHANNEL, this.taskUsage.own())
+      else this.clients.broadcast('task-usage-changed', this.taskUsage.snapshot())
+    }
+  })
   /** Native notebook tabs' Jupyter kernels, one per tab. */
   private readonly notebookKernels: NotebookKernelManager
   /** tabId -> token of a kernel start still awaiting its conda lookup. */
@@ -550,6 +561,7 @@ export class HostServices {
     void this.taskLanding.reconcile()
     this.promptQueue.start()
     this.queuedTasks.start()
+    this.taskUsage.start()
     this.autopilot.start()
     this.missingFolders.start()
     this.taskDiffs.start()
@@ -1130,6 +1142,7 @@ export class HostServices {
   async shutdown(): Promise<void> {
     if (this.donePruneTimer) clearTimeout(this.donePruneTimer)
     this.mobileService?.stop()
+    this.taskUsage.stop()
     this.missingFoldersUnsub?.()
     this.missingFolders.stop()
     this.taskDiffs.stop()
@@ -1554,6 +1567,8 @@ export class HostServices {
     registerTokenUsageHandlers(ipc, { projectUsage: (projectId) => this.projectTokenUsage(projectId) })
     // A server answers its own logins (its desktop merges them); a desktop every one it knows.
     registerPlanLimitsHandlers(ipc, { accounts: () => this.isServer ? this.planLimits.own() : this.planLimits.accounts() })
+    // A server answers its own machine (its desktop merges it); a desktop every host it knows.
+    registerTaskUsageHandlers(ipc, { snapshot: () => this.isServer ? this.taskUsage.own() : this.taskUsage.snapshot() })
     registerHostFsHandlers(ipc, {
       send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       env: () => getShellEnv()

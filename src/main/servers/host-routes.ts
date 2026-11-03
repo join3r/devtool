@@ -215,6 +215,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'token-usage-project': project0,
   // This desktop's tracker already holds its servers' logins.
   'plan-limits-get': 'local',
+  // CPU and memory per tab (ipc/task-usage.ts): this desktop's usage already holds its servers'.
+  'task-usage-get': 'local',
   // a task's title from its first prompt (ipc/task-names.ts): this desktop's claude names it
   'task-name-suggest': 'local',
 
@@ -309,6 +311,10 @@ export const SERVER_PRIVATE_EVENTS: readonly string[] = [
   'mobile-state-changed',
   // DesktopRouting folds it into this desktop's own list.
   'server-plan-limits-changed',
+  // A desktop's own windows' view; a server sends its machine as server-task-usage-changed.
+  'task-usage-changed',
+  // DesktopRouting folds it into this desktop's usage.
+  'server-task-usage-changed',
   'ssh-status-changed',
   'ssh-tunnel-status-changed'
 ]

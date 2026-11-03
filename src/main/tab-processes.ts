@@ -35,6 +35,48 @@ export function pidsWithTag(psOutput: string, tagId: string, exclude: readonly n
   return pids
 }
 
+/** Of `ps -axEww -o pid=,command=` lines, every tagged pid and the tab it carries. */
+export function tagsByPid(psOutput: string): Map<number, string> {
+  const needle = ` ${TAB_OWNER_ENV}=`
+  const tags = new Map<number, string>()
+  for (const line of psOutput.split('\n')) {
+    const match = /^\s*(\d+)\s/.exec(line)
+    if (!match) continue
+    const at = line.lastIndexOf(needle)
+    if (at < 0) continue
+    const rest = line.slice(at + needle.length)
+    const end = rest.indexOf(' ')
+    const tag = end < 0 ? rest : rest.slice(0, end)
+    if (tag) tags.set(Number(match[1]), tag)
+  }
+  return tags
+}
+
+/** Every process carrying a tab tag, by pid. Empty off macOS and Linux. */
+export function listAllTagged(): Promise<Map<number, string>> {
+  if (process.platform === 'linux') {
+    const tags = new Map<number, string>()
+    const prefix = `${TAB_OWNER_ENV}=`
+    for (const entry of fs.readdirSync('/proc')) {
+      const pid = Number(entry)
+      if (!Number.isInteger(pid)) continue
+      try {
+        const found = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').find(item => item.startsWith(prefix))
+        if (found && found.length > prefix.length) tags.set(pid, found.slice(prefix.length))
+      } catch {
+        // Gone, or someone else's.
+      }
+    }
+    return Promise.resolve(tags)
+  }
+  if (process.platform !== 'darwin') return Promise.resolve(new Map())
+  return new Promise((resolve) => {
+    execFile('ps', ['-axEww', '-o', 'pid=,command='], { maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
+      resolve(err ? new Map() : tagsByPid(stdout))
+    })
+  })
+}
+
 /** Of `/proc/<pid>/environ` contents, whether it carries the tab's tag. */
 export function environHasTag(environ: string, tagId: string): boolean {
   return environ.split('\0').includes(`${TAB_OWNER_ENV}=${tagId}`)

@@ -184,6 +184,9 @@ export const SERVER_MOBILE_STATE_CHANNEL = 'server-mobile-state-changed'
  */
 export const SERVER_PLAN_LIMITS_CHANNEL = 'server-plan-limits-changed'
 
+/** A server's CPU and memory per tab: it pushes its own on this channel, and its desktop folds them into what its windows get. */
+export const SERVER_TASK_USAGE_CHANNEL = 'server-task-usage-changed'
+
 /** Where the install script and the bootstrap are served from; `DEVTOOL_INSTALL_URL` overrides it. */
 export const DEFAULT_INSTALL_URL = 'https://devtool.awantech.sk'
 

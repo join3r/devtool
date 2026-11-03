@@ -10,6 +10,7 @@ import { paletteEvents } from '../../palette/paletteEvents'
 import { inboxApps, type InboxApp } from '../inbox'
 import { openBenchRun } from './benchState'
 import PlanLimitChips from './PlanLimitChips'
+import TaskUsageStatus from './TaskUsageStatus'
 import { runLogTaskId, statusHosts, statusPhone, statusRunLabel, type StatusTone } from './statusBar'
 
 const DOT: Record<StatusTone, string> = {
@@ -86,6 +87,7 @@ export default function DeskStatusBar(): React.ReactElement {
         )
       })}
       <span className="flex-1" />
+      <TaskUsageStatus />
       {apps.map(app => (
         <span key={streamRunKey(app.stream.id, app.run.commandId)} className="group flex items-stretch min-w-0 shrink" data-testid="desk-status-run" data-app-state={app.crashed ? 'crashed' : 'running'}>
           <button

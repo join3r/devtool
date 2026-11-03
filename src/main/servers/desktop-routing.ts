@@ -10,8 +10,9 @@ import type { ImageCodec } from '../mobile/chat-image'
 import { fitChatImagesForLink } from './link-chat-images'
 import { streamGivesTaskWorktrees } from '../../shared/streams'
 import { LinkError, LinkErrorCode } from '../host/link/errors'
-import { SERVER_PLAN_LIMITS_CHANNEL } from '../../shared/servers'
+import { SERVER_PLAN_LIMITS_CHANNEL, SERVER_TASK_USAGE_CHANNEL } from '../../shared/servers'
 import type { PlanAccount } from '../../shared/plan-limits'
+import { parseMachineUsage, type MachineUsage } from '../../shared/task-usage'
 
 /** The part of ServerHub the desktop's routing uses. */
 export interface RoutingHub {
@@ -27,6 +28,8 @@ export interface RoutedHost {
   onProjectsChanged(listener: (data: ProjectsData) => void): () => void
   /** The plan windows per login, which hold each server's too. */
   planLimits?: { setForeign(serverId: string, label: string, accounts: PlanAccount[] | null): void }
+  /** CPU and memory per tab, which holds each online server's too. */
+  taskUsage?: { setForeign(serverId: string, label: string, usage: MachineUsage | null): void }
 }
 
 export interface DesktopRoutingDeps {
@@ -128,6 +131,7 @@ export class DesktopRouting {
     this.hub = hub
     hub.onEvent((event) => {
       if (event.ch === SERVER_PLAN_LIMITS_CHANNEL) this.setServerPlanLimits(event.serverId, event.args[0])
+      if (event.ch === SERVER_TASK_USAGE_CHANNEL) this.setServerTaskUsage(event.serverId, event.args[0])
       this.router.deliver(event)
     })
     // ServerProjects first: a server that comes online is asked for its projects
@@ -156,12 +160,16 @@ export class DesktopRouting {
   private onServersState(state: ServersState): void {
     const now = new Set(state.servers.filter(s => s.state === 'online').map(s => s.id))
     const came = [...now].filter(id => !this.online.has(id))
+    const went = [...this.online].filter(id => !now.has(id))
     this.online = now
+    // A server that is away shows no numbers rather than its last ones.
+    for (const serverId of went) this.host?.taskUsage?.setForeign(serverId, '', null)
     this.serverNames = new Map(state.servers.map(s => [s.id, s.name || `server ${s.id.slice(0, 6)}`]))
     for (const serverId of came) {
       void this.refreshActivity(serverId)
       void this.refreshWorktreeStates(serverId)
       void this.refreshPlanLimits(serverId)
+      void this.refreshTaskUsage(serverId)
     }
     // An offline server's logins stay as last read; an unpaired one's go.
     for (const serverId of [...this.planLimitServers]) {
@@ -178,6 +186,25 @@ export class DesktopRouting {
       typeof a === 'object' && a !== null && typeof a.email === 'string' && a.email !== '' && Array.isArray(a.hosts))
     this.planLimitServers.add(serverId)
     this.host?.planLimits?.setForeign(serverId, this.serverNames.get(serverId) ?? `server ${serverId.slice(0, 6)}`, accounts)
+  }
+
+  /** A server's own machine (its push or its answer); only while it is online. */
+  private setServerTaskUsage(serverId: string, value: unknown): void {
+    const usage = parseMachineUsage(value)
+    if (!usage || !this.online.has(serverId)) return
+    this.host?.taskUsage?.setForeign(serverId, this.serverNames.get(serverId) ?? `server ${serverId.slice(0, 6)}`, usage)
+  }
+
+  /** A server came (back) online: what its tabs run now. It pushes only changes. */
+  private async refreshTaskUsage(serverId: string): Promise<void> {
+    const hub = this.hub
+    if (!hub) return
+    try {
+      this.setServerTaskUsage(serverId, await hub.call(serverId, MAIN_CLIENT_ID, 'task-usage-get'))
+    } catch (err) {
+      // An older server has no such channel: its tasks show no numbers.
+      this.deps.log(`servers taskUsageRefresh server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   /** A server came (back) online: its logins' windows may have moved on meanwhile. */

@@ -82,6 +82,15 @@ export class PtyManager {
     this.instances.get(id)?.process.onExit(({ exitCode }) => callback(exitCode))
   }
 
+  /** The root pid of every live PTY, by id (the tab's, for tabs). */
+  pids(): Map<string, number> {
+    const pids = new Map<string, number>()
+    for (const [id, instance] of this.instances) {
+      if (instance.process.pid > 0) pids.set(id, instance.process.pid)
+    }
+    return pids
+  }
+
   kill(id: string): void {
     const instance = this.instances.get(id)
     if (instance) {

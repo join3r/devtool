@@ -18,6 +18,7 @@ import { autopilotActive, autopilotLine, autopilotNeedsYou } from '../../../shar
 import { wakeHint } from './deskSnooze'
 import type { TaskBackground } from './deskInbox'
 import { queuedLine } from '../../../shared/queued-tasks'
+import TaskUsagePills from './TaskUsagePills'
 
 /** Which list a row sits in; it decides the preview line and the hover actions. */
 export type DeskRowKind = 'needsYou' | 'answered' | 'waiting' | 'working' | 'snoozed'
@@ -214,6 +215,8 @@ export default function DeskRow({
             </span>
             {pinned && <Pin size={11} className="shrink-0 self-center text-text-subtle" aria-label="pinned" />}
             {autopilotActive(task) && <AutopilotMark />}
+            {/* Under the hover actions, which cover the line above: the chart stays reachable. */}
+            {!offline && <span className="ml-auto self-end shrink-0 pl-1"><TaskUsagePills task={task} /></span>}
           </span>
         )}
         {inBackground && background ? (

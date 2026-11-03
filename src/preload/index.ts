@@ -55,6 +55,7 @@ import type { AiStatusEvent } from '../shared/ai-status'
 import type { PromptQueueRunResult } from '../shared/prompt-queue'
 import type { TokenUsageReport } from '../shared/token-usage'
 import type { PlanAccount } from '../shared/plan-limits'
+import type { TaskUsageSnapshot } from '../shared/task-usage'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
@@ -690,6 +691,13 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, accounts: PlanAccount[]) => callback(accounts)
     ipcRenderer.on('plan-limits-changed', handler)
     return () => ipcRenderer.removeListener('plan-limits-changed', handler)
+  },
+  /** CPU and memory per tab on this machine. */
+  taskUsageGet: (): Promise<TaskUsageSnapshot> => ipcRenderer.invoke('task-usage-get'),
+  onTaskUsageChanged: (callback: (snapshot: TaskUsageSnapshot) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: TaskUsageSnapshot) => callback(snapshot)
+    ipcRenderer.on('task-usage-changed', handler)
+    return () => ipcRenderer.removeListener('task-usage-changed', handler)
   },
   /** A server's phone state as it changes; `serverId` is the server it came from. */
   onServerMobileStateChanged: (callback: (serverId: string, state: MobileState) => void): (() => void) => {
