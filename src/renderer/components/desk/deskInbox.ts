@@ -182,6 +182,19 @@ export function composeTarget(
   return { project, stream }
 }
 
+export type RowKey = 'e' | 's' | 'w' | 'u'
+
+/**
+ * The row action a ⌘ chord asks for: ⌘E done, ⌘⇧S snooze, ⌘⇧W wake, ⌘⇧U unread
+ * (Ctrl on Windows/Linux). These work from the composer too, where the bare letters type.
+ */
+export function rowChord(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>): RowKey | null {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return null
+  const key = e.key.toLowerCase()
+  if (!e.shiftKey) return key === 'e' ? 'e' : null
+  return key === 's' || key === 'w' || key === 'u' ? key : null
+}
+
 /** The task a row key acts on: the hovered row, else the selected one, when either is listed. */
 export function keyTarget(entries: readonly InboxEntry[], hoveredTaskId: string | null, selectedTaskId: string | null): InboxEntry | null {
   const find = (id: string | null): InboxEntry | undefined => (id ? entries.find(entry => entry.task.id === id) : undefined)

@@ -20,8 +20,8 @@ import DeskScopeMenu from './DeskScopeMenu'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
 import { deskEvents } from './deskEvents'
 import {
-  DONE_WINDOW_MS, checkRows, checkedRows, deskLists, deskTabCounts, doneEntries, keyTarget, liveScope, nextNeedsYou, pinnedFirst, scopeLabel, scopeSources, shownRows, stepRow, taskBackground,
-  type DeskLists, type DoneEntry, type InboxRename
+  DONE_WINDOW_MS, checkRows, checkedRows, deskLists, deskTabCounts, doneEntries, keyTarget, liveScope, rowChord, nextNeedsYou, pinnedFirst, scopeLabel, scopeSources, shownRows, stepRow, taskBackground,
+  type DeskLists, type DoneEntry, type InboxRename, type RowKey
 } from './deskInbox'
 import { stopBackground } from './useDeskDone'
 import { isTaskJumpKey, jumpDigit } from '../../hooks/useMetaHeld'
@@ -224,7 +224,8 @@ export default function DeskColumn({
   }
 
   // Row keys: E done, S snooze, W wake, U unread, ⌫ remove — on the hovered row,
-  // else the selected one. ⌥↓ / ⌥↑ walk the tab's rows; ⌘J goes to the next that needs you.
+  // else the selected one. ⌘E / ⌘⇧S / ⌘⇧W / ⌘⇧U do the same on the open task from
+  // anywhere, its composer included. ⌥↓ / ⌥↑ walk the tab's rows; ⌘J goes to the next that needs you.
   const shown = shownRows(listed, grouped, [...pinnedIds])
 
   // Ticked rows for a bulk action. A switch of tab or scope starts over; a row
@@ -271,8 +272,9 @@ export default function DeskColumn({
       entries.filter(({ task }) => !isSnoozed(task, Date.now())).map(({ project, task }) => ({ projectId: project.id, taskId: task.id }))
   }
 
-  const keyState = useRef({ listed: shown, selectedTaskId, tab, needsYou: lists.needsYou, ticked, bulk, snoozeOpen: snooze !== null })
-  keyState.current = { listed: shown, selectedTaskId, tab, needsYou: lists.needsYou, ticked, bulk, snoozeOpen: snooze !== null }
+  const everyRow = [...lists.needsYou, ...lists.answered, ...lists.waiting, ...lists.working, ...lists.snoozed]
+  const keyState = useRef({ listed: shown, everyRow, selectedTaskId, tab, needsYou: lists.needsYou, ticked, bulk, snoozeOpen: snooze !== null })
+  keyState.current = { listed: shown, everyRow, selectedTaskId, tab, needsYou: lists.needsYou, ticked, bulk, snoozeOpen: snooze !== null }
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       // A modal (Settings, a form, the bar) has the keys: E must not land the task behind it.
@@ -292,6 +294,47 @@ export default function DeskColumn({
         if (!next) return
         e.preventDefault()
         onSelectTask(next.project.id, next.task.id)
+        return
+      }
+      const act = (key: RowKey | 'remove', entry: InboxEntry): void => {
+        const { project, task } = entry
+        if (key === 'e') void onDone(project.id, task.id)
+        else if (key === 'remove') void onRemove(project.id, task.id)
+        else if (key === 's' && !isSnoozed(task, Date.now())) {
+          const row = document.querySelector(`[data-testid="desk-row"][data-task-id="${task.id}"]`)?.getBoundingClientRect()
+          const button = document.querySelector('[data-testid="desk-task-snooze"]')?.getBoundingClientRect()
+          const at = row && row.height > 0 ? { x: row.right - 240, y: row.top + 32 } : button ? { x: button.left, y: button.bottom + 4 } : { x: 200, y: 200 }
+          openSnooze([{ projectId: project.id, taskId: task.id }], at)
+        } else if (key === 'w' && isSnoozed(task, Date.now())) unsnoozeTask(project.id, task.id)
+        else if (key === 'u') {
+          if (entry.unread) markTaskVisited(project.id, task.id)
+          else markTaskUnread(project.id, task.id)
+        }
+      }
+      const actBulk = (key: RowKey | 'remove', tickedRows: readonly InboxEntry[]): void => {
+        const { bulk: run } = keyState.current
+        if (key === 'e') void run.done(tickedRows)
+        else if (key === 'remove') void run.remove(tickedRows)
+        else if (key === 'w') run.wake(tickedRows)
+        else if (key === 'u') run.read(tickedRows)
+        else if (key === 's') {
+          const rect = document.querySelector('[data-testid="desk-bulk-bar"]')?.getBoundingClientRect()
+          openSnooze(run.snoozeTargets(tickedRows), rect ? { x: rect.left + 12, y: rect.bottom + 4 } : { x: 200, y: 200 })
+        }
+      }
+      // ⌘E / ⌘⇧S / ⌘⇧W / ⌘⇧U: the ticked rows, else the open task, wherever focus is.
+      const chord = rowChord(e)
+      if (chord) {
+        const { ticked: tickedRows, everyRow: all, selectedTaskId: selected } = keyState.current
+        if (tickedRows.length > 0) {
+          e.preventDefault()
+          actBulk(chord, tickedRows)
+          return
+        }
+        const entry = keyTarget(all, null, selected)
+        if (!entry) return
+        e.preventDefault()
+        act(chord, entry)
         return
       }
       // ⌥↓ / ⌥↑ also work from an empty field: opening a task focuses its chat's composer.
@@ -330,34 +373,15 @@ export default function DeskColumn({
       }
       if (!['e', 's', 'w', 'u', 'remove'].includes(key)) return
       if (tickedRows.length > 0) {
-        const { bulk: act } = keyState.current
         e.preventDefault()
-        if (key === 'e') void act.done(tickedRows)
-        else if (key === 'remove') void act.remove(tickedRows)
-        else if (key === 'w') act.wake(tickedRows)
-        else if (key === 'u') act.read(tickedRows)
-        else if (key === 's') {
-          const rect = document.querySelector('[data-testid="desk-bulk-bar"]')?.getBoundingClientRect()
-          openSnooze(act.snoozeTargets(tickedRows), rect ? { x: rect.left + 12, y: rect.bottom + 4 } : { x: 200, y: 200 })
-        }
+        actBulk(key as RowKey | 'remove', tickedRows)
         return
       }
       // ⌫ only acts on the row under the pointer: a stray Backspace must not close the open task.
       const entry = keyTarget(rows, hovered.current, key === 'remove' ? null : selected)
       if (!entry) return
-      const { project, task } = entry
       e.preventDefault()
-      if (key === 'e') void onDone(project.id, task.id)
-      else if (key === 'remove') void onRemove(project.id, task.id)
-      else if (key === 's' && !isSnoozed(task, Date.now())) {
-        const row = document.querySelector(`[data-testid="desk-row"][data-task-id="${task.id}"]`)
-        const rect = row?.getBoundingClientRect()
-        openSnooze([{ projectId: project.id, taskId: task.id }], rect ? { x: rect.right - 240, y: rect.top + 32 } : { x: 200, y: 200 })
-      } else if (key === 'w' && isSnoozed(task, Date.now())) unsnoozeTask(project.id, task.id)
-      else if (key === 'u') {
-        if (entry.unread) markTaskVisited(project.id, task.id)
-        else markTaskUnread(project.id, task.id)
-      }
+      act(key as RowKey | 'remove', entry)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -521,7 +545,7 @@ export default function DeskColumn({
             : <>
               {lists.needsYou.length > 0 && <GroupHead label="Needs you" count={lists.needsYou.length} tone="needs" />}
               {lists.needsYou.map(entry => renderRow(entry, 'needsYou'))}
-              {lists.answered.length > 0 && <GroupHead label="Answered" count={lists.answered.length} tone="answered" hint="E done · S snooze" />}
+              {lists.answered.length > 0 && <GroupHead label="Answered" count={lists.answered.length} tone="answered" hint={`${formatShortcutForApp('CmdOrCtrl+E')} done · ${formatShortcutForApp('CmdOrCtrl+Shift+S')} snooze`} />}
               {lists.answered.map(entry => renderRow(entry, 'answered'))}
               {lists.waiting.length > 0 && <GroupHead label="Waiting on you" count={lists.waiting.length} />}
               {lists.waiting.map(entry => renderRow(entry, 'waiting'))}

@@ -10,6 +10,7 @@ import {
   keyTarget,
   liveScope,
   nextNeedsYou,
+  rowChord,
   pinnedFirst,
   scopeLabel,
   scopeSources,
@@ -281,5 +282,25 @@ describe('pins, grouping and row keys', () => {
     expect(shownRows(rows, true, []).map(e => e.task.id)).toEqual(['a2', 'a1', 'b1'])
     expect(shownRows(rows, true, ['b']).map(e => e.task.id)).toEqual(['b1', 'a2', 'a1'])
     expect(stepRow(shownRows(rows, true, []), 'a2', 1)?.task.id).toBe('a1')
+  })
+})
+
+describe('rowChord', () => {
+  const key = (k: string, mods: Partial<Record<'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey', boolean>> = {}) =>
+    ({ key: k, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods })
+
+  it('maps ⌘E to done and ⌘⇧S/W/U to snooze, wake, unread', () => {
+    expect(rowChord(key('e', { metaKey: true }))).toBe('e')
+    expect(rowChord(key('E', { ctrlKey: true }))).toBe('e')
+    expect(rowChord(key('S', { metaKey: true, shiftKey: true }))).toBe('s')
+    expect(rowChord(key('W', { metaKey: true, shiftKey: true }))).toBe('w')
+    expect(rowChord(key('U', { metaKey: true, shiftKey: true }))).toBe('u')
+  })
+
+  it('leaves bare letters, ⌘S, ⌘⇧E and ⌥ chords alone', () => {
+    expect(rowChord(key('e'))).toBeNull()
+    expect(rowChord(key('s', { metaKey: true }))).toBeNull()
+    expect(rowChord(key('E', { metaKey: true, shiftKey: true }))).toBeNull()
+    expect(rowChord(key('e', { metaKey: true, altKey: true }))).toBeNull()
   })
 })

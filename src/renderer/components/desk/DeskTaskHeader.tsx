@@ -9,6 +9,7 @@ import { autopilotActive, autopilotLine } from '../../../shared/autopilot'
 import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { useCloseTask } from '../sidebar/useCloseTask'
 import { isSnoozed } from '../inbox'
+import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { useDeskDone } from './useDeskDone'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
 
@@ -43,13 +44,15 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
         </span>
       )}
       {snoozed ? (
-        <button type="button" className={ghostCls} onClick={() => unsnoozeTask(project.id, task.id)} title="Back to the Inbox now">Wake</button>
+        <button type="button" className={ghostCls} onClick={() => unsnoozeTask(project.id, task.id)} title={`Back to the Inbox now (${formatShortcutForApp('CmdOrCtrl+Shift+W')})`}>Wake</button>
       ) : (
         <button
           type="button"
           className={ghostCls}
           aria-haspopup="menu"
           aria-expanded={snoozeAt !== null}
+          title={`Snooze (${formatShortcutForApp('CmdOrCtrl+Shift+S')})`}
+          data-testid="desk-task-snooze"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect()
             setSnoozeAt({ x: rect.left, y: rect.bottom + 4, projectId: project.id, taskId: task.id })
@@ -91,7 +94,7 @@ export function DeskDoneButton({ project, task }: { project: Project; task: Task
           type="button"
           className={`${fill} px-3 ${lands ? 'rounded-l-[7px]' : 'rounded-[7px]'}`}
           disabled={landing}
-          title="Land the task into its stream and close it (E on its inbox row)"
+          title={`Land the task into its stream and close it (${formatShortcutForApp('CmdOrCtrl+E')})`}
           onClick={() => { void done(project.id, task.id) }}
           data-testid="desk-task-done"
         >
