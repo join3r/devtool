@@ -111,6 +111,9 @@ describe('scope', () => {
     expect(composeTarget([a, b], { projectId: 'a' }, { projectId: 'a', streamId: 'a-s' })).toMatchObject({ project: { id: 'a' }, stream: { id: 'a-s' } })
     expect(composeTarget([a, b], { projectId: 'b' }, { projectId: 'a', streamId: 'a-s' })).toMatchObject({ project: { id: 'b' }, stream: undefined })
     expect(composeTarget([a, b], null, { projectId: 'a', streamId: 'gone' })).toMatchObject({ project: { id: 'a' }, stream: undefined })
+    const left = { ...a, lastStreamId: 'a-s' }
+    expect(composeTarget([left, b], { projectId: 'a' }, { projectId: 'b' })).toMatchObject({ project: { id: 'a' }, stream: { id: 'a-s' } })
+    expect(composeTarget([left, b], { projectId: 'a' }, { projectId: 'a' })).toMatchObject({ project: { id: 'a' }, stream: undefined })
     expect(composeTarget([a, b], null, null)?.project.id).toBe('a')
     expect(composeTarget([], null, null)).toBeNull()
   })

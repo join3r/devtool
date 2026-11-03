@@ -15,7 +15,7 @@
  */
 import type { DeskScope, Project, Stream, Task } from '../../../shared/types'
 import { isEphemeralProject } from '../../../shared/types'
-import { findStreamOfTask, findTaskInProject } from '../../../shared/streams'
+import { findStreamOfTask, findTaskInProject, lastUsedStream } from '../../../shared/streams'
 import { fuzzyMatch, FUZZY_SCORE_FLOOR } from '../../palette/fuzzy'
 import { computeFrecencyMultiplier, type FrecencyState } from '../../palette/frecency'
 import type { InboxApp } from '../inbox'
@@ -179,7 +179,9 @@ function barTarget(
     const last = project.streams.find(s => s.id === here.last?.streamId)
     if (last) return { project, stream: last }
   }
-  return { project, stream: undefined }
+  if (here.last?.projectId === project.id) return { project, stream: undefined }
+  // The stream the project was last left in.
+  return { project, stream: lastUsedStream(project) }
 }
 
 /** "devtool › 0.7.0", or just "devtool" for main. */

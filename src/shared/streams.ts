@@ -241,6 +241,12 @@ export function streamWorktreeSupported(project: Project): boolean {
   return !project.shellCommand
 }
 
+/** The non-main stream the project was last left in, when it still exists (none: `main`). */
+export function lastUsedStream(project: Project): Stream | undefined {
+  const stream = project.streams.find(candidate => candidate.id === project.lastStreamId)
+  return stream && !stream.isMain ? stream : undefined
+}
+
 /** The task the project was last left on, when it still exists. */
 export function projectLastTaskId(project: Project): string | undefined {
   const stream = project.streams.find(candidate => candidate.id === project.lastStreamId)

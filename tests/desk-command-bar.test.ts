@@ -97,6 +97,13 @@ describe('resolveBar', () => {
     expect(resolveBar('x @stem', projects, { ...nowhere, projectId: 'dt', taskId: 't-beta' }).target?.stream).toBeUndefined()
   })
 
+  it('aims an @project at the stream it was last left in', () => {
+    const left = [devtool, { ...stem, lastStreamId: 'st-next' }]
+    expect(resolveBar('x @stem', left, nowhere).target).toMatchObject({ project: { id: 'st' }, stream: { id: 'st-next' } })
+    // Fired into its main last: that wins.
+    expect(resolveBar('x @stem', left, { ...nowhere, last: { projectId: 'st' } }).target?.stream).toBeUndefined()
+  })
+
   it('drops a bare sigil from the prompt', () => {
     expect(resolveBar('fix it @', projects, nowhere).query).toBe('fix it')
   })

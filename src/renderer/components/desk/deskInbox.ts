@@ -18,6 +18,7 @@ import { backgroundWork, type AgentActivity, type BackgroundWork } from '../../.
 import { statusTabs } from '../../../shared/inbox-state'
 import type { ArchivedTask, ProjectArchive } from '../../../shared/archive'
 import { autopilotNeedsYou } from '../../../shared/autopilot'
+import { lastUsedStream } from '../../../shared/streams'
 import { groupInboxByProject, landingNeedsYou, type InboxEntry, type InboxPartition, type InboxSource } from '../inbox'
 
 /** A row's name being edited in place (the row menu's Rename): the value typed so far and what Enter, blur and Escape do. */
@@ -175,11 +176,11 @@ export function composeTarget(
   const pick = (id: string | null | undefined): Project | undefined => (id ? projects.find(p => p.id === id) : undefined)
   const project = pick(scope?.projectId) ?? pick(last?.projectId) ?? projects[0]
   if (!project) return null
-  const streamId = scope?.projectId === project.id && scope.streamId
-    ? scope.streamId
-    : last?.projectId === project.id ? last.streamId : undefined
-  const stream = streamId ? project.streams.find(s => s.id === streamId) : undefined
-  return { project, stream }
+  const find = (id: string | undefined): Stream | undefined => (id ? project.streams.find(s => s.id === id) : undefined)
+  if (scope?.projectId === project.id && scope.streamId) return { project, stream: find(scope.streamId) }
+  // The stream last fired into, else the one the project was last left in.
+  if (last?.projectId === project.id) return { project, stream: find(last.streamId) }
+  return { project, stream: lastUsedStream(project) }
 }
 
 export type RowKey = 'e' | 's' | 'w' | 'u'
