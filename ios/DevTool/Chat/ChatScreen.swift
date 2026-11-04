@@ -22,6 +22,9 @@ struct ChatScreen: View {
     /// A workflow the task sheet opens on (demo launches only).
     @State private var tasksWorkflow: String?
     @State private var composerFocused = false
+    /// What Send does while the agent works (§8.24); the chip beside Send swaps it.
+    @AppStorage(ChatSendModeSettings.key) private var busyMode: ChatSendMode = .queue
+    @State private var editingQueued: ChatQueued?
     /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
     @State private var viewportHeight: CGFloat = 0
     /// Find in the thread (§8.23): the bar is open, and what it searches for.
@@ -100,6 +103,11 @@ struct ChatScreen: View {
                 ItemDetailSheet(item: item) { try await model.detail(for: item.id) }
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $editingQueued) { message in
+                QueuedMessageEditor(message: message) { text in
+                    Task { await model.queue(.edit, message.id, text: text) }
+                }
             }
             .sheet(item: $sideQuestion) { side in
                 SideQuestionSheet(question: side.question) { [model] in try await model.askSideQuestion(side.question) }
@@ -401,6 +409,16 @@ struct ChatScreen: View {
             if !pictures.isEmpty {
                 pastedPictures
             }
+            if supportsQueue, let queue = model.view?.status.queue, !queue.isEmpty {
+                QueuedMessagesView(queue: queue, busy: model.busy, agentName: agentName, disabled: readOnly) { action, message in
+                    if action == .edit {
+                        editingQueued = message
+                    } else {
+                        Task { await model.queue(action, message.id) }
+                    }
+                }
+                .transition(.opacity)
+            }
             composer
         }
         .padding(.horizontal, 12)
@@ -412,6 +430,7 @@ struct ChatScreen: View {
         .animation(.snappy, value: model.view?.prompts.first?.id)
         .animation(.snappy, value: model.toast)
         .animation(.snappy, value: suggestions?.map(\.name))
+        .animation(.snappy, value: model.view?.status.queue.map(\.id))
         // Above the bar, not over it: over the composer it would cover Stop and Send.
         .overlay(alignment: .topTrailing) {
             if !pinned {
@@ -489,6 +508,21 @@ struct ChatScreen: View {
         app.supports(DesktopFeature.chatBash, on: route.desktopId)
     }
 
+    /// The desktop queues or steers mid-turn messages as asked (§8.24).
+    private var supportsQueue: Bool {
+        app.supports(DesktopFeature.chatQueue, on: route.desktopId)
+    }
+
+    /// The Queue / Steer choice is on screen: the agent works and Send would send a message.
+    private var choosingMode: Bool {
+        supportsQueue && model.busy && !bashMode && !readOnly
+    }
+
+    private var busyPlaceholder: String {
+        guard supportsQueue else { return "Queue a message" }
+        return busyMode == .queue ? "Queue a message" : "Steer \(agentName)"
+    }
+
     /// The draft is a shell command, as the desktop composer's bash mode.
     private var bashMode: Bool {
         supportsBash && !readOnly && ChatBashMode.isOn(draft)
@@ -514,7 +548,7 @@ struct ChatScreen: View {
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             PromptTextView(text: $draft, focused: $composerFocused,
-                           placeholder: offline ? "\(app.kindTitle(route.desktopId)) offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message \(agentName)"),
+                           placeholder: offline ? "\(app.kindTitle(route.desktopId)) offline" : model.showingCache ? "Connecting…" : (model.busy ? busyPlaceholder : "Message \(agentName)"),
                            disabled: readOnly, minLines: 1, maxLines: 6) { pasted in
                 let room = SentImage.maxCount - pictures.count
                 pictures += pasted.prefix(max(room, 0)).map { PickedImage(pasted: $0) }
@@ -540,7 +574,11 @@ struct ChatScreen: View {
                 .disabled(readOnly || model.interrupting)
                 .accessibilityLabel("Stop")
             } else {
-                Button(action: send) {
+                if choosingMode {
+                    ChatSendModeChip(mode: $busyMode, agentName: agentName)
+                        .padding(.bottom, 6)
+                }
+                Button { send() } label: {
                     Group {
                         if model.sending {
                             ProgressView().frame(width: 32, height: 32)
@@ -552,13 +590,25 @@ struct ChatScreen: View {
                     }
                 }
                 .disabled(!canSend)
-                .accessibilityLabel(bashMode ? "Run shell command" : "Send")
+                .accessibilityLabel(bashMode ? "Run shell command" : choosingMode ? busyMode.label : "Send")
+                .contextMenu {
+                    if choosingMode && canSend {
+                        ForEach(ChatSendMode.allCases, id: \.self) { mode in
+                            Button { send(mode: mode) } label: {
+                                Label(mode == .queue ? "Queue" : "Steer now", systemImage: mode.symbol)
+                                Text(ChatSendModeChip.help(mode, agentName: agentName))
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    private func send() {
+    /// `mode`: the long-press pick; else the chip's while the agent works.
+    private func send(mode picked: ChatSendMode? = nil) {
         guard canSend else { return }
+        let mode: ChatSendMode? = choosingMode ? (picked ?? busyMode) : nil
         if supportsBash, let command = ChatBashMode.command(in: draft) {
             runBash(command)
             return
@@ -575,7 +625,7 @@ struct ChatScreen: View {
         Task {
             let picked = sent.map(\.image)
             let images = await Task.detached(priority: .userInitiated) { PickedImage.encode(picked) }.value
-            if await !model.send(text, images: images), draft.isEmpty {
+            if await !model.send(text, images: images, mode: mode), draft.isEmpty {
                 draft = text // Give the text (and pictures) back so they aren't lost.
                 if pictures.isEmpty { pictures = sent }
             }

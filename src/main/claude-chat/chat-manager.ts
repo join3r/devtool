@@ -21,6 +21,7 @@ import {
   type ChatState
 } from '../../shared/claude-chat'
 import { randomUUID } from 'crypto'
+import { ChatSendQueue, holdsSend, turnEnd, type ChatQueueOp, type ChatSendMode } from '../../shared/chat-send-queue'
 import { ChatSession } from './chat-session'
 import type { AgentChatSession } from '../agent-chat/session'
 import { CodexChatSession } from '../agent-chat/codex-session'
@@ -119,6 +120,8 @@ interface ChatRuntime {
   effort?: string
   /** Finished `!command`s whose output goes to Claude with the next message. */
   bashContext: { id: string; blocks: string[] }[]
+  /** Messages sent with `queue` mid-turn, waiting for the turn to end. */
+  queue: ChatSendQueue
   /** `/login` running `claude auth login`. */
   loginRun?: LoginRun
   /** Its output so far, and how long that was when the last code went in. */
@@ -222,10 +225,67 @@ export class ClaudeChatManager {
     return ids
   }
 
-  async send(tabId: string, text: string, images: ChatImage[] = []): Promise<void> {
+  /**
+   * Send a message. Mid-turn, `mode` picks what it does: `steer` (the default, and
+   * what older callers get) hands it to the running turn now; `queue` holds it
+   * until the turn ends, then sends it as the next message.
+   */
+  async send(tabId: string, text: string, images: ChatImage[] = [], mode?: ChatSendMode): Promise<void> {
     const runtime = this.runtimes.get(tabId)
     if (!runtime) throw new Error('chat tab not attached')
     await runtime.ready
+    if (holdsSend(mode, runtime.state)) {
+      if (!runtime.queue.add(text, images, Date.now())) throw new Error('The queue is full. Send or remove a queued message first.')
+      this.emitQueue(runtime)
+      return
+    }
+    await this.sendNow(runtime, text, images)
+  }
+
+  /** Edit, remove, or send now one queued message. False when it is no longer queued. */
+  async queueOp(tabId: string, op: ChatQueueOp): Promise<boolean> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) return false
+    switch (op.op) {
+      case 'edit': {
+        if (!runtime.queue.edit(op.id, op.text)) return false
+        this.emitQueue(runtime)
+        return true
+      }
+      case 'remove': {
+        if (!runtime.queue.take(op.id)) return false
+        this.emitQueue(runtime)
+        return true
+      }
+      case 'send': {
+        const entry = runtime.queue.take(op.id)
+        if (!entry) return false
+        this.emitQueue(runtime)
+        await runtime.ready
+        await this.sendNow(runtime, entry.text, entry.images)
+        return true
+      }
+    }
+  }
+
+  /** The turn ran to its end: the oldest queued message goes out as the next one. */
+  private sendQueued(runtime: ChatRuntime): void {
+    if (this.runtimes.get(runtime.tabId) !== runtime || runtime.state.busy) return
+    const entry = runtime.queue.shift()
+    if (!entry) return
+    this.emitQueue(runtime)
+    this.deps.log(`chatQueueSend tab=${runtime.tabId} left=${runtime.queue.size}`)
+    void this.sendNow(runtime, entry.text, entry.images).catch((err: unknown) => {
+      if (this.runtimes.get(runtime.tabId) !== runtime) return
+      this.emit(runtime, { t: 'notice', text: `Couldn't send a queued message: ${err instanceof Error ? err.message : String(err)}`, tone: 'error' })
+    })
+  }
+
+  private emitQueue(runtime: ChatRuntime): void {
+    this.emit(runtime, { t: 'queue', items: runtime.queue.view() })
+  }
+
+  private async sendNow(runtime: ChatRuntime, text: string, images: ChatImage[]): Promise<void> {
     if (!runtime.session || runtime.session.isEnded()) await this.startSession(runtime)
     if (!runtime.session) return
     const context = runtime.bashContext
@@ -515,7 +575,8 @@ export class ClaudeChatManager {
       session: null,
       ready: Promise.resolve(),
       hasTranscript: false,
-      bashContext: []
+      bashContext: [],
+      queue: new ChatSendQueue(() => `q-${randomUUID()}`)
     }
     runtime.ready = this.loadHistory(runtime)
     this.runtimes.set(tabId, runtime)
@@ -676,7 +737,12 @@ export class ClaudeChatManager {
 
   private emit(runtime: ChatRuntime, raw: ChatEvent): void {
     const event = this.deps.redact ? this.deps.redact(raw) : raw
-    runtime.state = reduceChat(runtime.state, event)
+    const prev = runtime.state
+    runtime.state = reduceChat(prev, event)
+    // After this event has gone out everywhere, so the queued send's own events follow it.
+    if (runtime.queue.size > 0 && turnEnd(prev, runtime.state, event) === 'done') {
+      setTimeout(() => this.sendQueued(runtime), 0)
+    }
     runtime.seq += 1
     for (const clientId of runtime.attached) {
       this.deps.sendToClient(clientId, 'chat-event', runtime.tabId, runtime.seq, event)

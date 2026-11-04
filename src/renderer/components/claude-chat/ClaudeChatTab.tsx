@@ -22,6 +22,8 @@ import PermissionsDialog from './PermissionsDialog'
 import Composer from './Composer'
 import ChatFindBar from './ChatFindBar'
 import { useChatFind } from './useChatFind'
+import QueuedMessages from './QueuedMessages'
+import type { ChatSendMode } from '../../../shared/chat-send-queue'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 import { takePendingPrompt } from '../promptBox'
 import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
@@ -249,10 +251,10 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }
 
-  const send = useCallback((text: string, images: ChatImage[]) => {
+  const send = useCallback((text: string, images: ChatImage[], mode: ChatSendMode) => {
     markTaskInteracted(projectId, taskId)
     stickRef.current = true
-    void window.api.chatSend(tabId, text, images).then(() => leaveAfterSend(projectId, taskId), (err: unknown) => {
+    void window.api.chatSend(tabId, text, images, mode).then(() => leaveAfterSend(projectId, taskId), (err: unknown) => {
       setAttachError(err instanceof Error ? err.message : String(err))
     })
   }, [tabId, projectId, taskId, markTaskInteracted, leaveAfterSend])
@@ -480,6 +482,14 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
           />
         )}
         {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
+        {state.queue && (
+          <QueuedMessages
+            queue={state.queue}
+            busy={state.busy}
+            label={features.label}
+            onOp={(op) => { void window.api.chatQueue(tabId, op).catch(reportError) }}
+          />
+        )}
         <Composer
           agent={agent}
           busy={state.busy}

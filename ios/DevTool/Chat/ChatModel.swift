@@ -334,18 +334,30 @@ final class ChatModel {
         searchJump += 1
     }
 
-    /// Returns true when the desktop took the message.
-    func send(_ text: String, images: [SentImage] = []) async -> Bool {
+    /// Returns true when the desktop took the message. `mode` (§8.24) only for a
+    /// desktop that lists `chat.queue`.
+    func send(_ text: String, images: [SentImage] = [], mode: ChatSendMode? = nil) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let connection = connection() else { return false }
         sending = true
         defer { sending = false }
         do {
-            try await connection.sendChat(tabId: route.tabId, text: text, images: images)
+            try await connection.sendChat(tabId: route.tabId, text: text, images: images, mode: mode)
             return true
         } catch {
             show(error)
             return false
+        }
+    }
+
+    /// `chat.queue` (§8.24): edit, remove or send now a queued message. The queue's
+    /// new state comes with the next chat event.
+    func queue(_ action: ChatQueueParams.Action, _ id: String, text: String? = nil) async {
+        guard let connection = connection() else { return }
+        do {
+            try await connection.queueChat(tabId: route.tabId, id: id, action: action, text: text)
+        } catch {
+            show(error)
         }
     }
 

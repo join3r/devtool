@@ -93,6 +93,7 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'chat-detach': tab0,
   // A server chat's images are scaled down here first (desktop-routing.ts).
   'chat-send': { by: [{ tab: 0 }], remote: 'custom' },
+  'chat-queue': tab0,
   'chat-bash': tab0,
   'chat-login': tab0,
   'chat-login-code': tab0,

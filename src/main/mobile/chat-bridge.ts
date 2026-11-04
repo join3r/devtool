@@ -23,6 +23,7 @@ import {
   canAlwaysAllow
 } from '../../shared/chat-prompts'
 import type { ChatImage } from '../../shared/claude-chat'
+import type { ChatQueueOp, ChatSendMode } from '../../shared/chat-send-queue'
 import { chatTabConfig, type ChatTabConfigShape } from '../../shared/chat-tab-config'
 import { searchChatItems } from '../../shared/chat-search'
 import { chatTabAgent, isChatTabType, type Project, type ProjectsData, type Tab, type Task, type TaskWorktreeResult } from '../../shared/types'
@@ -48,6 +49,7 @@ import {
   AppErrorCode,
   CHAT_BASH_OP,
   CHAT_SEARCH_OP,
+  CHAT_QUEUE_OP,
   CHAT_TASK_STOP_OP,
   CHAT_BTW_OP,
   CHAT_COMMANDS_OP,
@@ -65,6 +67,7 @@ import type {
   ChatBashParams,
   ChatSearchParams,
   ChatSearchResult,
+  ChatQueueParams,
   ChatBtwParams,
   ChatBtwResult,
   ChatCommandEntry,
@@ -98,7 +101,10 @@ export interface ChatBridgeChats {
     listener: (seq: number, event: ChatEvent, state: ChatState) => void
   ): Promise<{ snapshot: ChatSnapshot; stop: () => void }>
   snapshot(tabId: string): ChatSnapshot | null
-  send(tabId: string, text: string, images?: ChatImage[]): Promise<void>
+  /** `mode` (§8.24): what a message sent mid-turn does; steer when absent. */
+  send(tabId: string, text: string, images?: ChatImage[], mode?: ChatSendMode): Promise<void>
+  /** `chat.queue` (§8.24); false when the message is no longer queued. Without it the op answers `unsupported`. */
+  queueOp?(tabId: string, op: ChatQueueOp): Promise<boolean>
   /** Optional so a bridge without it still serves every `chat.*` op; `task.new` uses it for `mode`. */
   setPermissionMode?(tabId: string, mode: string): Promise<void>
   /** `chat.settings`; undefined goes back to Claude's settings default. */
@@ -290,7 +296,7 @@ export class ChatBridge {
       case ChatOp.Send:
         await this.ensureRuntime(resolved)
         this.deps.onPhoneSend?.(state.phone.id, params.tabId)
-        await this.deps.chats.send(params.tabId, (params as ChatSendParams).text, (params as ChatSendParams).images)
+        await this.deps.chats.send(params.tabId, (params as ChatSendParams).text, (params as ChatSendParams).images, (params as ChatSendParams).mode)
         return {}
       case ChatOp.Answer: {
         const { promptId, answer } = params as ChatAnswerParams
@@ -339,6 +345,17 @@ export class ChatBridge {
         const result: ChatBtwResult = { response: answer.response }
         if (answer.synthetic) result.synthetic = true
         return result
+      }
+      case CHAT_QUEUE_OP: {
+        const queueOp = this.deps.chats.queueOp?.bind(this.deps.chats)
+        if (!queueOp) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot queue messages')
+        const { id, action, text } = params as ChatQueueParams
+        await this.ensureRuntime(resolved)
+        // Sending one now is the phone's send: the turn it starts (or steers) is its own.
+        if (action === 'send') this.deps.onPhoneSend?.(state.phone.id, params.tabId)
+        const op: ChatQueueOp = action === 'edit' ? { op: 'edit', id, text: text ?? '' } : { op: action, id }
+        if (!(await queueOp(params.tabId, op))) throw new OpError(AppErrorCode.Gone, 'That message is no longer queued')
+        return {}
       }
       case CHAT_BASH_OP: {
         const runBash = this.deps.chats.runBash?.bind(this.deps.chats)

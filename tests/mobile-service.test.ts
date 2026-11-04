@@ -648,6 +648,30 @@ describe('MobileService chat.search (SPEC.md §8.23)', () => {
   })
 })
 
+describe('MobileService chat.queue and chat.send mode (SPEC.md §8.24)', () => {
+  it('hands parsed params to the bridge and rejects bad ones', () => {
+    const requests: { op: string; params: unknown }[] = []
+    const env = pairedSetup({
+      chat: { request: (_phone, _id, op, params) => { requests.push({ op, params }) }, dropPhone: () => {}, dropAll: () => {}, projectsChanged: () => {} }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.send', params: { tabId: 't', text: 'hi', mode: 'queue' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'chat.queue', params: { tabId: 't', id: 'q1', action: 'edit', text: 'new' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'chat.queue', params: { tabId: 't', id: 'q1', action: 'send', text: 'ignored' } })
+    expect(requests).toEqual([
+      { op: 'chat.send', params: { tabId: 't', text: 'hi', mode: 'queue' } },
+      { op: 'chat.queue', params: { tabId: 't', id: 'q1', action: 'edit', text: 'new' } },
+      { op: 'chat.queue', params: { tabId: 't', id: 'q1', action: 'send' } }
+    ])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 4, op: 'chat.send', params: { tabId: 't', text: 'hi', mode: 'later' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 4, ok: false, error: { code: 'bad-request' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 5, op: 'chat.queue', params: { tabId: 't', id: 'q1', action: 'edit', text: ' ' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 5, ok: false, error: { code: 'bad-request' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'chat.queue', params: { tabId: 't', id: 'q1', action: 'drop' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 6, ok: false, error: { code: 'bad-request' } })
+    expect(requests).toHaveLength(3)
+  })
+})
+
 describe('MobileService chat.task.stop (SPEC.md §8.20)', () => {
   it('hands parsed params to the bridge and rejects a missing task id', () => {
     const requests: { op: string; params: unknown }[] = []

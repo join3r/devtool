@@ -14,6 +14,8 @@ import type { IpcRegistrar } from './registrar'
 import {
   chatImages,
   chatPromptResponse,
+  chatQueueOp,
+  chatSendMode,
   chatTaskArgs,
   chatTabConfig,
   optSafeId,
@@ -203,8 +205,9 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   ipc.on('chat-detach', [safeId], (ctx, tabId) => {
     deps.chatManager().detach(ctx.clientId, tabId)
   })
-  ipc.handle('chat-send', [safeId, str, chatImages], (_event, tabId, text, images) =>
-    deps.chatManager().send(tabId, text, images ?? []))
+  ipc.handle('chat-send', [safeId, str, chatImages, chatSendMode], (_event, tabId, text, images, mode) =>
+    deps.chatManager().send(tabId, text, images ?? [], mode))
+  ipc.handle('chat-queue', [safeId, chatQueueOp], (_event, tabId, op) => deps.chatManager().queueOp(tabId, op))
   ipc.handle('chat-bash', [safeId, v.string({ nonEmpty: true, max: 20_000 })], (_event, tabId, command) =>
     deps.chatManager().runBash(tabId, command))
   ipc.handle('chat-login', [safeId, v.literal('claudeai', 'console', 'sso')], (_event, tabId, method) =>

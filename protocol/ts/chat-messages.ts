@@ -412,6 +412,31 @@ export interface ChatSearchResult {
 }
 
 /**
+ * Queue or steer (SPEC.md §8.24): `chat.send`'s `mode` picks what a message sent
+ * mid-turn does, the view's `queue` lists the messages waiting for the turn to end,
+ * and `chat.queue` edits, removes or sends one of them now.
+ */
+export const CHAT_QUEUE_OP = 'chat.queue'
+/** The handshake feature (§8.1) a desktop lists when it takes `mode` and answers `chat.queue`. */
+export const CHAT_QUEUE_FEATURE = 'chat.queue'
+export const CHAT_SEND_MODES = ['queue', 'steer'] as const
+export type ChatSendModeName = (typeof CHAT_SEND_MODES)[number]
+export const CHAT_QUEUE_ACTIONS = ['edit', 'remove', 'send'] as const
+export type ChatQueueAction = (typeof CHAT_QUEUE_ACTIONS)[number]
+
+/** `text` only with `edit`. */
+export interface ChatQueueParams { tabId: string; id: string; action: ChatQueueAction; text?: string }
+
+/** One message waiting for the turn to end. */
+export interface ChatViewQueued {
+  id: string
+  /** Capped at {@link ChatLimits.text}. */
+  text: string
+  /** Pictures that go with it; absent = none. */
+  images?: number
+}
+
+/**
  * Work Claude runs beside the turn (SPEC.md §8.20): the view's `tasks`, and
  * `chat.task.stop` to stop one, as the desktop's task pill does.
  */
@@ -667,6 +692,8 @@ export interface ChatViewStatus {
   usage?: ChatViewUsage
   /** Running tasks and ones finished in the last minute (§8.20); absent = none. */
   tasks?: ChatViewTask[]
+  /** Messages waiting for the turn to end, oldest first (§8.24); absent = none. */
+  queue?: ChatViewQueued[]
 }
 
 export interface ChatView extends ChatViewStatus {
@@ -695,7 +722,7 @@ export interface ChatViewEvent extends ChatViewStatus {
 
 export interface ChatTabParams { tabId: string }
 export interface ChatEarlierParams { tabId: string; before: string; limit?: number }
-export interface ChatSendParams { tabId: string; text: string; images?: SentImage[] }
+export interface ChatSendParams { tabId: string; text: string; images?: SentImage[]; mode?: ChatSendModeName }
 export interface ChatDetailParams { tabId: string; itemId: string }
 
 export type ChatAnswer =
@@ -718,6 +745,7 @@ export type ChatParams =
   | ChatBtwParams
   | ChatBashParams
   | ChatSearchParams
+  | ChatQueueParams
   | ChatTaskStopParams
   | ChatPermissionsUpdateParams
 
@@ -1013,6 +1041,14 @@ function parseTask(value: unknown): ChatViewTask {
   return task
 }
 
+function parseQueued(value: unknown): ChatViewQueued {
+  const o = obj(value, 'queued message')
+  const queued: ChatViewQueued = { id: str(o, 'id'), text: str(o, 'text') }
+  const images = optInt(o, 'images')
+  if (images !== undefined && images > 0) queued.images = images
+  return queued
+}
+
 function parseStatus(o: Obj): ChatViewStatus {
   const status: ChatViewStatus = { busy: bool(o, 'busy'), process: soft<ChatViewProcess>(o, 'process', PROCESSES, 'idle') }
   const turnStartedAt = optInt(o, 'turnStartedAt')
@@ -1029,6 +1065,10 @@ function parseStatus(o: Obj): ChatViewStatus {
     const tasks = arr(o, 'tasks').map(parseTask)
     if (tasks.length > 0) status.tasks = tasks
   }
+  if (!absent(o, 'queue')) {
+    const queue = arr(o, 'queue').map(parseQueued)
+    if (queue.length > 0) status.queue = queue
+  }
   return status
 }
 
@@ -1044,7 +1084,8 @@ function withStatus<T extends object>(head: T, status: ChatViewStatus): T & Chat
     ...(status.model !== undefined ? { model: status.model } : {}),
     ...(status.settings !== undefined ? { settings: status.settings } : {}),
     ...(status.usage !== undefined ? { usage: status.usage } : {}),
-    ...(status.tasks !== undefined ? { tasks: status.tasks } : {})
+    ...(status.tasks !== undefined ? { tasks: status.tasks } : {}),
+    ...(status.queue !== undefined ? { queue: status.queue } : {})
   }
 }
 
@@ -1128,7 +1169,14 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
       if (text.length > ChatLimits.send) fail(`text over ${ChatLimits.send} characters`)
       if (!text.trim()) fail('text is empty')
       const images = sentImages(o)
-      return images ? { tabId, text, images } : { tabId, text }
+      const mode = optStr(o, 'mode')
+      if (mode !== undefined && !(CHAT_SEND_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
+      return {
+        tabId,
+        text,
+        ...(images ? { images } : {}),
+        ...(mode !== undefined ? { mode: mode as ChatSendModeName } : {})
+      }
     }
     case ChatOp.Answer:
       return { tabId, promptId: str(o, 'promptId'), answer: parseAnswer(o.answer) }
@@ -1432,6 +1480,23 @@ export function parseChatSearchResult(value: unknown): ChatSearchResult {
 export function parseChatTaskStopParams(params: unknown): ChatTaskStopParams {
   const o = obj(params, 'params')
   return { tabId: str(o, 'tabId'), taskId: str(o, 'taskId') }
+}
+
+/**
+ * `chat.queue` params (the desktop's side). Throws ProtocolError — `bad-request` — on
+ * a missing `tabId` or `id`, an unknown `action`, or an `edit` whose `text` is
+ * missing, blank or over {@link ChatLimits.send} characters.
+ */
+export function parseChatQueueParams(params: unknown): ChatQueueParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const id = str(o, 'id')
+  const action = oneOf(o, 'action', CHAT_QUEUE_ACTIONS)
+  if (action !== 'edit') return { tabId, id, action }
+  const text = str(o, 'text')
+  if (text.length > ChatLimits.send) fail(`text over ${ChatLimits.send} characters`)
+  if (!text.trim()) fail('text is empty')
+  return { tabId, id, action, text }
 }
 
 function oneOf<T extends string>(o: Obj, key: string, allowed: readonly T[]): T {

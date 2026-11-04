@@ -200,11 +200,40 @@ public actor MockDesktopConnection: DesktopConnection {
             }
             return ChatImageResult(mediaType: "image/png", data: data).json
         case ChatOp.send:
-            guard case .send(let tabId, let text, let images)? = try? ChatParams.parse(op: op, params) else {
+            guard case .send(let tabId, let text, let images, let mode)? = try? ChatParams.parse(op: op, params) else {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Bad chat.send")
             }
-            guard chats[tabId] != nil else { throw notFound() }
+            guard var chat = chats[tabId] else { throw notFound() }
+            if mode == .queue, chat.status.busy {
+                // §8.24: held until the turn ends.
+                let id = chat.makeId("q")
+                chats[tabId] = chat
+                change(tabId) { $0.status.queue.append(ChatQueued(id: id, text: text, images: images.isEmpty ? nil : images.count)) }
+                return .object([:])
+            }
             startReply(tabId: tabId, text: text, images: images.count)
+            return .object([:])
+        case ChatOp.queue:
+            let parsed: ChatQueueParams
+            do {
+                parsed = try ChatQueueParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard let chat = chats[parsed.tabId] else { throw notFound() }
+            guard let at = chat.status.queue.firstIndex(where: { $0.id == parsed.id }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.gone, message: "That message is no longer queued")
+            }
+            let queued = chat.status.queue[at]
+            switch parsed.action {
+            case .edit:
+                change(parsed.tabId) { $0.status.queue[at].text = parsed.text ?? queued.text }
+            case .remove:
+                change(parsed.tabId) { $0.status.queue.remove(at: at) }
+            case .send:
+                change(parsed.tabId) { $0.status.queue.remove(at: at) }
+                startReply(tabId: parsed.tabId, text: queued.text, images: queued.images ?? 0)
+            }
             return .object([:])
         case ChatOp.answer:
             let tabId = try string("tabId"), promptId = try string("promptId")
@@ -1182,12 +1211,20 @@ public actor MockDesktopConnection: DesktopConnection {
                                   ChatQuestionOption(label: "Not yet")])])))
                 }
             } else {
-                await mock.change(tabId) {
-                    $0.status.busy = false
-                    $0.status.turnStartedAt = nil
-                }
+                await mock.endTurn(tabId)
             }
         }
+    }
+
+    /// The turn ran to its end: the oldest queued message (§8.24) goes out next.
+    private func endTurn(_ tabId: String) {
+        change(tabId) {
+            $0.status.busy = false
+            $0.status.turnStartedAt = nil
+        }
+        guard let next = chats[tabId]?.status.queue.first else { return }
+        change(tabId) { $0.status.queue.removeFirst() }
+        startReply(tabId: tabId, text: next.text, images: next.images ?? 0)
     }
 
     private func interrupt(tabId: String) {
@@ -1242,7 +1279,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.taskBusy, DesktopFeature.queue,
-            DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
+            DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
             DesktopFeature.tokensUsage, DesktopFeature.chatSearch,
         ]))

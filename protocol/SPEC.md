@@ -310,6 +310,7 @@ ChatView = {
   settings?: ChatViewSettings,         // the composer's pickers (desktops that list chat.settings, §8.5)
   usage?: ChatViewUsage,               // the composer's meter
   tasks?: ChatViewTask[],              // the task pill's rows (desktops that list chat.tasks, §8.20); absent = none
+  queue?: ChatViewQueued[],            // messages waiting for the turn to end (desktops that list chat.queue, §8.24); absent = none
   items: ChatViewItem[],               // oldest → newest, WINDOWED (see 6.4)
   hasEarlier: boolean,                 // more items exist before items[0]
   prompts: ChatViewPrompt[]            // open prompts, oldest first
@@ -360,7 +361,7 @@ All ops take `params` in the `req` object: `{ t:'req', id, op, params }`.
 | `chat.open` | `{ tabId }` | `{ seq, view: ChatView }`. Subscribes this phone to the chat's events until `chat.close`, a disconnect, or another `chat.open` (**one open chat per phone**; opening a second chat silently ends the first subscription). Attaches a runtime from the tab's stored config if the chat isn't live, the same way a window attaching does (which starts the process when it isn't running). |
 | `chat.close` | `{ tabId }` | `{}` |
 | `chat.earlier` | `{ tabId, before: itemId, limit?: ≤100 }` | `{ items: ChatViewItem[], hasEarlier }`: up to `limit` (default and maximum 100; larger values are clamped) items immediately before `before`, oldest first. Unknown `before` → `not-found`. |
-| `chat.send` | `{ tabId, text, images? }` (≤ 32000 chars, not blank; `images` as §8.4) | `{}`. Same path as the composer's send (`ClaudeChatManager.send`), which restarts a dead process. |
+| `chat.send` | `{ tabId, text, images?, mode? }` (≤ 32000 chars, not blank; `images` as §8.4; `mode` as §8.24) | `{}`. Same path as the composer's send (`ClaudeChatManager.send`), which restarts a dead process. |
 | `chat.answer` | `{ tabId, promptId, answer }` | `{}`. `answer` is one of: `{ behavior:'allow', always?: true }`, `{ behavior:'deny', message?: string }`, `{ behavior:'answers', answers: { [question]: string } }` for a question (every question answered; multi-select joins labels with ", ", matching what the desktop sends), or `{ behavior:'approvePlan' }` / `{ behavior:'deny', message? }` for a plan. Unknown or already-answered `promptId` → error `gone`. An answer that doesn't fit the prompt's kind → `bad-request`. |
 | `chat.interrupt` | `{ tabId }` | `{}` |
 | `chat.detail` | `{ tabId, itemId }` | `{ kind:'tool', input: string, result?: string }` (pretty JSON input + result text, each ≤ 200000 chars) or `{ kind:'text', markdown }` for a text, user, thinking or notice item (the full text). |
@@ -470,7 +471,7 @@ Only chat tabs (`claude-chat`, and Codex/Pi chats flagged `chat`, §4.4) in proj
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"` (and `"chat.image.user"` when it serves user items' images), §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"`, §8.19 `"stream.run"` (and `"stream.run.task"` when it takes `taskId`, `"stream.run.commands"` when streams have named commands) §8.20 `"chat.tasks"`, §8.21 `"stream.commands"`, §8.22 `"tokens.usage"` and §8.23 `"chat.search"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4), and `"task.busy"` one whose `task.new` takes `start` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"` (and `"chat.image.user"` when it serves user items' images), §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"`, §8.19 `"stream.run"` (and `"stream.run.task"` when it takes `taskId`, `"stream.run.commands"` when streams have named commands) §8.20 `"chat.tasks"`, §8.21 `"stream.commands"`, §8.22 `"tokens.usage"`, §8.23 `"chat.search"` and §8.24 `"chat.queue"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4), and `"task.busy"` one whose `task.new` takes `start` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -830,6 +831,36 @@ Find in a chat thread, as the desktop's Cmd+F in a chat tab: the desktop searche
 - The chat need not be open on this phone. When it has no runtime yet, the desktop attaches one first, as for `chat.detail`.
 - A desktop that implements this op lists `"chat.search"` in its features (§8.1). A phone offers search in a chat only for such a desktop.
 - Errors: unknown tab, as §6.3 → `not-found`. Missing or malformed params, or a blank or too-long `query` → `bad-request`.
+
+### 8.24 Queue or steer: `chat.send` `mode`, `chat.queue` (phone → desktop `req`)
+
+A message sent while a turn runs can do one of two things, as in the desktop composer:
+
+- **steer**: it goes into the running turn now, and the agent reads it at its next step (Claude through its streaming input, Codex with `turn/steer`, Pi with `streamingBehavior: "steer"`). This is what every `chat.send` did before this section, and what one without `mode` still does.
+- **queue**: the desktop holds it and sends it by itself, as the next message, when the turn ends. Queued messages go out one per turn, oldest first. A turn that Stop or a failure ended holds the queue: nothing more goes out until the user sends one now, removes it, or another turn runs to its end.
+
+`chat.send` takes `mode?: 'queue' | 'steer'`. With no turn running both send at once. Another value → `bad-request`.
+
+The view (§6.2) and every `evt chat` (§6.4) carry the queue as a status field, sent whole and flushed at once like `prompts`:
+
+```ts
+ChatViewQueued = {
+  id: string,          // the desktop's id for it, stable while it waits
+  text: string,        // capped at 16000 chars like a user item's text
+  images?: number      // pictures that go with it; absent = none
+}
+```
+
+| op | params | result |
+|---|---|---|
+| `chat.queue` | `{ tabId, id, action: 'edit' \| 'remove' \| 'send', text? }` | `{}` |
+
+- `edit` replaces the message's text with `text` (required, not blank, at most 32000 chars). Its pictures stay.
+- `remove` drops it.
+- `send` takes it out of the queue and sends it now: into the running turn (steer), or as the next message when none runs. Like a `chat.send` from this phone, the turn it starts is the phone's for the `done` push (§7.6). A desktop sends no `done` push while messages are still queued: the work goes on.
+- The chat need not be open on this phone; the desktop attaches a runtime first, as for `chat.detail`.
+- A desktop that takes `mode` and answers this op lists `"chat.queue"` in its features (§8.1). A phone offers the choice only for such a desktop; against an older one every mid-turn message steers, as before.
+- Errors: unknown tab, as §6.3 → `not-found`. An `id` no longer queued (sent, removed, or the chat closed) → `gone`. Missing or malformed params, an unknown `action`, or an `edit` without a usable `text` → `bad-request`.
 
 ## 9. Version 2: streams
 

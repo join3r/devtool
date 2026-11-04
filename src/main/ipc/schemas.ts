@@ -211,6 +211,13 @@ export const chatPromptResponse = v.union(
 ) as Validator<ChatPromptResponse>
 
 /** `chat-stop-task` / `chat-background-task`: the tab, then a task id or tool_use id. */
+export const chatSendMode = v.optional(v.literal('queue', 'steer'))
+
+export const chatQueueOp = v.union(
+  v.object({ op: v.literal('edit'), id: v.string({ nonEmpty: true, max: 256 }), text: v.string({ max: 100_000 }) }),
+  v.object({ op: v.literal('remove', 'send'), id: v.string({ nonEmpty: true, max: 256 }) })
+)
+
 export const chatTaskArgs = [safeId, v.string({ nonEmpty: true, max: 256 })] as const
 
 export const envRecord = v.optional(v.record(v.string()))

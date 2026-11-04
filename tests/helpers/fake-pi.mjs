@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // A stand-in for `pi --mode rpc`: one prompt runs one bash tool call and a reply.
-// Session id "known" has one past exchange.
+// Session id "known" has one past exchange. A prompt "hold" keeps its turn open
+// until a steered "finish" ends it, or an abort stops it.
 const args = process.argv.slice(2)
 const sessionId = args[args.indexOf('--session-id') + 1]
 let buffer = ''
@@ -16,7 +17,23 @@ const history = sessionId === 'known'
     ]
   : []
 
+let holding = false
+
+function settle(stopReason) {
+  holding = false
+  send({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 20 } })
+  send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: stopReason === 'aborted' ? '' : 'Done holding' }], stopReason, timestamp: 20 } })
+  send({ type: 'agent_end', messages: [], willRetry: false })
+  send({ type: 'agent_settled' })
+}
+
 function runPrompt(message) {
+  if (message === 'hold') {
+    holding = true
+    send({ type: 'agent_start' })
+    send({ type: 'message_start', message: { role: 'user', content: [{ type: 'text', text: message }], timestamp: 10 } })
+    return
+  }
   send({ type: 'agent_start' })
   send({ type: 'message_start', message: { role: 'user', content: [{ type: 'text', text: message }], timestamp: 10 } })
   const call = { type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'ls' } }
@@ -44,9 +61,16 @@ function handle(command) {
     case 'get_session_stats': return ok(type, id, { contextUsage: { tokens: 5000, contextWindow: 100000, percent: 5 }, cost: 0.12 })
     case 'set_model': return ok(type, id, { id: command.modelId, provider: command.provider })
     case 'set_thinking_level': return ok(type, id)
-    case 'abort': return ok(type, id)
+    case 'abort':
+      ok(type, id)
+      if (holding) settle('aborted')
+      return
     case 'prompt':
       ok(type, id)
+      if (holding) {
+        if (command.message === 'finish') settle('stop')
+        return
+      }
       return runPrompt(command.message)
     default:
       send({ type: 'response', id, command: type, success: false, error: `unknown ${type}` })

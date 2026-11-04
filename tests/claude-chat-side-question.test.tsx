@@ -81,7 +81,7 @@ describe('Composer /btw', () => {
   it('still sends other messages', () => {
     const { props, submit } = renderComposer()
     submit('hello')
-    expect(props.onSend).toHaveBeenCalledWith('hello', [])
+    expect(props.onSend).toHaveBeenCalledWith('hello', [], 'queue')
     expect(props.onSideQuestion).not.toHaveBeenCalled()
   })
 })

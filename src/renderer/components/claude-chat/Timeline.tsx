@@ -182,7 +182,7 @@ function UserMessage({ item }: { item: Extract<ChatItem, { kind: 'user' }> }): R
         )}
         {(item.queued || item.failed) && (
           <div className={`mt-1 text-xs ${item.failed ? 'text-danger' : 'text-text-muted'}`} data-find-skip>
-            {item.failed ? 'Not delivered — Claude stopped before reading it' : 'Queued — Claude reads it at its next step'}
+            {item.failed ? 'Not delivered — the agent stopped before reading it' : 'Sent — the agent reads it at its next step'}
           </div>
         )}
       </div>

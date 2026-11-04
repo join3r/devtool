@@ -1,4 +1,5 @@
 import { firstLine, summarizeTool } from './agent-activity'
+import type { ChatQueuedMessage } from './chat-send-queue'
 
 /**
  * The Claude chat tab's model: what main streams to the windows and how both
@@ -268,6 +269,8 @@ export interface ChatState {
   coldCache?: ChatColdCache
   /** `/login` in progress or just finished; cleared when dismissed. */
   login?: ChatLogin
+  /** Messages waiting for the turn to end (`chat-send-queue.ts`); absent when none. */
+  queue?: ChatQueuedMessage[]
 }
 
 /** How `/login` signs in: the `claude auth login` flags. */
@@ -304,6 +307,8 @@ export type ChatEvent =
   | { t: 'bash-sent'; ids: string[] }
   | { t: 'cold-cache'; cache: ChatColdCache }
   | { t: 'login'; login: ChatLogin | null }
+  /** The queued messages, whole (main owns the queue). */
+  | { t: 'queue'; items: ChatQueuedMessage[] }
   // Agent-neutral events: what the Codex and Pi sessions speak (Claude's stay `sdk`).
   /** Add a row, or replace the row with the same id. */
   | { t: 'item'; item: ChatItem; at?: number }
@@ -1578,7 +1583,13 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
     case 'interrupting':
       return state.busy ? { ...state, interrupting: true } : state
     case 'reset':
-      return { ...emptyChatState(), models: state.models, commands: state.commands, usage: state.usage, login: state.login }
+      return { ...emptyChatState(), models: state.models, commands: state.commands, usage: state.usage, login: state.login, ...(state.queue ? { queue: state.queue } : {}) }
+    case 'queue': {
+      if (event.items.length > 0) return { ...state, queue: event.items }
+      if (!state.queue) return state
+      const { queue: _queue, ...rest } = state
+      return rest
+    }
     case 'login': {
       if (event.login) return { ...state, login: event.login }
       if (!state.login) return state

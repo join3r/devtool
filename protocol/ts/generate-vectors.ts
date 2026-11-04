@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -623,6 +623,10 @@ function chatMessages(): unknown {
       // `images` (feature `send.images`) go with the text; an empty list is no images.
       params('chat.send', { tabId: 'tab-chat', text: 'What is wrong here?', images: [{ mediaType: 'image/jpeg', data: '/9j/4AAQ' }] }),
       params('chat.send', { tabId: 'tab-chat', text: 'Go', images: [] }),
+      // §8.24: `mode` picks what a message sent mid-turn does.
+      params('chat.send', { tabId: 'tab-chat', text: 'Then run the linter', mode: 'queue' }),
+      params('chat.send', { tabId: 'tab-chat', text: 'Skip the docs', mode: 'steer', images: [] }),
+      params('chat.send', { tabId: 'tab-chat', text: 'Go', mode: null }),
       params('chat.answer', { tabId: 'tab-chat', promptId: 'req-1', answer: { behavior: 'allow' } }),
       params('chat.answer', { tabId: 'tab-chat', promptId: 'req-1', answer: { behavior: 'allow', always: true } }),
       params('chat.answer', { tabId: 'tab-chat', promptId: 'req-1', answer: { behavior: 'allow', always: false } }),
@@ -662,6 +666,9 @@ function chatMessages(): unknown {
         ]
       }),
       sample({ ...event, seq: 18, upserts: [], tasks: [] }),
+      // §8.24: messages waiting for the turn to end; `images: 0` drops, an empty list is no queue.
+      sample({ ...event, seq: 19, upserts: [], queue: [{ id: 'q1', text: 'Then run the linter' }, { id: 'q2', text: 'And look at this', images: 2, at: 5 }, { id: 'q3', text: 'x', images: 0 }] }),
+      sample({ ...event, seq: 20, upserts: [], queue: [] }),
       sample({ ...event, seq: 15, upserts: [], usage: { ...usage, fiveHour: { used: 43, resetsAt: 1790003600000 } }, settings: { ...settings, effort: 'high', defaultEffort: undefined } }),
       sample({ ...event, seq: 14, upserts: [{ kind: 'poll', id: 'x1', options: [] }, { ...items[3], preview: 'more…', streaming: true }], prompts: viewWithUnknowns.prompts, process: 'napping', cursor: 5 })
     ],
@@ -673,6 +680,7 @@ function chatMessages(): unknown {
         { op: 'chat.send', json: text({ tabId: 't', text: '   ' }) },
         { op: 'chat.send', json: text({ tabId: 't', text: 'x'.repeat(32001) }) },
         { op: 'chat.send', json: text({ tabId: 't', text: 'Go', images: [{ mediaType: 'image/tiff', data: 'AAAA' }] }) },
+        { op: 'chat.send', json: text({ tabId: 't', text: 'Go', mode: 'later' }) },
         { op: 'chat.earlier', json: text({ tabId: 't', before: 'u1', limit: 0 }) },
         { op: 'chat.earlier', json: text({ tabId: 't', before: 'u1', limit: -3 }) },
         { op: 'chat.answer', json: text({ tabId: 't', promptId: 'p', answer: { behavior: 'maybe' } }) },
@@ -703,6 +711,8 @@ function chatMessages(): unknown {
         text({ ...event, tasks: [{ id: 'x', kind: 'shell', description: 'd', status: 'running', tokens: -5 }] }),
         text({ ...event, tasks: [{ ...tasks[0], workflow: { phases: [], agents: [{ state: 'done' }] } }] }),
         text({ ...event, tasks: { a1: tasks[1] } }),
+        text({ ...event, queue: [{ id: 'q1' }] }),
+        text({ ...event, queue: { q1: 'x' } }),
         text({ ...event, upserts: [{ kind: 'tool', id: 'x', name: 'Read', summary: 's', status: 'done', hasDetail: true, images: 'two' }] })
       ]
     },
@@ -1183,6 +1193,26 @@ function chatMessages(): unknown {
           text({ matches: [{ count: 1 }], total: 1 }),
           text({ matches: [] }),
           text({ total: 0 }),
+          'null'
+        ]
+      }
+    },
+    // §8.24: a queued message edited, removed or sent now.
+    queue: {
+      params: [
+        text({ tabId: 'tab-chat', id: 'q1', action: 'edit', text: 'Then run the linter and fix it' }),
+        text({ tabId: 'tab-chat', id: 'q1', action: 'remove' }),
+        // `text` is only for `edit`; elsewhere it drops like an unknown field.
+        text({ tabId: 'tab-chat', id: 'q1', action: 'send', text: 'ignored', extra: true })
+      ].map((json) => ({ json, expected: parseChatQueueParams(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ id: 'q1', action: 'remove' }),
+          text({ tabId: 'tab-chat', action: 'remove' }),
+          text({ tabId: 'tab-chat', id: 'q1', action: 'drop' }),
+          text({ tabId: 'tab-chat', id: 'q1', action: 'edit' }),
+          text({ tabId: 'tab-chat', id: 'q1', action: 'edit', text: ' \n ' }),
+          text({ tabId: 'tab-chat', id: 'q1', action: 'edit', text: 'x'.repeat(32001) }),
           'null'
         ]
       }

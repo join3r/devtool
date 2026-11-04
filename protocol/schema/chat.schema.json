@@ -121,6 +121,7 @@
         "settings": { "$ref": "#/$defs/settings" },
         "usage": { "$ref": "#/$defs/usage" },
         "tasks": { "type": "array", "description": "≤ 20", "items": { "$ref": "#/$defs/task" } },
+        "queue": { "type": "array", "description": "§8.24: messages waiting for the turn to end, oldest first; absent = none", "items": { "$ref": "#/$defs/queued" } },
         "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
         "hasEarlier": { "type": "boolean" },
         "prompts": { "type": "array", "items": { "$ref": "#/$defs/prompt" } }
@@ -320,8 +321,32 @@
         "model": { "type": "string" },
         "settings": { "$ref": "#/$defs/settings" },
         "usage": { "$ref": "#/$defs/usage" },
-        "tasks": { "type": "array", "description": "≤ 20", "items": { "$ref": "#/$defs/task" } }
+        "tasks": { "type": "array", "description": "≤ 20", "items": { "$ref": "#/$defs/task" } },
+        "queue": { "type": "array", "description": "§8.24: messages waiting for the turn to end, oldest first; absent = none", "items": { "$ref": "#/$defs/queued" } }
       }
+    },
+    "queued": {
+      "description": "§8.24: one message queued mid-turn. text ≤ 16000 chars.",
+      "type": "object",
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "images": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "queueParams": {
+      "description": "chat.queue params (§8.24); text only with edit.",
+      "type": "object",
+      "required": ["tabId", "id", "action"],
+      "properties": {
+        "tabId": { "type": "string" },
+        "id": { "type": "string" },
+        "action": { "enum": ["edit", "remove", "send"] },
+        "text": { "type": "string", "pattern": "\\S", "maxLength": 32000 }
+      },
+      "if": { "properties": { "action": { "const": "edit" } } },
+      "then": { "required": ["text"] }
     }
   }
 }

@@ -240,8 +240,10 @@ enum MockChats {
         return MockChatTranscript(
             title: "Codex",
             agent: "codex",
+            // One message queued for when this turn ends (§8.24).
             status: ChatStatus(busy: true, turnStartedAt: now.unixMilliseconds - 20_000, process: .running, permissionMode: "ask",
-                               model: "gpt-6.1-sol", settings: settings, usage: usage),
+                               model: "gpt-6.1-sol", settings: settings, usage: usage,
+                               queue: [ChatQueued(id: "q-cdn", text: "Then do the same for the CDN config in infra/cdn.tf")]),
             items: items,
             prompts: [ChatPrompt(id: "p-net", .permission(ChatPermission(
                 toolName: "Bash", title: "Allow Bash?", summary: "Bash · curl -sI localhost:3000/static/app.js",

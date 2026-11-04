@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -231,6 +231,8 @@ describe('M2 vectors', () => {
     for (const s of file.search.results) expect(parseChatSearchResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.search.invalid.params) expect(() => parseChatSearchParams(JSON.parse(s)), s).toThrow()
     for (const s of file.search.invalid.results) expect(() => parseChatSearchResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.queue.params) expect(parseChatQueueParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.queue.invalid.params) expect(() => parseChatQueueParams(JSON.parse(s)), s).toThrow()
     for (const s of file.taskStop.params) expect(parseChatTaskStopParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.taskStop.invalid.params) expect(() => parseChatTaskStopParams(JSON.parse(s)), s).toThrow()
     for (const s of file.permissions.params) expect(parseChatPermissionsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)

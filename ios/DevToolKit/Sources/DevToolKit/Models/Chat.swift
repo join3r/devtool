@@ -247,10 +247,12 @@ public struct ChatStatus: Sendable, Equatable {
     public var usage: ChatUsage?
     /// What Claude runs beside the turn (§8.20); empty from a desktop without `chat.tasks`.
     public var tasks: [ChatTask]
+    /// Messages waiting for the turn to end (§8.24), oldest first; empty from a desktop without `chat.queue`.
+    public var queue: [ChatQueued]
 
     public init(busy: Bool = false, turnStartedAt: Int64? = nil, process: ChatProcessState = .idle,
                 processError: String? = nil, permissionMode: String? = nil, model: String? = nil,
-                settings: ChatSettings? = nil, usage: ChatUsage? = nil, tasks: [ChatTask] = []) {
+                settings: ChatSettings? = nil, usage: ChatUsage? = nil, tasks: [ChatTask] = [], queue: [ChatQueued] = []) {
         self.busy = busy
         self.turnStartedAt = turnStartedAt
         self.process = process
@@ -260,6 +262,7 @@ public struct ChatStatus: Sendable, Equatable {
         self.settings = settings
         self.usage = usage
         self.tasks = tasks
+        self.queue = queue
     }
 }
 
@@ -855,6 +858,8 @@ public enum ChatOp {
     public static let search = "chat.search"
     /// §8.20, behind `DesktopFeature.chatTasks`.
     public static let stopTask = "chat.task.stop"
+    /// §8.24, behind `DesktopFeature.chatQueue`; parsed by `ChatQueueParams`, not `ChatParams`.
+    public static let queue = "chat.queue"
 
     /// §6.3 limits.
     public static let maxSendLength = 32_000
@@ -901,7 +906,8 @@ extension ChatStatus {
             model: try f.optStr("model"),
             settings: f.isUnset("settings") ? nil : try ChatSettings.parse(f["settings"]),
             usage: f.isUnset("usage") ? nil : try ChatUsage.parse(f["usage"]),
-            tasks: f.isUnset("tasks") ? [] : try f.array("tasks").map { (v) throws(ProtocolError) -> ChatTask in try ChatTask.parse(v) }
+            tasks: f.isUnset("tasks") ? [] : try f.array("tasks").map { (v) throws(ProtocolError) -> ChatTask in try ChatTask.parse(v) },
+            queue: f.isUnset("queue") ? [] : try f.array("queue").map { (v) throws(ProtocolError) -> ChatQueued in try ChatQueued.parse(v) }
         )
     }
 
@@ -915,6 +921,7 @@ extension ChatStatus {
         if let settings { o["settings"] = settings.json }
         if let usage { o["usage"] = usage.json }
         if !tasks.isEmpty { o["tasks"] = .array(tasks.map(\.json)) }
+        if !queue.isEmpty { o["queue"] = .array(queue.map(\.json)) }
     }
 }
 
@@ -1657,7 +1664,8 @@ extension ChatAnswer {
 public enum ChatParams: Sendable, Equatable {
     case tab(op: String, tabId: String)
     case earlier(tabId: String, before: String, limit: Int?)
-    case send(tabId: String, text: String, images: [SentImage])
+    /// `mode` (§8.24): nil sends without one (steer, as before it existed).
+    case send(tabId: String, text: String, images: [SentImage], mode: ChatSendMode? = nil)
     case answer(tabId: String, promptId: String, answer: ChatAnswer)
     case detail(tabId: String, itemId: String)
 
@@ -1679,7 +1687,13 @@ public enum ChatParams: Sendable, Equatable {
             // JS string length counts UTF-16 code units.
             if text.utf16.count > ChatOp.maxSendLength { throw ProtocolError("text over \(ChatOp.maxSendLength) characters") }
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ProtocolError("text is empty") }
-            return .send(tabId: tabId, text: text, images: try SentImage.parseList(f))
+            let images = try SentImage.parseList(f)
+            var mode: ChatSendMode?
+            if let raw = try f.optStr("mode") {
+                guard let parsed = ChatSendMode(rawValue: raw) else { throw ProtocolError("unknown mode \(raw)") }
+                mode = parsed
+            }
+            return .send(tabId: tabId, text: text, images: images, mode: mode)
         case ChatOp.answer:
             return .answer(tabId: tabId, promptId: try f.str("promptId"), answer: try ChatAnswer.parse(f["answer"]))
         case ChatOp.detail:
@@ -1691,7 +1705,7 @@ public enum ChatParams: Sendable, Equatable {
 
     public var tabId: String {
         switch self {
-        case .tab(_, let id), .earlier(let id, _, _), .send(let id, _, _), .answer(let id, _, _), .detail(let id, _): id
+        case .tab(_, let id), .earlier(let id, _, _), .send(let id, _, _, _), .answer(let id, _, _), .detail(let id, _): id
         }
     }
 
@@ -1703,9 +1717,10 @@ public enum ChatParams: Sendable, Equatable {
             var o: JSONObject = ["tabId": .string(tabId), "before": .string(before)]
             if let limit { o["limit"] = .int(Int64(limit)) }
             return .object(o)
-        case .send(let tabId, let text, let images):
+        case .send(let tabId, let text, let images, let mode):
             var o: JSONObject = ["tabId": .string(tabId), "text": .string(text)]
             if !images.isEmpty { o["images"] = SentImage.json(images) }
+            if let mode { o["mode"] = .string(mode.rawValue) }
             return .object(o)
         case .answer(let tabId, let promptId, let answer):
             return .object(["tabId": .string(tabId), "promptId": .string(promptId), "answer": answer.json])

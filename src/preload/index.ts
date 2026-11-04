@@ -57,6 +57,7 @@ import type { TokenUsageReport } from '../shared/token-usage'
 import type { PlanAccount } from '../shared/plan-limits'
 import type { TaskUsageSnapshot } from '../shared/task-usage'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
+import type { ChatQueueOp, ChatSendMode } from '../shared/chat-send-queue'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
 import type { SecretAnswer, SecretRequest } from '../shared/secrets'
@@ -300,8 +301,10 @@ const api = {
     config: { agent?: 'claude' | 'codex' | 'pi'; cwd: string; sessionId: string; projectId?: string; sshConfig?: SshConfig; extraArgs?: string[] }
   ): Promise<ChatSnapshot> => ipcRenderer.invoke('chat-attach', tabId, config),
   chatDetach: (tabId: string): void => ipcRenderer.send('chat-detach', tabId),
-  chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>
-    ipcRenderer.invoke('chat-send', tabId, text, images),
+  /** `mode` decides what a mid-turn message does (`chat-send-queue.ts`); steer when absent. */
+  chatSend: (tabId: string, text: string, images?: ChatImage[], mode?: ChatSendMode): Promise<void> =>
+    ipcRenderer.invoke('chat-send', tabId, text, images, mode),
+  chatQueue: (tabId: string, op: ChatQueueOp): Promise<boolean> => ipcRenderer.invoke('chat-queue', tabId, op),
   chatBash: (tabId: string, command: string): Promise<void> => ipcRenderer.invoke('chat-bash', tabId, command),
   chatLogin: (tabId: string, method: ChatLoginMethod): Promise<void> => ipcRenderer.invoke('chat-login', tabId, method),
   chatLoginCode: (tabId: string, code: string): Promise<void> => ipcRenderer.invoke('chat-login-code', tabId, code),

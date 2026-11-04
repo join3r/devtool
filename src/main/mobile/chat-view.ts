@@ -151,6 +151,13 @@ export function viewStatus(state: ChatState, now: number = Date.now()): ChatView
   if (usage) status.usage = usage
   const tasks = viewTasks(state.tasks, now)
   if (tasks.length > 0) status.tasks = tasks
+  if (state.queue?.length) {
+    status.queue = state.queue.map((message) => ({
+      id: message.id,
+      text: capText(message.text, ChatLimits.text).text,
+      ...(message.images > 0 ? { images: message.images } : {})
+    }))
+  }
   return status
 }
 

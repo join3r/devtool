@@ -76,7 +76,8 @@ export class PushEmitter {
     // Forget answered prompts so the set can't grow without bound.
     tab.prompts = new Set(chat.pending.map((p) => p.id))
 
-    const finished = tab.busy && !chat.busy
+    // A queued message is about to start the next turn: the work isn't done yet.
+    const finished = tab.busy && !chat.busy && !chat.queue?.length
     tab.busy = chat.busy
     const owners = finished ? [...tab.turnOwners] : []
     if (finished) tab.turnOwners.clear()

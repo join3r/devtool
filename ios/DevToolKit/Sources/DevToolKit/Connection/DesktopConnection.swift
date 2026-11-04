@@ -205,12 +205,12 @@ extension DesktopConnection {
     }
 
     /// `chat.send`: `text` is at most 32000 chars. `images` go only to a
-    /// desktop that lists `send.images`.
-    public func sendChat(tabId: String, text: String, images: [SentImage] = []) async throws {
+    /// desktop that lists `send.images`, `mode` only to one that lists `chat.queue`.
+    public func sendChat(tabId: String, text: String, images: [SentImage] = [], mode: ChatSendMode? = nil) async throws {
         guard text.count <= ChatOp.maxSendLength else {
             throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Messages are limited to \(ChatOp.maxSendLength) characters.")
         }
-        let params = ChatParams.send(tabId: tabId, text: text, images: images)
+        let params = ChatParams.send(tabId: tabId, text: text, images: images, mode: mode)
         // Pictures take a while to go through the relay.
         _ = try await request(ChatOp.send, params: params.json, timeout: images.isEmpty ? Self.defaultRequestTimeout : .seconds(60))
     }
@@ -424,6 +424,15 @@ extension DesktopConnection {
             throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Commands are limited to \(ChatOp.maxBashLength) characters.")
         }
         _ = try await request(ChatOp.bash, params: ChatBashParams(tabId: tabId, command: command).json)
+    }
+
+    /// `chat.queue` (§8.24): edits, removes or sends now one queued message. One
+    /// that already went out (or was removed) throws `.remote(code: "gone")`.
+    public func queueChat(tabId: String, id: String, action: ChatQueueParams.Action, text: String? = nil) async throws {
+        if let text, text.utf16.count > ChatOp.maxSendLength {
+            throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Messages are limited to \(ChatOp.maxSendLength) characters.")
+        }
+        _ = try await request(ChatOp.queue, params: ChatQueueParams(tabId: tabId, id: id, action: action, text: text).json)
     }
 
     /// `chat.task.stop` (§8.20): stops one of the chat's tasks. Its new status

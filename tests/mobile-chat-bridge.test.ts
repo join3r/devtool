@@ -468,6 +468,37 @@ describe('ChatBridge', () => {
     expect(await req('chat.btw', { tabId: 'tab-chat', question: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'Claude is not running.' } })
   })
 
+  it('queues or steers with chat.send\'s mode, and edits, removes or sends a queued message (§8.24)', async () => {
+    expect(await req('chat.send', { tabId: 'tab-chat', text: 'later', mode: 'queue' })).toMatchObject({ ok: true })
+    expect(await req('chat.send', { tabId: 'tab-chat', text: 'now', mode: 'steer' })).toMatchObject({ ok: true })
+    expect(await req('chat.send', { tabId: 'tab-chat', text: 'plain' })).toMatchObject({ ok: true })
+    expect(chats.sendModes).toEqual(['queue', 'steer', undefined])
+
+    chats.queuedIds = new Set(['q1', 'q2'])
+    expect(await req('chat.queue', { tabId: 'tab-chat', id: 'q1', action: 'edit', text: 'later, edited' })).toMatchObject({ ok: true, result: {} })
+    expect(await req('chat.queue', { tabId: 'tab-chat', id: 'q1', action: 'send' })).toMatchObject({ ok: true })
+    expect(await req('chat.queue', { tabId: 'tab-chat', id: 'q2', action: 'remove' })).toMatchObject({ ok: true })
+    expect(chats.queueOps.map((o) => o.op)).toEqual([
+      { op: 'edit', id: 'q1', text: 'later, edited' },
+      { op: 'send', id: 'q1' },
+      { op: 'remove', id: 'q2' }
+    ])
+    expect(await req('chat.queue', { tabId: 'tab-chat', id: 'q1', action: 'remove' })).toMatchObject({ ok: false, error: { code: 'gone' } })
+    expect(await req('chat.queue', { tabId: 'nope', id: 'q1', action: 'remove' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+  })
+
+  it('shows the queue in the view, its texts capped (§8.24)', async () => {
+    const { viewStatus } = await import('../src/main/mobile/chat-view')
+    const { emptyChatState } = await import('../src/shared/claude-chat')
+    const state = { ...emptyChatState(), busy: true, queue: [{ id: 'q1', text: 'x'.repeat(20000), images: 0, at: 1 }, { id: 'q2', text: 'pic', images: 2, at: 2 }] }
+    const status = viewStatus(state)
+    expect(status.queue?.map((q) => q.id)).toEqual(['q1', 'q2'])
+    expect(status.queue?.[0].text.length).toBe(16000)
+    expect(status.queue?.[0]).not.toHaveProperty('images')
+    expect(status.queue?.[1]).toEqual({ id: 'q2', text: 'pic', images: 2 })
+    expect(viewStatus(emptyChatState())).not.toHaveProperty('queue')
+  })
+
   it('runs !commands in the chat\'s shell without sending into the chat (§8.17)', async () => {
     expect(await req('chat.bash', { tabId: 'tab-chat', command: 'git status' })).toMatchObject({ ok: true, result: {} })
     expect(chats.bashCommands).toEqual([{ tabId: 'tab-chat', command: 'git status' }])

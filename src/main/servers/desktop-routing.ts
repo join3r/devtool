@@ -86,7 +86,9 @@ export class DesktopRouting {
         'chat-send': (serverId, ctx, args) => this.callServer(serverId, ctx, 'chat-send', [
           args[0],
           args[1],
-          deps.images ? fitChatImagesForLink(args[2] as ChatImage[] | undefined, deps.images) : args[2]
+          deps.images ? fitChatImagesForLink(args[2] as ChatImage[] | undefined, deps.images) : args[2],
+          // The send mode, only when given: a server from before it refuses a fourth argument.
+          ...(args[3] !== undefined ? [args[3]] : [])
         ])
       }
     })

@@ -1,6 +1,7 @@
 import { emptyChatState, type ChatEvent, type ChatPromptResponse, type ChatSideAnswer, type ChatSnapshot, type ChatState } from '../../src/shared/claude-chat'
 import type { ChatTabConfigShape } from '../../src/shared/chat-tab-config'
 import type { ChatBridgeChats } from '../../src/main/mobile/chat-bridge'
+import type { ChatQueueOp } from '../../src/shared/chat-send-queue'
 
 type Listener = (seq: number, event: ChatEvent, state: ChatState) => void
 
@@ -46,9 +47,24 @@ export class FakeChats implements ChatBridgeChats {
     return runtime ? { seq: runtime.seq, state: runtime.state } : null
   }
 
-  async send(tabId: string, text: string): Promise<void> {
+  /** Each send's `mode` (§8.24), undefined when none was given. */
+  readonly sendModes: (string | undefined)[] = []
+
+  async send(tabId: string, text: string, _images?: unknown, mode?: string): Promise<void> {
+    this.sendModes.push(mode)
     this.sent.push({ tabId, text })
     this.update(tabId, (s) => ({ ...s, busy: true, items: [...s.items, { kind: 'user', id: `u${this.sent.length}`, text, images: 0 }] }))
+  }
+
+  readonly queueOps: { tabId: string; op: ChatQueueOp }[] = []
+  /** Ids `queueOp` knows; any other answers false. */
+  queuedIds = new Set<string>()
+
+  async queueOp(tabId: string, op: ChatQueueOp): Promise<boolean> {
+    if (!this.queuedIds.has(op.id)) return false
+    this.queueOps.push({ tabId, op })
+    if (op.op !== 'edit') this.queuedIds.delete(op.id)
+    return true
   }
 
   readonly modes: { tabId: string; mode: string }[] = []

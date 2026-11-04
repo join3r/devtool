@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ListPlus, Navigation, Square, SquareTerminal } from 'lucide-react'
 import {
   CHAT_EFFORT_LEVELS,
   chatAgentFeatures,
@@ -25,6 +25,8 @@ import UsageMeter from './UsageMeter'
 import { menuCls } from '../ui'
 import { onAgentInsert } from '../../agentLink/linkToAgent'
 import { AttachmentStrip, toChatImages, useImageAttachments } from './imageAttachments'
+import type { ChatSendMode } from '../../../shared/chat-send-queue'
+import { desktopPlatform } from '../../hostPlatform'
 
 interface Props {
   /** The agent the tab runs; Claude when absent. Claude's own commands and modes are Claude's only. */
@@ -37,7 +39,8 @@ interface Props {
   commands: ChatCommand[]
   /** Loaded on the first `@`; the project's files as git lists them. */
   loadFiles: () => Promise<string[]>
-  onSend: (text: string, images: ChatImage[]) => void
+  /** `mode`: what a message sent mid-turn does (queue it, or steer the running turn). */
+  onSend: (text: string, images: ChatImage[], mode: ChatSendMode) => void
   /** `/btw <question>`: answered beside the conversation, not sent into it. */
   onSideQuestion: (question: string) => void
   /** `!command`: run in the project's shell; Claude gets it with the next message. */
@@ -66,6 +69,34 @@ const MODE_CYCLE: Record<ChatAgent, string[]> = {
   pi: []
 }
 const DEFAULT_MODE: Record<ChatAgent, string> = { claude: 'default', codex: DEFAULT_CODEX_MODE, pi: '' }
+
+const SEND_MODE_KEY = 'devtool.chat.busySendMode'
+
+/** What Enter does mid-turn: the last pick, else queue (it never derails the running turn). */
+export function readBusySendMode(): ChatSendMode {
+  try {
+    return window.localStorage.getItem(SEND_MODE_KEY) === 'steer' ? 'steer' : 'queue'
+  } catch {
+    return 'queue'
+  }
+}
+
+function writeBusySendMode(mode: ChatSendMode): void {
+  try { window.localStorage.setItem(SEND_MODE_KEY, mode) } catch { /* storage blocked: the default stays */ }
+}
+
+/**
+ * The mode a key press sends with: Enter takes the picked one, Cmd/Ctrl+Enter the
+ * other. Null when the key doesn't send (Shift/Alt+Enter is a newline).
+ */
+export function sendModeForKey(
+  e: { key: string; shiftKey: boolean; altKey: boolean; metaKey: boolean; ctrlKey: boolean; isComposing?: boolean },
+  picked: ChatSendMode
+): ChatSendMode | null {
+  if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isComposing) return null
+  if (e.metaKey || e.ctrlKey) return picked === 'queue' ? 'steer' : 'queue'
+  return picked
+}
 
 type Suggest =
   | { kind: 'file'; start: number; query: string }
@@ -110,6 +141,8 @@ export default function Composer(props: Props): React.ReactElement {
   const [files, setFiles] = useState<string[] | null>(null)
   const filesLoading = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [busyMode, setBusyMode] = useState<ChatSendMode>(readBusySendMode)
+  const modKey = desktopPlatform() === 'darwin' ? '⌘' : 'Ctrl+'
 
   useEffect(() => {
     if (focusSignal) textareaRef.current?.focus()
@@ -208,7 +241,7 @@ export default function Composer(props: Props): React.ReactElement {
     })
   }
 
-  const submit = (): void => {
+  const submit = (mode: ChatSendMode = busyMode): void => {
     const trimmed = text.trim()
     if (!trimmed && images.length === 0) return
     if (trimmed.startsWith('!')) {
@@ -253,7 +286,7 @@ export default function Composer(props: Props): React.ReactElement {
       setSuggest(null)
       return
     }
-    onSend(trimmed, toChatImages(images))
+    onSend(trimmed, toChatImages(images), mode)
     setText('')
     attachments.clear()
     setSuggest(null)
@@ -276,9 +309,10 @@ export default function Composer(props: Props): React.ReactElement {
       onSetMode(cycle[(current + 1) % cycle.length])
       return
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing) {
+    const mode = sendModeForKey({ key: e.key, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, isComposing: e.nativeEvent.isComposing }, busyMode)
+    if (mode) {
       e.preventDefault()
-      submit()
+      submit(mode)
     }
   }
 
@@ -307,6 +341,20 @@ export default function Composer(props: Props): React.ReactElement {
   const modeHelp = isClaude ? MODE_HELP : CODEX_MODE_HELP
   const canSend = !disabled && (text.trim().length > 0 || images.length > 0)
   const bashMode = text.trimStart().startsWith('!')
+  const otherMode: ChatSendMode = busyMode === 'queue' ? 'steer' : 'queue'
+  const modeHelpText = (mode: ChatSendMode): string => mode === 'queue'
+    ? `queues it: sent when ${features.label} finishes this turn`
+    : `steers: ${features.label} reads it at its next step`
+  const pickBusyMode = (mode: ChatSendMode): void => {
+    setBusyMode(mode)
+    writeBusySendMode(mode)
+    textareaRef.current?.focus()
+  }
+  const placeholder = !busy
+    ? `Message ${features.label} — @ for files, / for commands, ! for shell`
+    : busyMode === 'queue'
+      ? `Queue a message — sent when ${features.label} finishes (${modKey}↵ steers now)`
+      : `Steer ${features.label} — it reads this at its next step (${modKey}↵ queues)`
 
   return (
     <div
@@ -335,7 +383,7 @@ export default function Composer(props: Props): React.ReactElement {
         rows={1}
         value={text}
         disabled={disabled}
-        placeholder={busy ? `Add to the conversation — ${features.label} reads it at its next step` : `Message ${features.label} — @ for files, / for commands, ! for shell`}
+        placeholder={placeholder}
         onChange={(e) => {
           setText(e.target.value)
           refreshSuggest(e.target.value, e.target.selectionStart)
@@ -395,14 +443,26 @@ export default function Composer(props: Props): React.ReactElement {
             <Square size={10} fill="currentColor" />
           </button>
         )}
+        {busy && !bashMode && (
+          <button
+            type="button"
+            title={`While ${features.label} works, Enter ${modeHelpText(busyMode)}. ${modKey}↵ ${modeHelpText(otherMode)}. Click to make Enter ${otherMode}.`}
+            aria-label={`Enter ${busyMode === 'queue' ? 'queues' : 'steers'}; switch to ${otherMode}`}
+            onClick={() => pickBusyMode(otherMode)}
+            className="h-6 px-1.5 inline-flex items-center gap-1 rounded-md border-0 bg-transparent text-xs text-text-muted cursor-pointer hover:bg-surface-3 hover:text-text"
+          >
+            {busyMode === 'queue' ? <ListPlus size={12} /> : <Navigation size={11} />}
+            {busyMode === 'queue' ? 'Queue' : 'Steer'}
+          </button>
+        )}
         <button
           type="button"
-          title="Send (Enter)"
+          title={busy && !bashMode ? `${busyMode === 'queue' ? 'Queue' : 'Steer'} (Enter) · ${otherMode === 'queue' ? 'Queue' : 'Steer'} (${modKey}↵)` : 'Send (Enter)'}
           disabled={!canSend}
-          onClick={submit}
+          onClick={(e) => submit(e.metaKey || e.ctrlKey ? otherMode : busyMode)}
           className="w-6 h-6 inline-flex items-center justify-center rounded-md border-0 bg-accent text-accent-ink cursor-pointer hover:brightness-105 disabled:opacity-35 disabled:cursor-default"
         >
-          <ArrowUp size={14} strokeWidth={2.5} />
+          {busy && !bashMode && busyMode === 'queue' ? <ListPlus size={14} strokeWidth={2.5} /> : <ArrowUp size={14} strokeWidth={2.5} />}
         </button>
       </div>
     </div>

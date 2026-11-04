@@ -188,6 +188,12 @@ describe('JSON Schema', () => {
     }
   })
 
+  it('accepts the chat.queue samples and rejects the invalid ones (§8.24)', () => {
+    const check = (value: unknown) => validate({ $ref: 'chat.schema.json#/$defs/queueParams' }, value, 'chat.schema.json')
+    for (const s of chat.queue.params) expect(check(s.expected), s.json).toEqual([])
+    for (const text of chat.queue.invalid.params) expect(check(JSON.parse(text)), text).not.toEqual([])
+  })
+
   it('accepts the queue.update and queue.run samples and rejects the invalid ones (§8.16)', () => {
     const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
     for (const s of chat.queueUpdate.params) expect(check('queueUpdateParams', s.expected), s.json).toEqual([])
