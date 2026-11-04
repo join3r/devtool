@@ -88,7 +88,13 @@ export interface ChatPrompt {
 
 export type ChatProcessState = 'idle' | 'starting' | 'running' | 'exited'
 
-export type ChatTaskKind = 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'other'
+/**
+ * `hook`: a command hook still running, most often a Stop hook such as the
+ * security-guidance plugin's review, which can wake Claude with what it found.
+ * The turn looks finished, but the agent isn't done until it reports. It can't
+ * be stopped from here, and it leaves the list when it ends.
+ */
+export type ChatTaskKind = 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'hook' | 'other'
 export type ChatTaskStatus = 'running' | 'completed' | 'failed' | 'stopped'
 
 /**
@@ -306,6 +312,8 @@ export type ChatEvent =
   /** The `!command` context went out with a message. */
   | { t: 'bash-sent'; ids: string[] }
   | { t: 'cold-cache'; cache: ChatColdCache }
+  /** The command hooks that hold the agent right now (replace semantics), as `hook` tasks. */
+  | { t: 'hooks'; hooks: ChatHook[]; at?: number }
   | { t: 'login'; login: ChatLogin | null }
   /** The queued messages, whole (main owns the queue). */
   | { t: 'queue'; items: ChatQueuedMessage[] }
@@ -320,6 +328,14 @@ export type ChatEvent =
   | { t: 'delivered'; uuid?: string }
   /** The conversation so far, read back from the agent's own session; ignored once the timeline has rows. */
   | { t: 'restore'; items: ChatItem[] }
+
+/** A command hook still running: see the `hook` {@link ChatTaskKind}. */
+export interface ChatHook {
+  /** `hook:<hook_id>`, the task id it is listed under. */
+  id: string
+  description: string
+  startedAt: number
+}
 
 /** What `chat-attach` returns: the state so far and the seq it corresponds to. */
 export interface ChatSnapshot {
@@ -1236,7 +1252,10 @@ function applyTaskMessage(draft: Draft, state: ChatState, m: Json, subtype: stri
       for (const [taskId, task] of Object.entries(tasks)) {
         const entry = live.get(taskId)
         if (entry?.ambient === true) continue
-        if (entry) {
+        // Hooks come and go by their own event, not the CLI's task level.
+        if (task.kind === 'hook') {
+          next[taskId] = task
+        } else if (entry) {
           next[taskId] = task.status === 'running' && !task.background ? { ...task, background: true } : task
         } else if (task.background && task.status === 'running') {
           // Gone from the level without its bookend (yet): it ended somehow.
@@ -1552,6 +1571,7 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
       // Its tasks died with it.
       const tasks: Record<string, ChatTask> = {}
       for (const [id, task] of Object.entries(state.tasks)) {
+        if (task.kind === 'hook') continue
         tasks[id] = task.status === 'running' ? finishTask(task, 'stopped', event.at) : task
       }
       return draft.result({
@@ -1577,6 +1597,23 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
         ...(event.info ? { info: { ...state.info, ...event.info } } : {}),
         ...(event.usage ? { usage: { ...state.usage, ...event.usage } } : {})
       }
+    case 'hooks': {
+      // Replace semantics: a hook that ended leaves the list rather than lingering as done.
+      const live = new Map(event.hooks.map((hook) => [hook.id, hook]))
+      let changed = false
+      const tasks: Record<string, ChatTask> = {}
+      for (const [id, task] of Object.entries(state.tasks)) {
+        if (task.kind === 'hook' && !live.has(id)) changed = true
+        else tasks[id] = task
+      }
+      for (const hook of live.values()) {
+        const existing = tasks[hook.id]
+        if (existing && existing.description === hook.description) continue
+        tasks[hook.id] = { id: hook.id, kind: 'hook', description: hook.description, background: true, status: 'running', startedAt: existing?.startedAt ?? hook.startedAt }
+        changed = true
+      }
+      return changed ? { ...state, tasks } : state
+    }
     case 'cold-cache':
       // A process restarted by a send resumes with the message already on its way.
       return state.busy ? state : { ...state, coldCache: event.cache }

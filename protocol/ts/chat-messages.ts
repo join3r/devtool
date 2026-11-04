@@ -634,7 +634,7 @@ export interface ChatViewUsage {
   sevenDay?: ChatViewLimitWindow
 }
 
-export type ChatViewTaskKind = 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'other'
+export type ChatViewTaskKind = 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'hook' | 'other'
 export type ChatViewTaskStatus = 'running' | 'completed' | 'failed' | 'stopped'
 export type ChatViewWorkflowAgentState = 'queued' | 'running' | 'done' | 'failed' | 'skipped'
 
@@ -978,7 +978,7 @@ function parseUsage(value: unknown): ChatViewUsage {
   return usage
 }
 
-const TASK_KINDS: readonly string[] = ['subagent', 'shell', 'workflow', 'monitor', 'mcp', 'other']
+const TASK_KINDS: readonly string[] = ['subagent', 'shell', 'workflow', 'monitor', 'mcp', 'hook', 'other']
 const TASK_STATUSES: readonly string[] = ['running', 'completed', 'failed', 'stopped']
 const WORKFLOW_AGENT_STATES: readonly string[] = ['queued', 'running', 'done', 'failed', 'skipped']
 

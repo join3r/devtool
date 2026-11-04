@@ -23,9 +23,10 @@ const SETTLE_MS = 5_000
  */
 const inFlight = new Set<string>()
 
-/** Stop every task of a Background state (■ Stop, and Done before it lands). Best-effort. */
+/** Stop every task of a Background state (■ Stop, and Done before it lands). Best-effort; hooks end on their own. */
 export async function stopBackground(background: TaskBackground): Promise<void> {
-  await Promise.all(background.tasks.map(task => window.api.chatStopTask(background.tabId, task.id).catch(() => false)))
+  const stoppable = background.tasks.filter(task => task.type !== 'hook')
+  await Promise.all(stoppable.map(task => window.api.chatStopTask(background.tabId, task.id).catch(() => false)))
 }
 
 /**

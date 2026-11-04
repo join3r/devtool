@@ -402,7 +402,7 @@ export default function DeskColumn({
         activity={bestActivity(entry, activities)}
         background={background}
         diff={kind === 'snoozed' ? undefined : diffs.get(entry.task.id)}
-        onStopBackground={background && background.tasks.length > 0 ? () => { void stopBackground(background) } : undefined}
+        onStopBackground={background && background.tasks.some(task => task.type !== 'hook') ? () => { void stopBackground(background) } : undefined}
         selected={selectedTaskId === entry.task.id}
         jumpNumber={jumpIndex.get(entry.task.id)}
         checked={checked.has(entry.task.id)}

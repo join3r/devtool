@@ -133,6 +133,28 @@ describe('chat tasks', () => {
     expect(state.tasks.x9).toMatchObject({ kind: 'shell', background: true, status: 'running', startedAt: 1500 })
   })
 
+  it('lists running hooks as hook tasks that leave the list when they end', () => {
+    const review: ChatEvent = { t: 'hooks', hooks: [{ id: 'hook:h1', description: 'Stop hook', startedAt: 1000 }], at: 1000 }
+    let state = fold([review])
+    expect(state.tasks['hook:h1']).toEqual({ id: 'hook:h1', kind: 'hook', description: 'Stop hook', background: true, status: 'running', startedAt: 1000 })
+    expect(reduceChat(state, review)).toBe(state)
+
+    // The CLI's task level doesn't know hooks: it must not end one.
+    state = fold([system('background_tasks_changed', { tasks: [] }, 1500)], state)
+    expect(state.tasks['hook:h1'].status).toBe('running')
+
+    state = fold([{ t: 'hooks', hooks: [], at: 9000 }], state)
+    expect(state.tasks).toEqual({})
+  })
+
+  it('drops running hooks when the process exits', () => {
+    const state = fold([
+      { t: 'hooks', hooks: [{ id: 'hook:h1', description: 'Stop hook', startedAt: 1000 }] },
+      { t: 'process', state: 'exited', at: 2000 }
+    ])
+    expect(state.tasks).toEqual({})
+  })
+
   it('leaves ambient tasks out', () => {
     let state = fold([
       system('task_started', { task_id: 'a1', description: 'Housekeeping', task_type: 'local_bash', ambient: true, skip_transcript: true }, 1000),

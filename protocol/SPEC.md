@@ -737,12 +737,12 @@ The desktop answers once the action is done (the process started, or ended for `
 |---|---|---|
 | `chat.task.stop` | `{ tabId, taskId }` | `{}` |
 
-What Claude runs beside the turn, as the desktop chat's task pill shows it: subagents, shells, workflows, monitors and MCP tasks. The chat view's status (§6.2, so `chat.open`'s view and every `evt chat`) carries `tasks`:
+What Claude runs beside the turn, as the desktop chat's task pill shows it: subagents, shells, workflows, monitors, MCP tasks, and command hooks still running. The chat view's status (§6.2, so `chat.open`'s view and every `evt chat`) carries `tasks`:
 
 ```ts
 ChatViewTask = {
   id: string,                          // the CLI's task id, what chat.task.stop takes
-  kind: 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'other',
+  kind: 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'hook' | 'other',
   description: string,
   status: 'running' | 'completed' | 'failed' | 'stopped',
   startedAt?: number, endedAt?: number,          // unix ms
@@ -764,6 +764,7 @@ ChatViewWorkflow = {
 - `tasks` lists running tasks, then ones that finished in the last 60 s, each group by `startedAt`. Tasks a subagent started are left out, as on the desktop. At most **20** tasks, and at most **100** agents per workflow: past that the desktop keeps queued, running and failed agents and then the latest finished ones, and says in `moreAgents` how many it left out. `description`, `command`, `detail`, an agent's `label` and `lastTool` are one line of at most **300** characters.
 - `tasks` is sent whole, like the other status fields, but a change only to it goes out on the item throttle (§6.4), not at once: a workflow reports progress every few seconds.
 - A phone hides a finished task 60 s after its `endedAt`, even without a new event, and counts elapsed time from `startedAt`.
+- `hook` is a command hook that holds the agent, most often a Stop hook such as a security review that runs after the answer and can wake Claude with what it found. Its `id` starts `hook:`. It can't be stopped (`chat.task.stop` answers `{}` and a notice says so), and it leaves the list when it ends instead of lingering as finished.
 - Forward compatibility: an unknown `kind` reads as `other`, an unknown `status` as `running` and an unknown agent `state` as `running`. Flags are `true` or absent, and an empty list means no tasks.
 
 `chat.task.stop` is the pill's Stop: the desktop stops the task (the CLI's `stop_task`), which throws away its work. It answers once the CLI took the request; the task's new `status` comes with a later `evt chat`. A task that already ended answers `{}` and nothing happens.

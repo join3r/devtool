@@ -58,7 +58,7 @@
       "description": "§8.20: one row of the task pill",
       "properties": {
         "id": { "type": "string" },
-        "kind": { "type": "string", "description": "subagent | shell | workflow | monitor | mcp | other; unknown reads as other" },
+        "kind": { "type": "string", "description": "subagent | shell | workflow | monitor | mcp | hook | other; unknown reads as other" },
         "description": { "type": "string", "description": "≤ 300 chars" },
         "status": { "type": "string", "description": "running | completed | failed | stopped; unknown reads as running" },
         "startedAt": { "$ref": "#/$defs/ms" },

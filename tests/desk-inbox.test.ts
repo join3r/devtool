@@ -223,7 +223,7 @@ describe('taskBackground', () => {
 
   it('is set when the turn ended but its work still runs', () => {
     const t = task('t')
-    expect(taskBackground(t, { 't-tab': between() })).toEqual({ tasks: [shell], label: 'xcodebuild', since: NOW - 180_000, tabId: 't-tab' })
+    expect(taskBackground(t, { 't-tab': between() })).toEqual({ tasks: [shell], label: 'xcodebuild', since: NOW - 180_000, hooksOnly: false, tabId: 't-tab' })
   })
 
   it('is plain Working while a turn is in flight, and nothing when no work runs', () => {

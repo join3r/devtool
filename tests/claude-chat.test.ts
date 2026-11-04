@@ -493,6 +493,15 @@ describe('PendingHooks', () => {
     expect(hooks.entries(false)).toEqual([])
   })
 
+  it('names the running hooks with when they started, for the open chat', () => {
+    const hooks = new PendingHooks()
+    hooks.apply(started('h1'), 1200)
+    hooks.apply({ type: 'system', subtype: 'hook_started', hook_id: 'h2', hook_name: 'PostToolUse:Bash', hook_event: 'PostToolUse' }, 1300)
+    // A turn in flight is held only by its Stop hooks; once it ended, by any still running.
+    expect(hooks.running(true)).toEqual([{ id: 'hook:h1', description: 'Stop hook', startedAt: 1200 }])
+    expect(hooks.running(false).map((hook) => hook.id)).toEqual(['hook:h1', 'hook:h2'])
+  })
+
   it('lets a plain async hook go on the hook_progress it sends instead of a response', () => {
     const hooks = new PendingHooks()
     hooks.apply(started('h1', 'PostToolUse:Bash'), 0)

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowDownToLine, Bot, Check, ChevronRight, Circle, CircleSlash, ListTodo, Plug, Square, SquareTerminal, Workflow, X } from 'lucide-react'
+import { Activity, ArrowDownToLine, Bot, Check, ChevronRight, Circle, CircleSlash, ListTodo, Plug, Square, SquareTerminal, Webhook, Workflow, X } from 'lucide-react'
 import { visibleTasks, type ChatTask, type ChatTaskKind, type ChatWorkflow, type ChatWorkflowAgent, type ChatWorkflowAgentState, type ChatWorkflowPhase } from '../../../shared/claude-chat'
 import { menuCls } from '../ui'
 import { formatTokens } from './UsageMeter'
@@ -20,10 +20,11 @@ const KIND_NOUN: Record<ChatTaskKind, [string, string]> = {
   workflow: ['workflow', 'workflows'],
   monitor: ['monitor', 'monitors'],
   mcp: ['MCP task', 'MCP tasks'],
+  hook: ['hook', 'hooks'],
   other: ['task', 'tasks']
 }
 
-const KIND_ORDER: ChatTaskKind[] = ['subagent', 'shell', 'workflow', 'monitor', 'mcp', 'other']
+const KIND_ORDER: ChatTaskKind[] = ['subagent', 'shell', 'workflow', 'monitor', 'mcp', 'hook', 'other']
 
 /** "2 agents · 1 shell". */
 export function countLabel(tasks: ChatTask[]): string {
@@ -54,6 +55,7 @@ function KindIcon({ kind }: { kind: ChatTaskKind }): React.ReactElement {
     case 'workflow': return <Workflow {...props} />
     case 'monitor': return <Activity {...props} />
     case 'mcp': return <Plug {...props} />
+    case 'hook': return <Webhook {...props} />
     case 'other': return <ListTodo {...props} />
   }
 }
@@ -342,7 +344,7 @@ function TaskRow({ task, now, onStop, onBackground, onJump, canJump }: { task: C
                   <ArrowDownToLine size={12} />
                 </ActionButton>
               )}
-              <StopButton description={task.description} onStop={() => onStop(task.id)} />
+              {task.kind !== 'hook' && <StopButton description={task.description} onStop={() => onStop(task.id)} />}
             </>
           ) : (
             <span className="size-(--ctl-h-sm) flex items-center justify-center"><OutcomeIcon status={task.status} /></span>

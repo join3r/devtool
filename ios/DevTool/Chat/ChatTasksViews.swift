@@ -16,6 +16,7 @@ extension ChatTaskKind {
         case .workflow: "point.3.connected.trianglepath.dotted"
         case .monitor: "waveform.path.ecg"
         case .mcp: "powerplug"
+        case .hook: "hourglass"
         case .other: "checklist"
         }
     }
@@ -144,7 +145,7 @@ struct ChatTasksSheet: View {
                             }
                         }
                         .swipeActions(edge: .trailing) {
-                            if task.running, !readOnly {
+                            if task.running, task.kind.stoppable, !readOnly {
                                 Button("Stop", role: .destructive) { confirmStop = task }
                             }
                         }

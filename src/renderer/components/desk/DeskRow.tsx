@@ -3,7 +3,7 @@ import { Check, Folder, GitBranch, MoreHorizontal, Pin } from 'lucide-react'
 import type { GitDiffSummary, Project } from '../../../shared/types'
 import { formatLineCount } from '../../hooks/useTaskDiffSummaries'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
-import type { AgentActivity } from '../../../shared/agent-activity'
+import { backgroundLine, type AgentActivity } from '../../../shared/agent-activity'
 import ProjectTileBadge from '../ProjectTileBadge'
 import {
   formatWaitTime,
@@ -231,7 +231,7 @@ export default function DeskRow({
         {inBackground && background ? (
           // One line, so the elapsed time and Stop never wrap away; the label gives way.
           <span className="flex items-center gap-1 min-w-0 text-sm leading-[1.45] text-text-muted" data-testid="desk-row-preview">
-            <span className="min-w-0 truncate">Background · {background.label}</span>
+            <span className="min-w-0 truncate">{backgroundLine(background)}</span>
             <span className="shrink-0 tabular-nums">· {formatWaitTime(now - background.since)}</span>
             {onStopBackground && <button
               type="button"

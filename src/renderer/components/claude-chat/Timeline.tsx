@@ -556,9 +556,12 @@ function ProgressCard({ turnKey, turn, compacting, waiting, since, backgroundTas
   const starts = backgroundTasks.map((task) => task.startedAt).filter((at): at is number => at !== undefined)
   const headSince = background && starts.length > 0 ? Math.min(...starts) : since
   const elapsed = headSince !== undefined ? clock(now - headSince) : undefined
-  const label = waiting ? 'Waiting for you' : compacting ? 'Compacting context' : background ? 'Background' : 'Working'
+  // Only hooks left (a Stop hook's security review, say): the answer is in, but the agent isn't done.
+  const onlyHooks = background && backgroundTasks.every((task) => task.kind === 'hook')
+  const label = waiting ? 'Waiting for you' : compacting ? 'Compacting context' : onlyHooks ? 'Waiting for hooks' : background ? 'Background' : 'Working'
   const hint = waiting
     ? 'Answer below'
+    : onlyHooks ? 'Claude picks up anything they find'
     : background ? 'Claude picks it up when it finishes' : "Folds into the answer when it's done · esc to stop"
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-surface-2 px-3 py-2.5 text-sm" data-testid="progress-card" data-background={background || undefined} data-chat-item={`card:${turnKey}`}>
@@ -597,7 +600,7 @@ function ProgressCard({ turnKey, turn, compacting, waiting, since, backgroundTas
                 {task.startedAt !== undefined ? clock(now - task.startedAt) : ''}
               </span>
               <span className="min-w-0 truncate text-text-muted">{task.description}</span>
-              {onStopTask && (
+              {onStopTask && task.kind !== 'hook' && (
                 <button
                   type="button"
                   className="ml-auto shrink-0 px-1.5 py-px rounded-md border-0 bg-transparent text-xs text-text-subtle hover:text-text hover:bg-surface-3 cursor-pointer"

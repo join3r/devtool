@@ -18,6 +18,7 @@ import {
   isChatPermissionMode,
   promptKindFor,
   type ChatEvent,
+  type ChatHook,
   type ChatImage,
   type ChatPrompt,
   type ChatPromptResponse,
@@ -242,10 +243,15 @@ export class PendingHooks {
   }
 
   /** The hooks that hold the agent: Stop hooks, and with `turnOpen` false any still running. */
-  entries(turnOpen: boolean): BackgroundTaskEntry[] {
+  running(turnOpen: boolean): ChatHook[] {
     return [...this.hooks]
       .filter(([, hook]) => hook.event !== 'SessionStart' && hook.event !== 'UserPromptSubmit' && (hook.event === 'Stop' || !turnOpen))
-      .map(([id, hook]) => ({ id: `hook:${id}`, type: 'hook', description: `${hook.name} hook` }))
+      .map(([id, hook]) => ({ id: `hook:${id}`, description: `${hook.name} hook`, startedAt: hook.startedAt }))
+  }
+
+  /** {@link running} as the background tasks main counts. */
+  entries(turnOpen: boolean): BackgroundTaskEntry[] {
+    return this.running(turnOpen).map((hook) => ({ id: hook.id, type: 'hook', description: hook.description }))
   }
 
   clear(): void {
@@ -411,6 +417,7 @@ export class ChatSession {
   private readonly pendingHooks = new PendingHooks()
   private hookExpiry: ReturnType<typeof setTimeout> | null = null
   private reportedBackground = ''
+  private reportedHooks = '[]'
   /** Background shell tasks found to be servers: they don't count as work. */
   private serverTasks = new Set<string>()
   private serverCheck: ReturnType<typeof setTimeout> | null = null
@@ -545,6 +552,13 @@ export class ChatSession {
     if (this.ended) return
     if (this.hookExpiry) clearTimeout(this.hookExpiry)
     this.hookExpiry = null
+    const hooks = this.pendingHooks.running(this.turnStop.turnOpen)
+    const hooksKey = JSON.stringify(hooks.map((hook) => [hook.id, hook.description]))
+    if (hooksKey !== this.reportedHooks) {
+      this.reportedHooks = hooksKey
+      // The open chat lists them, so a turn that looks done says what it still waits on.
+      this.options.onEvent({ t: 'hooks', hooks, at: Date.now() })
+    }
     const tasks = [...this.sdkBackground.filter(t => !this.serverTasks.has(t.id)), ...this.pendingHooks.entries(this.turnStop.turnOpen)]
     const key = JSON.stringify(tasks)
     if (key !== this.reportedBackground) {
@@ -831,6 +845,7 @@ export class ChatSession {
   async stopTask(taskId: string): Promise<boolean> {
     const query = this.query
     if (!query || this.ended) return this.taskFailed('stop', 'Claude is not running.')
+    if (taskId.startsWith('hook:')) return this.taskFailed('stop', 'A hook ends on its own.')
     try {
       await query.stopTask(taskId)
       return true

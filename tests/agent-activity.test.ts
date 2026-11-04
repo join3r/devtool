@@ -246,6 +246,25 @@ describe('TabActivityRegistry', () => {
     expect(registry.getStatus('tab')).toBeNull()
   })
 
+  it('says a turn held only by its hooks is waiting for them', () => {
+    const registry = new TabActivityRegistry(() => 1)
+    const hook = (body: Record<string, unknown>): void => {
+      const update = registry.applyHook('tab', body)
+      if (update?.statusEvent) registry.statusEvent('tab', update.statusEvent)
+    }
+    hook({ hook_event_name: 'UserPromptSubmit', prompt: 'Fix it' })
+    registry.working('tab')
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1, tasks: [{ id: 'hook:h1', type: 'hook', description: 'Stop hook' }] })
+    hook({ hook_event_name: 'Stop' })
+    registry.stopped('tab')
+    expect(registry.getStatus('tab')).toBe('working')
+    expect(backgroundWork(registry.getActivity('tab') ?? undefined)?.hooksOnly).toBe(true)
+    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Waiting for Stop hook')
+
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 2, tasks: [{ id: 'hook:h1', type: 'hook', description: 'Stop hook' }, { id: 'b1', type: 'local_bash', description: 'npm test' }] })
+    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Background · Stop hook +1')
+  })
+
   it('leaves a running turn alone when its background tasks end', () => {
     const { events } = fold([
       { hook_event_name: 'UserPromptSubmit', prompt: 'Go' },
@@ -309,7 +328,7 @@ describe('background tasks', () => {
     ])
     expect(backgroundWork(activity)).toBeNull()
     const stopped = reduceAgentActivity(activity, { hook_event_name: 'Stop' }, 9000).activity
-    expect(backgroundWork(stopped)).toEqual({ tasks: stopped.backgroundTasks, label: 'xcodebuild +1', since: 1001 })
+    expect(backgroundWork(stopped)).toEqual({ tasks: stopped.backgroundTasks, label: 'xcodebuild +1', since: 1001, hooksOnly: false })
     expect(backgroundWork({ ...stopped, waiting: { kind: 'error', label: 'x', since: 1 } })).toBeNull()
     expect(backgroundWork(reduceAgentActivity(stopped, level([]), 9500).activity)).toBeNull()
   })

@@ -4,12 +4,15 @@ import Foundation
 // `chat.task.stop`, behind feature `chat.tasks`.
 
 public enum ChatTaskKind: String, Sendable, Hashable, CaseIterable {
-    case subagent, shell, workflow, monitor, mcp, other
+    case subagent, shell, workflow, monitor, mcp, hook, other
 
     /// Unknown kinds read as `other`.
     init(wire: String) { self = ChatTaskKind(rawValue: wire) ?? .other }
 
     /// "agent" / "agents", as the desktop pill counts them.
+    /// A command hook (a Stop hook's security review, say) ends on its own: no Stop.
+    public var stoppable: Bool { self != .hook }
+
     public func noun(_ count: Int) -> String {
         let (one, many) = switch self {
         case .subagent: ("agent", "agents")
@@ -17,6 +20,7 @@ public enum ChatTaskKind: String, Sendable, Hashable, CaseIterable {
         case .workflow: ("workflow", "workflows")
         case .monitor: ("monitor", "monitors")
         case .mcp: ("MCP task", "MCP tasks")
+        case .hook: ("hook", "hooks")
         case .other: ("task", "tasks")
         }
         return count == 1 ? one : many

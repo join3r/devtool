@@ -250,6 +250,16 @@ export interface BackgroundWork {
   label: string
   /** When the oldest of them started. */
   since: number
+  /**
+   * All of it is command hooks (a Stop hook's security review, say): the answer
+   * is in, and the agent waits for what they find. A hook can't be stopped.
+   */
+  hooksOnly: boolean
+}
+
+/** The row's line for it: "Background · xcodebuild", or "Waiting for Stop hook". */
+export function backgroundLine(work: BackgroundWork): string {
+  return work.hooksOnly ? `Waiting for ${work.label}` : `Background · ${work.label}`
 }
 
 export function backgroundWork(activity: AgentActivity | undefined): BackgroundWork | null {
@@ -261,7 +271,8 @@ export function backgroundWork(activity: AgentActivity | undefined): BackgroundW
   const label = first
     ? (count > 1 ? `${first.label} +${count - 1}` : first.label)
     : (count === 1 ? '1 task' : `${count} tasks`)
-  return { tasks, label, since: first?.startedAt ?? activity.updatedAt }
+  const hooksOnly = tasks.length === count && tasks.every((task) => task.type === 'hook')
+  return { tasks, label, since: first?.startedAt ?? activity.updatedAt, hooksOnly }
 }
 
 export function emptyActivity(now: number): AgentActivity {
@@ -504,7 +515,7 @@ export function describeActivity(
     if (activity.tool) parts.push(activity.tool.label)
     if (activity.subagents > 0) parts.push(activity.subagents === 1 ? '1 agent' : `${activity.subagents} agents`)
     const background = backgroundWork(activity)
-    if (background) parts.push(`Background · ${background.label}`)
+    if (background) parts.push(backgroundLine(background))
     if (parts.length > 0) return parts.join(' · ')
     return activity.lastPrompt ? `Thinking · ${activity.lastPrompt}` : 'Thinking'
   }
