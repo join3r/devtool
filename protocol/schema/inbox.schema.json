@@ -111,6 +111,30 @@
         "streamId": { "type": "string", "description": "The open stream its task goes to." }
       }
     },
+    "schedule": {
+      "type": "object",
+      "required": ["id", "name", "prompt", "every", "unit", "nextRunAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "prompt": { "type": "string" },
+        "streamId": { "type": "string", "description": "The stream its runs go to; absent: main." },
+        "every": { "type": "integer", "minimum": 1 },
+        "unit": { "enum": ["hour", "day", "week"] },
+        "nextRunAt": { "$ref": "#/$defs/unixMs" },
+        "paused": { "const": true },
+        "lastRun": {
+          "type": "object",
+          "required": ["at", "outcome"],
+          "properties": {
+            "at": { "$ref": "#/$defs/unixMs" },
+            "outcome": { "enum": ["running", "reported", "quiet", "failed", "skipped"] },
+            "taskId": { "type": "string" },
+            "note": { "type": "string" }
+          }
+        }
+      }
+    },
     "status": { "enum": ["working", "attention", "exited", "idle"] },
     "project": {
       "type": "object",
@@ -124,6 +148,7 @@
         "lastStreamId": { "type": "string", "description": "The stream the project was last used in." },
         "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" }, "description": "Open tasks, stream by stream." },
         "queue": { "type": "array", "items": { "$ref": "#/$defs/queuedPrompt" }, "description": "Project Home's queued prompts, first to run first (SPEC.md §4.4). Absent when empty." },
+        "schedules": { "type": "array", "items": { "$ref": "#/$defs/schedule" }, "description": "The project's schedules (SPEC.md §4.4, §8.23). Absent when none." },
         "missingFolder": { "const": true, "description": "The project's folder is gone from the desktop (SPEC.md §4.4). Absent otherwise." }
       }
     },
@@ -144,6 +169,7 @@
         "unread": { "const": true, "description": "Present while the desktop counts the task unread (SPEC.md §4.4)." },
         "snoozedUntil": { "$ref": "#/$defs/unixMs", "description": "Present while a timed snooze hasn't passed at generatedAt (SPEC.md §4.4)." },
         "snoozeUntilAttention": { "const": true, "description": "Present while the task is snoozed until it needs the user (SPEC.md §4.4)." },
+        "scheduled": { "type": "string", "description": "A run of one of the project's schedules: that schedule's name (SPEC.md §4.4, §8.23)." },
         "branch": { "type": "string", "description": "Version 3: the task's own worktree branch, once it has one (SPEC.md §4.4)." },
         "landing": { "$ref": "#/$defs/landing", "description": "Version 3: present while the task is landing into its stream or stopped doing so (SPEC.md §4.4)." },
         "diff": {

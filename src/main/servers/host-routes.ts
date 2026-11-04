@@ -211,6 +211,9 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'stream-merge-fix': project0,
   // Project Home's queue (ipc/prompt-queue.ts)
   'prompt-queue-run': project0,
+  // schedules (ipc/schedules.ts): a server project's schedules are its server's to run
+  'schedule-update': project0,
+  'schedule-run': project0,
   'task-worktree-close': project0,
   // token usage per project (ipc/token-usage.ts): the host it lives on read its agents' sessions
   'token-usage-project': project0,

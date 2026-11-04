@@ -14,6 +14,7 @@ import {
 } from '../../shared/types'
 import { findStreamOfTask, taskTabs } from '../../shared/streams'
 import { promptQueue, promptQueueWatchedTask, queuedPromptStream } from '../../shared/prompt-queue'
+import { projectSchedules, scheduleStreamId } from '../../shared/schedules'
 import type { PlanAccount } from '../../shared/plan-limits'
 import { limitWindow as wireLimitWindow } from './chat-view'
 import { INBOX_TAB_TYPES, TaskLandingLimits } from '../../../protocol/ts/index.ts'
@@ -23,6 +24,7 @@ import type {
   InboxPin as MobileInboxPin,
   InboxPlanLimit as MobileInboxPlanLimit,
   InboxQueuedPrompt as MobileQueuedPrompt,
+  InboxSchedule as MobileSchedule,
   InboxProject as MobileInboxProject,
   InboxStream as MobileInboxStream,
   InboxStreamRun as MobileInboxStreamRun,
@@ -164,6 +166,7 @@ function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: numb
   if (task.landing) out.landing = wireLanding(task.landing)
   const diff = diffs(task.id)
   if (diff && (diff.added > 0 || diff.deleted > 0)) out.diff = { added: diff.added, deleted: diff.deleted }
+  if (task.scheduledFrom) out.scheduled = task.scheduledFrom.name
   const tabs = taskTabs(task)
     .filter(isMobileTab)
     .map((tab) => buildTab(tab, lookup))
@@ -218,6 +221,29 @@ function buildQueue(project: Project): MobileQueuedPrompt[] {
   return out
 }
 
+/** The project's schedules (§4.4 `schedules`), each with the stream its runs go to. */
+function buildSchedules(project: Project): MobileSchedule[] {
+  return projectSchedules(project).map((schedule) => {
+    const streamId = scheduleStreamId(project, schedule)
+    const main = project.streams.find((stream) => stream.isMain)?.id
+    const out: MobileSchedule = {
+      id: schedule.id,
+      name: schedule.name,
+      prompt: schedule.prompt,
+      every: schedule.every,
+      unit: schedule.unit,
+      nextRunAt: schedule.nextRunAt
+    }
+    if (streamId && streamId !== main) out.streamId = streamId
+    if (schedule.paused) out.paused = true
+    if (schedule.lastRun) {
+      const { at, outcome, taskId, note } = schedule.lastRun
+      out.lastRun = { at, outcome, ...(taskId ? { taskId } : {}), ...(note ? { note } : {}) }
+    }
+    return out
+  })
+}
+
 /** Hidden (`hideFromMobile`) and spent ephemeral projects never reach a phone. */
 export function isVisibleOnMobile(project: Project): boolean {
   return !project.hideFromMobile && !isSpentEphemeralProject(project)
@@ -230,6 +256,7 @@ export function isVisibleOnMobile(project: Project): boolean {
 function buildProject(project: Project, lookup: InboxTabLookup, now: number, missingFolder: boolean, runs: StreamRunLookup, diffs: TaskDiffLookup): MobileInboxProject {
   const lastStream = project.streams.find((stream) => stream.id === project.lastStreamId)
   const queue = buildQueue(project)
+  const schedules = buildSchedules(project)
   return {
     id: project.id,
     name: project.name,
@@ -239,6 +266,7 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number, mis
     ...(lastStream ? { lastStreamId: lastStream.id } : {}),
     tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now, diffs))),
     ...(queue.length > 0 ? { queue } : {}),
+    ...(schedules.length > 0 ? { schedules } : {}),
     ...(missingFolder ? { missingFolder: true as const } : {})
   }
 }

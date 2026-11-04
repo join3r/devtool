@@ -204,12 +204,14 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
     public var tasks: [InboxTask]
     /// Project Home's queued prompts, first to run first (§4.4, §8.16).
     public var queue: [InboxQueuedPrompt]
+    /// Prompts the desktop runs again every hour/day/week as a new task (§4.4, §8.25).
+    public var schedules: [InboxSchedule]
     /// The project's folder is gone from the desktop (§4.4): New task there would fail.
     public var missingFolder: Bool
 
     public init(id: String, name: String, emoji: String? = nil, remote: Bool = false,
                 streams: [InboxStream] = [], lastStreamId: String? = nil, tasks: [InboxTask],
-                queue: [InboxQueuedPrompt] = [], missingFolder: Bool = false) {
+                queue: [InboxQueuedPrompt] = [], schedules: [InboxSchedule] = [], missingFolder: Bool = false) {
         self.id = id
         self.name = name
         self.emoji = emoji
@@ -218,6 +220,7 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
         self.lastStreamId = lastStreamId
         self.tasks = tasks
         self.queue = queue
+        self.schedules = schedules
         self.missingFolder = missingFolder
     }
 
@@ -231,6 +234,7 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
         lastStreamId = try c.decodeIfPresent(String.self, forKey: .lastStreamId)
         tasks = try c.decodeIfPresent([InboxTask].self, forKey: .tasks) ?? []
         queue = try c.decodeIfPresent([InboxQueuedPrompt].self, forKey: .queue) ?? []
+        schedules = (try? c.decodeIfPresent([InboxSchedule].self, forKey: .schedules)) ?? []
         missingFolder = (try? c.decodeIfPresent(Bool.self, forKey: .missingFolder)) == true
     }
 
@@ -344,6 +348,96 @@ public struct InboxQueuedPrompt: Codable, Sendable, Equatable, Hashable, Identif
     }
 }
 
+/// A prompt the desktop runs again every `every` `unit`s as a new task (§4.4 `schedules`, §8.25).
+public struct InboxSchedule: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public enum Unit: String, Codable, Sendable, CaseIterable {
+        case hour, day, week
+    }
+
+    /// The latest run.
+    public struct Run: Codable, Sendable, Equatable, Hashable {
+        public enum Outcome: String, Codable, Sendable {
+            case running, reported, quiet, failed, skipped
+        }
+
+        /// Unix milliseconds.
+        public var at: Int64
+        public var outcome: Outcome
+        public var taskId: String?
+        /// `quiet`: the agent's one line; `failed`: why.
+        public var note: String?
+
+        public init(at: Int64, outcome: Outcome, taskId: String? = nil, note: String? = nil) {
+            self.at = at
+            self.outcome = outcome
+            self.taskId = taskId
+            self.note = note
+        }
+    }
+
+    public var id: String
+    public var name: String
+    public var prompt: String
+    /// The stream its runs go to; nil: `main`.
+    public var streamId: String?
+    public var every: Int
+    public var unit: Unit
+    /// Unix milliseconds of the next run (stale while paused).
+    public var nextRunAt: Int64
+    public var paused: Bool
+    public var lastRun: Run?
+
+    public init(id: String, name: String, prompt: String, streamId: String? = nil, every: Int, unit: Unit,
+                nextRunAt: Int64, paused: Bool = false, lastRun: Run? = nil) {
+        self.id = id
+        self.name = name
+        self.prompt = prompt
+        self.streamId = streamId
+        self.every = every
+        self.unit = unit
+        self.nextRunAt = nextRunAt
+        self.paused = paused
+        self.lastRun = lastRun
+    }
+
+    /// "every week", "every 2 days".
+    public var cadence: String {
+        every == 1 ? "every \(unit.rawValue)" : "every \(every) \(unit.rawValue)s"
+    }
+
+    /// The latest run, in a few words: "Nothing new · Issue still open".
+    public var lastRunLine: String? {
+        guard let lastRun else { return nil }
+        switch lastRun.outcome {
+        case .running: return "Running now"
+        case .reported: return "Reported"
+        case .quiet: return lastRun.note.map { "Nothing new · \($0)" } ?? "Nothing new"
+        case .failed: return "Failed" + (lastRun.note.map { ": \($0)" } ?? "")
+        case .skipped: return "Skipped (the previous run was still working)"
+        }
+    }
+
+    /// Longest name and prompt, in UTF-16 code units (§8.25).
+    public static let nameLimit = 120
+    public static let promptLimit = 32000
+
+    /// Most of a unit between runs (§8.25).
+    public static func maxEvery(_ unit: Unit) -> Int {
+        switch unit {
+        case .hour: 720
+        case .day: 365
+        case .week: 52
+        }
+    }
+}
+
+extension InboxProject {
+    /// The stream a schedule's runs go to: its own while open, else `main`.
+    public func stream(of schedule: InboxSchedule) -> InboxStream? {
+        streams.first(where: { $0.id == schedule.streamId }) ?? mainStream
+    }
+}
+
 /// A task's lines added and removed, as the desktop Inbox shows them (§4.4 `diff`).
 public struct InboxTaskDiff: Codable, Sendable, Equatable, Hashable {
     public var added: Int
@@ -399,6 +493,8 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     /// Lines added and removed in the task's directory (§4.4); nil when
     /// nothing changed or the desktop doesn't count them.
     public var diff: InboxTaskDiff?
+    /// The schedule this task is a run of (§4.4 `scheduled`): its name.
+    public var scheduled: String?
     public var tabs: [InboxTab]
 
     public init(
@@ -409,6 +505,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         snoozedUntil: Int64? = nil, snoozeUntilAttention: Bool = false,
         branch: String? = nil, landing: TaskLanding? = nil,
         diff: InboxTaskDiff? = nil,
+        scheduled: String? = nil,
         tabs: [InboxTab]
     ) {
         self.id = id
@@ -427,6 +524,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         self.branch = branch
         self.landing = landing
         self.diff = diff
+        self.scheduled = scheduled
         self.tabs = tabs
     }
 
@@ -449,6 +547,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
         landing = (try? c.decodeIfPresent(TaskLanding.self, forKey: .landing)) ?? nil
         diff = (try? c.decodeIfPresent(InboxTaskDiff.self, forKey: .diff)) ?? nil
+        scheduled = try? c.decodeIfPresent(String.self, forKey: .scheduled)
         tabs = try c.decodeIfPresent([InboxTab].self, forKey: .tabs) ?? []
         status = try c.decodeIfPresent(TabStatus.self, forKey: .status)
             ?? tabs.map(\.status).max(by: { $0.priority < $1.priority }) ?? .idle

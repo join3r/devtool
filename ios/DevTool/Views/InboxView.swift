@@ -484,9 +484,12 @@ struct InboxRow: View {
                     ageText
                 }
                 .lineLimit(1)
-                Text(entry.task.name)
-                    .font(.subheadline)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    ScheduledMark(task: entry.task)
+                    Text(entry.task.name)
+                }
+                .font(.subheadline)
+                .lineLimit(1)
                 needLine
             }
         }
@@ -518,9 +521,12 @@ struct InboxRow: View {
     }
 
     private var taskName: some View {
-        Text(entry.task.name)
-            .font(.body.weight(entry.task.unread ? .semibold : .regular))
-            .lineLimit(1)
+        HStack(spacing: 4) {
+            ScheduledMark(task: entry.task)
+            Text(entry.task.name)
+        }
+        .font(.body.weight(entry.task.unread ? .semibold : .regular))
+        .lineLimit(1)
     }
 
     /// Lines added (green) and removed (red), as the desktop Inbox shows

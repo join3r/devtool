@@ -81,6 +81,11 @@ struct RootView: View {
         } message: {
             Text(model.queueError ?? "")
         }
+        .alert("Couldn't change the schedule", isPresented: Binding(get: { model.scheduleError != nil }, set: { if !$0 { model.scheduleError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.scheduleError ?? "")
+        }
         .onAppear { if sidebar == nil { sidebar = defaultSidebar } }
         .onChange(of: model.desktops.map(\.id)) { _, ids in
             if case .desktop(let id) = sidebar, !ids.contains(id) { sidebar = defaultSidebar }

@@ -265,6 +265,13 @@ export interface Task {
   queued?: TaskQueuedStart
   /** Started by another task's agent through DevTool's MCP tools (`main/devtool-mcp.ts`): that task, as it was named then. */
   delegatedFrom?: { taskId: string; name: string }
+  /** A run of one of the project's schedules (`shared/schedules.ts`): that schedule, as it was named then. */
+  scheduledFrom?: { scheduleId: string; name: string }
+  /**
+   * A scheduled run whose agent said it found nothing new (MCP `nothing_new`):
+   * main closes the task once its turn ends (`main/schedule-runner.ts`).
+   */
+  quietRun?: { note?: string }
 }
 
 /** A queued task's first prompt, held until its folder is free (see `Task.queued`). */
@@ -572,6 +579,45 @@ export interface Project {
    * One list; each stream runs the ones that go to it, and keeps its own auto-run.
    */
   promptQueue?: QueuedPrompt[]
+  /** Prompts run again and again, each run a new task (`shared/schedules.ts`). */
+  schedules?: Schedule[]
+}
+
+export type ScheduleUnit = 'hour' | 'day' | 'week'
+
+/** A scheduled job: `prompt`, run as a new Claude chat task every `every` `unit`s. */
+export interface Schedule {
+  id: string
+  name: string
+  prompt: string
+  /** The stream its runs go to; absent (or since closed) means `main`. */
+  streamId?: string
+  every: number
+  unit: ScheduleUnit
+  /** The first run; later ones keep its wall-clock time. */
+  startAt: number
+  /** When it runs next (while not paused). */
+  nextRunAt: number
+  paused?: true
+  /** Claude permission mode its runs start in; absent: the composer's last. */
+  mode?: string
+  createdAt: number
+  /** Made by an agent through DevTool's MCP tools: that task, as it was named then. */
+  createdBy?: { taskId: string; name: string }
+  lastRun?: ScheduleLastRun
+}
+
+/**
+ * The latest run: `running` until its agent's turn ends; then `reported` (it
+ * stays in the Inbox), `quiet` (nothing new, closed by itself), or why it didn't
+ * run (`failed`, `skipped` while the previous run was still at work).
+ */
+export interface ScheduleLastRun {
+  at: number
+  outcome: 'running' | 'reported' | 'quiet' | 'failed' | 'skipped'
+  taskId?: string
+  /** `quiet`: the agent's one line; `failed`: why. */
+  note?: string
 }
 
 /** A prompt waiting on Project Home to become a task. */

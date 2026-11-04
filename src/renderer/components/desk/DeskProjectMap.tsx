@@ -23,6 +23,7 @@ import { BranchGraph, projectBranchLabels, useBranchGraph } from '../BranchGraph
 import { CommitHeatmap } from '../CommitHeatmap'
 import { ProjectTokensCard, tokenUsageAvailable } from '../TokenUsage'
 import { ArchivedStreamsLine, DoneTaskItem } from './DoneItems'
+import { SchedulesCard, schedulesShown } from './DeskSchedules'
 import { StreamRunButtons } from '../StreamRunControls'
 import { bucketByDay, formatRelativeTime, quartileBins } from '../projectStats'
 import { taskAgentLabel, taskStatusChip, type TaskChipTone } from '../taskHeaderState'
@@ -442,6 +443,7 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
           </span>
         </div>
         {tokenUsageAvailable(project) && <ProjectTokensCard project={project} />}
+        {schedulesShown(project) && <SchedulesCard project={project} now={now} />}
       </div>
 
       {history && local && (

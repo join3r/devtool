@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -258,12 +258,20 @@ function appMessages(): unknown {
           tabs: []
         }, {
           id: 't4', name: 'Terminal', streamId: 's-main', streamName: 'main', status: 'attention',
-          snoozeUntilAttention: true,
+          snoozeUntilAttention: true, scheduled: 'Hourly smoke',
           tabs: [{ id: 'tab4', type: 'terminal', title: 'zsh', status: 'attention' }]
         }],
         queue: [
           { id: 'q1', text: 'Add rate limiting to the login route', streamId: 's-main' },
           { id: 'q2', text: 'Bump the version to 0.5.1\nand tag it', streamId: 's-050' }
+        ],
+        // §8.25: schedules, each with its latest run.
+        schedules: [
+          { id: 'sc1', name: 'SDK usage check', prompt: 'Check whether the Agent SDK usage bug is fixed', every: 1, unit: 'week', nextRunAt: 1790600000000,
+            lastRun: { at: 1789995000000, outcome: 'quiet', taskId: 't9', note: 'Issue still open' } },
+          { id: 'sc2', name: 'Dependency audit', prompt: 'Run npm audit', streamId: 's-050', every: 2, unit: 'day', nextRunAt: 1790100000000, paused: true },
+          { id: 'sc3', name: 'Hourly smoke', prompt: 'Run the smoke test', every: 6, unit: 'hour', nextRunAt: 1790010000000,
+            lastRun: { at: 1790000000000, outcome: 'running', taskId: 't4' } }
         ]
       },
       { id: 'p2', name: 'remote-box', remote: true, streams: [{ id: 's-main-2', name: 'main', main: true }], tasks: [] },
@@ -289,6 +297,12 @@ function appMessages(): unknown {
         { id: 's-2', name: 'two', runCommand: 'make run', run: { status: 'exited', startedAt: 5, endedAt: null, exitCode: -15, pid: 42 } }
       ],
       queue: [{ id: 'q1', text: 'Add rate limiting', streamId: 's-main', author: 'me' }],
+      // A newer desktop's unit drops that schedule; an unknown outcome drops the run; extras are dropped.
+      schedules: [
+        { id: 'sc1', name: 'Check', prompt: 'Go', every: 1, unit: 'week', nextRunAt: 5, paused: 'yes', streamId: null, color: 'red', lastRun: { at: 4, outcome: 'cancelled' } },
+        { id: 'sc2', name: 'Monthly', prompt: 'Go', every: 1, unit: 'month', nextRunAt: 5 },
+        { id: 'sc3', name: 'Daily', prompt: 'Go', every: 1, unit: 'day', nextRunAt: 5, lastRun: { at: 4, outcome: 'failed', taskId: null, note: 'Claude is off' } }
+      ],
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'thinking', since: null,
         activity: null, notes: 'x', attentionAt: null, branch: null,
@@ -314,6 +328,10 @@ function appMessages(): unknown {
         { id: 's-2', name: 'two', runCommand: 'make run', run: { status: 'exited', startedAt: 5, exitCode: -15 } }
       ],
       queue: [{ id: 'q1', text: 'Add rate limiting', streamId: 's-main' }],
+      schedules: [
+        { id: 'sc1', name: 'Check', prompt: 'Go', every: 1, unit: 'week', nextRunAt: 5 },
+        { id: 'sc3', name: 'Daily', prompt: 'Go', every: 1, unit: 'day', nextRunAt: 5, lastRun: { at: 4, outcome: 'failed', note: 'Claude is off' } }
+      ],
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'idle',
         landing: { state: 'queued' },
@@ -1020,6 +1038,45 @@ function chatMessages(): unknown {
       results: [text({ taskId: 't9' }), text({ taskId: 't9', tabId: 'tab9' })].map((json) => ({ json, expected: parseQueueRunResult(JSON.parse(json)) })),
       invalid: {
         params: [text({ projectId: 'p1' }), text({ itemId: 'q1' }), text({ projectId: 'p1', itemId: 7 }), 'null'],
+        results: [text({}), text({ taskId: 7 }), '[]']
+      }
+    },
+    // §8.25: `schedule.update` edits a project's schedules; `schedule.run` starts a run now.
+    scheduleUpdate: {
+      params: [
+        text({ projectId: 'p1', action: 'add', name: '  SDK check ', prompt: ' Check the bug ', every: 1, unit: 'week' }),
+        text({ projectId: 'p1', action: 'add', name: 'Audit', prompt: 'npm audit', every: 2, unit: 'day', streamId: 's-050', startAt: 1790100000000, paused: true }),
+        text({ projectId: 'p1', action: 'edit', scheduleId: 'sc1', every: 3, unit: 'hour' }),
+        text({ projectId: 'p1', action: 'edit', scheduleId: 'sc1', name: 'Renamed', prompt: 'New prompt', streamId: null, startAt: 1790200000000 }),
+        text({ projectId: 'p1', action: 'edit', scheduleId: 'sc1', streamId: 's-050' }),
+        text({ projectId: 'p1', action: 'pause', scheduleId: 'sc1', paused: true, name: 'ignored' }),
+        text({ projectId: 'p1', action: 'remove', scheduleId: 'sc1' })
+      ].map((json) => ({ json, expected: parseScheduleUpdateParams(JSON.parse(json)) })),
+      results: [text({ scheduleId: 'sc4' }), text({ scheduleId: 'sc4', extra: 1 })].map((json) => ({ json, expected: parseScheduleUpdateResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ action: 'add', name: 'x', prompt: 'y', every: 1, unit: 'day' }),
+          text({ projectId: 'p1', action: 'clear' }),
+          text({ projectId: 'p1', action: 'add', prompt: 'y', every: 1, unit: 'day' }),
+          text({ projectId: 'p1', action: 'add', name: ' ', prompt: 'y', every: 1, unit: 'day' }),
+          text({ projectId: 'p1', action: 'add', name: 'x', prompt: 'y'.repeat(32001), every: 1, unit: 'day' }),
+          text({ projectId: 'p1', action: 'add', name: 'x', prompt: 'y', every: 0, unit: 'day' }),
+          text({ projectId: 'p1', action: 'add', name: 'x', prompt: 'y', every: 1, unit: 'month' }),
+          text({ projectId: 'p1', action: 'add', name: 'x', prompt: 'y', every: 1, unit: 'day', startAt: -5 }),
+          text({ projectId: 'p1', action: 'edit', name: 'x' }),
+          text({ projectId: 'p1', action: 'pause', scheduleId: 'sc1' }),
+          text({ projectId: 'p1', action: 'pause', scheduleId: 'sc1', paused: 'yes' }),
+          text({ projectId: 'p1', action: 'remove' }),
+          'null'
+        ],
+        results: [text({}), text({ scheduleId: 7 }), '[]']
+      }
+    },
+    scheduleRun: {
+      params: [text({ projectId: 'p1', scheduleId: 'sc1' }), text({ projectId: 'p1', scheduleId: 'sc1', extra: true })].map((json) => ({ json, expected: parseScheduleRunParams(JSON.parse(json)) })),
+      results: [text({ taskId: 't9' }), text({ taskId: 't9', tabId: 'tab9' })].map((json) => ({ json, expected: parseScheduleRunResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({ projectId: 'p1' }), text({ scheduleId: 'sc1' }), text({ projectId: 'p1', scheduleId: 7 }), 'null'],
         results: [text({}), text({ taskId: 7 }), '[]']
       }
     },

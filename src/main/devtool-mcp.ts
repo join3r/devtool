@@ -3,8 +3,19 @@ import { describeActivity } from '../shared/agent-activity'
 import type { ArchivedTask, ProjectArchive } from '../shared/archive'
 import { autopilotActive, autopilotBusy, autopilotLine, autopilotNeedsYou, autopilotTab } from '../shared/autopilot'
 import { landingNeedsYou, statusTabs, taskStatus } from '../shared/inbox-state'
-import { taskDirectory, taskTabs } from '../shared/streams'
-import { AI_TAB_TYPES, type AiTabType, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
+import { mapTaskInProject, taskDirectory, taskTabs } from '../shared/streams'
+import { AI_TAB_TYPES, type AiTabType, type Project, type ProjectsData, type Schedule, type ScheduleUnit, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
+import {
+  applyScheduleOp,
+  cadenceError,
+  cadenceLabel,
+  newSchedule,
+  projectSchedules,
+  scheduleStreamId,
+  schedulesSupported,
+  SCHEDULES_PER_PROJECT,
+  textError
+} from '../shared/schedules'
 import { hasMcpTools } from './agent-context'
 import { DEFAULT_SECRET_FILE, SECRET_REASON_MAX, isDotenvFile, safeSecretFile, validSecretName } from '../shared/secrets'
 import type { SecretOutcome } from './secrets/secret-requests'
@@ -34,7 +45,7 @@ export interface DevtoolMcpEndpoint {
  * messaging one go through the tab's own permission mode (in auto mode Claude's
  * classifier decides, so an Autopilot run isn't stopped by them).
  */
-export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
+export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
 
 /** The server as Claude's MCP config (`--mcp-config`, the Agent SDK's `mcpServers`) names it. */
 export function claudeMcpServers(endpoint: DevtoolMcpEndpoint): Record<string, { type: 'http'; url: string; headers: Record<string, string> }> {
@@ -112,6 +123,11 @@ export interface DevtoolMcpDeps {
   requestSecret?(input: RequestSecretInput, signal?: AbortSignal): Promise<SecretOutcome | { status: 'error'; error: string }>
   /** Known secret values out of a reply an agent reads. */
   redact?(text: string): string
+  /** Saves the projects (schedules, a quiet run's flag). */
+  commit(data: ProjectsData): void
+  /** The permission mode the agent in `tabId` runs in; null when main can't see it (a terminal tab). */
+  callerMode(tabId: string): string | null
+  newId(): string
   now?(): number
 }
 
@@ -506,8 +522,88 @@ export const TOOLS: ToolDef[] = [
       required: ['name', 'reason'],
       additionalProperties: false
     }
+  },
+  {
+    name: 'schedule_task',
+    title: 'Schedule a recurring DevTool task',
+    description:
+      'Make a schedule in your project: DevTool starts a new task with `prompt` every `every` `unit`s (e.g. every 1 week), each run a fresh Claude agent that sees nothing of this conversation, so write the prompt as a complete brief. ' +
+      'Use it when the user asks for something to be done or checked regularly ("check weekly whether X is fixed"). ' +
+      'A run that finds nothing new closes itself quietly (DevTool tells it how); a run with something to report stays in the user\'s Inbox. ' +
+      'Runs need DevTool to be running; missed ones become one run at the next launch. Runs start in your permission mode, or a stricter one. The user sees and edits schedules on the project\'s page.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short title, shown in DevTool and on each run\'s task.' },
+        prompt: { type: 'string', description: 'What each run does: a complete, self-contained brief, including what counts as worth reporting.' },
+        every: { type: 'integer', minimum: 1, description: 'How many units between runs.' },
+        unit: { type: 'string', enum: ['hour', 'day', 'week'] },
+        firstRunAt: { type: 'string', description: 'ISO 8601 date-time of the first run; later runs keep its time of day. Default: one period from now.' },
+        streamId: { type: 'string', description: 'A stream from list_tasks. Default: main.' }
+      },
+      required: ['name', 'prompt', 'every', 'unit'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'list_schedules',
+    title: 'List DevTool schedules',
+    description: 'Your project\'s schedules: each one\'s prompt, cadence, next run and its latest run\'s outcome.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true }
+  },
+  {
+    name: 'cancel_schedule',
+    title: 'Delete a DevTool schedule',
+    description: 'Delete one of your project\'s schedules (list_schedules names them). Runs already started are left alone.',
+    inputSchema: {
+      type: 'object',
+      properties: { scheduleId: { type: 'string' } },
+      required: ['scheduleId'],
+      additionalProperties: false
+    },
+    annotations: { destructiveHint: true }
+  },
+  {
+    name: 'nothing_new',
+    title: 'End a scheduled run quietly',
+    description:
+      'Only in a scheduled run (DevTool\'s context says so): you found nothing the user needs to see. DevTool closes this task once your turn ends, so it never reaches their Inbox, and keeps `note` as the run\'s outcome. Call it, then end your turn.',
+    inputSchema: {
+      type: 'object',
+      properties: { note: { type: 'string', description: 'One line: what you checked and found, e.g. "Issue #97074 still open, no fix released".' } },
+      additionalProperties: false
+    }
   }
 ]
+
+/** What an agent sees of a schedule. */
+function describeSchedule(project: Project, schedule: Schedule): Record<string, unknown> {
+  const streamId = scheduleStreamId(project, schedule)
+  return {
+    scheduleId: schedule.id,
+    name: schedule.name,
+    cadence: cadenceLabel(schedule),
+    stream: project.streams.find(s => s.id === streamId)?.name ?? 'main',
+    ...(schedule.paused ? { paused: true } : { nextRunAt: new Date(schedule.nextRunAt).toISOString() }),
+    prompt: schedule.prompt,
+    ...(schedule.lastRun
+      ? {
+          lastRun: {
+            at: new Date(schedule.lastRun.at).toISOString(),
+            outcome: schedule.lastRun.outcome,
+            ...(schedule.lastRun.taskId ? { taskId: schedule.lastRun.taskId } : {}),
+            ...(schedule.lastRun.note ? { note: schedule.lastRun.note } : {})
+          }
+        }
+      : {}),
+    ...(schedule.createdBy ? { createdBy: `${schedule.createdBy.name} (${schedule.createdBy.taskId})` } : {})
+  }
+}
+
+function mapProjectIn(data: ProjectsData, projectId: string, fn: (project: Project) => Project): ProjectsData {
+  return { ...data, projects: data.projects.map(p => (p.id === projectId ? fn(p) : p)) }
+}
 
 class ToolError extends Error {}
 
@@ -686,6 +782,60 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       throw new ToolError('DevTool failed to ask.')
     }
 
+    case 'schedule_task': {
+      if (!schedulesSupported(project)) throw new ToolError('Schedules run only in projects on this machine.')
+      // Only a task the user started makes schedules: a run or a delegated task can't make more of itself.
+      if (me.task.scheduledFrom || me.task.delegatedFrom) throw new ToolError('Only a task the user started can make schedules. Tell the user what to schedule instead.')
+      const scheduleName = str(args, 'name', true)
+      const prompt = str(args, 'prompt', true)
+      const textProblem = textError(scheduleName, prompt)
+      if (textProblem) throw new ToolError(textProblem)
+      const cadence = cadenceError(args.every, args.unit)
+      if (cadence) throw new ToolError(cadence)
+      const streamId = str(args, 'streamId')
+      if (streamId && !project.streams.some(s => s.id === streamId)) throw new ToolError('No such stream in your project. list_tasks names them.')
+      if (projectSchedules(project).length >= SCHEDULES_PER_PROJECT) throw new ToolError(`A project has at most ${SCHEDULES_PER_PROJECT} schedules.`)
+      const first = str(args, 'firstRunAt')
+      let startAt: number | undefined
+      if (first) {
+        startAt = Date.parse(first)
+        if (Number.isNaN(startAt)) throw new ToolError('`firstRunAt` must be an ISO 8601 date-time.')
+        if (startAt < now - 60_000) throw new ToolError('`firstRunAt` is in the past.')
+      }
+      const mode = delegatedMode(deps.callerMode(caller.tabId))
+      const schedule = newSchedule({
+        id: deps.newId(),
+        name: scheduleName,
+        prompt,
+        every: args.every as number,
+        unit: args.unit as ScheduleUnit,
+        ...(streamId && !project.streams.find(s => s.id === streamId)?.isMain ? { streamId } : {}),
+        ...(startAt !== undefined ? { startAt } : {}),
+        mode,
+        createdBy: { taskId: me.task.id, name: me.task.name },
+        now
+      })
+      deps.commit(mapProjectIn(deps.peek(), project.id, p => applyScheduleOp(p, { op: 'add', schedule })))
+      return { ...describeSchedule(project, schedule), permissionMode: mode }
+    }
+
+    case 'list_schedules':
+      return { project: project.name, schedules: projectSchedules(project).map(s => describeSchedule(project, s)) }
+
+    case 'cancel_schedule': {
+      const scheduleId = str(args, 'scheduleId', true)
+      if (!projectSchedules(project).some(s => s.id === scheduleId)) throw new ToolError('No such schedule in your project. list_schedules names them.')
+      deps.commit(mapProjectIn(deps.peek(), project.id, p => applyScheduleOp(p, { op: 'remove', id: scheduleId })))
+      return { deleted: true, scheduleId }
+    }
+
+    case 'nothing_new': {
+      if (!me.task.scheduledFrom) throw new ToolError('This task is not a scheduled run: report to the user instead.')
+      const note = (str(args, 'note') ?? '').trim().slice(0, 300)
+      deps.commit(mapProjectIn(deps.peek(), project.id, p => mapTaskInProject(p, me.task.id, task => ({ ...task, quietRun: note ? { note } : {} }))))
+      return { ok: true, note: 'DevTool closes this task once your turn ends. End your turn now with one short line.' }
+    }
+
     default:
       throw new ToolError(`Unknown tool: ${name}`)
   }
@@ -790,7 +940,8 @@ async function handleOne(message: unknown, caller: Caller, deps: DevtoolMcpDeps,
         instructions:
           'DevTool is the app that runs you. These tools start, follow and message other DevTool tasks (each one its own agent), ' +
           'so you can hand off self-contained work or run several pieces in parallel and collect their results. ' +
-          'When you need a secret (API key, token, password), ask with request_secret instead of asking the user to paste it into the chat.'
+          'When you need a secret (API key, token, password), ask with request_secret instead of asking the user to paste it into the chat. ' +
+          'Schedules (schedule_task, list_schedules, cancel_schedule) run a prompt again every hour, day or week as a new task, for work the user wants done or checked regularly.'
       })
     }
     case 'ping':

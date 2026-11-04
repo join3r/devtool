@@ -26,6 +26,10 @@ final class AppModel {
     var queueError: String?
     /// Queued prompts whose Run now is in flight (`desktopId/itemId`).
     private(set) var startingQueued: Set<String> = []
+    /// A failed schedule change or Run now (§8.25); `RootView` shows it and clears it.
+    var scheduleError: String?
+    /// Schedules whose Run now is in flight (`desktopId/scheduleId`).
+    private(set) var startingSchedules: Set<String> = []
     /// A failed `stream.run` (§8.19), for the alert.
     var runError: String?
     /// Streams whose Run, Stop or Restart is in flight (`desktopId/streamId`), and which.
@@ -312,6 +316,47 @@ final class AppModel {
 
     func isStartingQueued(_ itemId: String, desktopId: String) -> Bool {
         startingQueued.contains("\(desktopId)/\(itemId)")
+    }
+
+    // MARK: - Schedules (§8.25)
+
+    /// `schedule.update`, answered by the desktop: the schedule sheet's Save,
+    /// which shows its own error. Returns the schedule's id.
+    @discardableResult
+    func updateSchedule(_ action: ScheduleUpdateParams.Action, projectId: String, desktopId: String) async throws -> String {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.updateSchedule(projectId: projectId, action)
+    }
+
+    /// `schedule.update` from a row (Pause, Resume, Delete): the next inbox
+    /// shows it; a failure sets `scheduleError`.
+    func changeSchedule(_ action: ScheduleUpdateParams.Action, projectId: String, desktopId: String) async {
+        do {
+            try await updateSchedule(action, projectId: projectId, desktopId: desktopId)
+        } catch {
+            scheduleError = error.localizedDescription
+        }
+    }
+
+    /// `schedule.run`: Run now. The task comes with the next inbox; a failure sets `scheduleError`.
+    func runSchedule(_ scheduleId: String, projectId: String, desktopId: String) async {
+        guard let connection = connections[desktopId] else {
+            scheduleError = DesktopConnectionError.notConnected.localizedDescription
+            return
+        }
+        let key = "\(desktopId)/\(scheduleId)"
+        guard !startingSchedules.contains(key) else { return }
+        startingSchedules.insert(key)
+        defer { startingSchedules.remove(key) }
+        do {
+            try await connection.runSchedule(projectId: projectId, scheduleId: scheduleId)
+        } catch {
+            scheduleError = error.localizedDescription
+        }
+    }
+
+    func isStartingSchedule(_ scheduleId: String, desktopId: String) -> Bool {
+        startingSchedules.contains("\(desktopId)/\(scheduleId)")
     }
 
     // MARK: - App runs (§8.19)

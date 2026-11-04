@@ -371,6 +371,22 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             return QueueRunResult(taskId: try runQueued(parsed)).json
+        case TaskOp.updateSchedule:
+            let parsed: ScheduleUpdateParams
+            do {
+                parsed = try ScheduleUpdateParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return .object(["scheduleId": .string(try updateSchedule(parsed))])
+        case TaskOp.runSchedule:
+            let parsed: ScheduleRunParams
+            do {
+                parsed = try ScheduleRunParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return QueueRunResult(taskId: try runSchedule(parsed)).json
         case TaskOp.triage:
             let parsed: TaskTriageParams
             do {
@@ -1004,6 +1020,88 @@ public actor MockDesktopConnection: DesktopConnection {
         return result.taskId
     }
 
+    /// `schedule.update`: edits the project's schedules as the desktop's
+    /// `scheduleRequestToOp` does and sends the inbox. Returns the schedule's id.
+    private func updateSchedule(_ params: ScheduleUpdateParams) throws -> String {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == params.projectId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        let project = inbox.projects[p]
+        func index(_ id: String) throws -> Int {
+            guard let i = project.schedules.firstIndex(where: { $0.id == id }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such schedule")
+            }
+            return i
+        }
+        func checkStream(_ id: String??) throws {
+            if case .some(.some(let id)) = id, !project.streams.contains(where: { $0.id == id }) {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")
+            }
+        }
+        func periodMs(_ every: Int, _ unit: InboxSchedule.Unit) -> Int64 {
+            Int64(every) * (unit == .hour ? 3_600_000 : unit == .day ? 86_400_000 : 604_800_000)
+        }
+        let now = Date().unixMilliseconds
+        let id: String
+        switch params.action {
+        case .add(let f):
+            if project.id == Self.shellProjectId || project.remote {
+                throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Schedules run only in local projects that run Claude.")
+            }
+            try checkStream(f.streamId)
+            let every = f.every ?? 1, unit = f.unit ?? .day
+            newCount += 1
+            id = "sc-new-\(newCount)"
+            let streamId = f.streamId ?? nil
+            inbox.projects[p].schedules.append(InboxSchedule(
+                id: id, name: f.name ?? "", prompt: f.prompt ?? "",
+                streamId: streamId == project.mainStream?.id ? nil : streamId,
+                every: every, unit: unit, nextRunAt: f.startAt ?? now + periodMs(every, unit)))
+        case .edit(let scheduleId, let f):
+            let i = try index(scheduleId)
+            try checkStream(f.streamId)
+            var s = inbox.projects[p].schedules[i]
+            if let name = f.name { s.name = name }
+            if let prompt = f.prompt { s.prompt = prompt }
+            if let every = f.every { s.every = every }
+            if let unit = f.unit { s.unit = unit }
+            if let streamId = f.streamId { s.streamId = streamId == project.mainStream?.id ? nil : streamId }
+            if let startAt = f.startAt { s.nextRunAt = startAt } else if f.every != nil || f.unit != nil { s.nextRunAt = now + periodMs(s.every, s.unit) }
+            inbox.projects[p].schedules[i] = s
+            id = scheduleId
+        case .pause(let scheduleId, let paused):
+            let i = try index(scheduleId)
+            inbox.projects[p].schedules[i].paused = paused
+            id = scheduleId
+        case .remove(let scheduleId):
+            let i = try index(scheduleId)
+            inbox.projects[p].schedules.remove(at: i)
+            id = scheduleId
+        }
+        inbox.generatedAt = now
+        continuation.yield(.inbox(inbox))
+        return id
+    }
+
+    /// `schedule.run`: a new task in the schedule's stream, named after it.
+    private func runSchedule(_ params: ScheduleRunParams) throws -> String {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == params.projectId }),
+              let i = inbox.projects[p].schedules.firstIndex(where: { $0.id == params.scheduleId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such schedule")
+        }
+        let schedule = inbox.projects[p].schedules[i]
+        let result = try addTask(projectId: params.projectId, streamId: inbox.projects[p].stream(of: schedule)?.id, prompt: schedule.prompt)
+        if let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == result.taskId }) {
+            inbox.projects[p].tasks[t].name = schedule.name
+            inbox.projects[p].tasks[t].scheduled = schedule.name
+        }
+        let now = Date().unixMilliseconds
+        inbox.projects[p].schedules[i].lastRun = InboxSchedule.Run(at: now, outcome: .running, taskId: result.taskId)
+        startReply(tabId: result.tabId, text: schedule.prompt, images: 0)
+        continuation.yield(.inbox(inbox))
+        return result.taskId
+    }
+
     /// `task.triage`: applies the action as the desktop would and sends the inbox.
     private func triage(_ params: TaskTriageParams) throws {
         for p in inbox.projects.indices {
@@ -1281,7 +1379,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.taskBusy, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
-            DesktopFeature.tokensUsage, DesktopFeature.chatSearch,
+            DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -1478,6 +1576,12 @@ public enum MockInbox {
                     InboxQueuedPrompt(id: "q-1", text: "Add a Retry-After header to 429 responses", streamId: api050.id),
                     InboxQueuedPrompt(id: "q-2", text: "Write an integration test for the rate limiter that covers burst traffic and the reset window", streamId: api050.id),
                     InboxQueuedPrompt(id: "q-3", text: "Look into why the login test is flaky on CI", streamId: apiMain.id),
+                ], schedules: [
+                    InboxSchedule(id: "sc-1", name: "Agent SDK usage check", prompt: "Check whether the Agent SDK 5-hour usage bug (anthropics/claude-code#97074) is fixed. Report only if something changed.",
+                                  every: 1, unit: .week, nextRunAt: ago(-60 * 24 * 3),
+                                  lastRun: InboxSchedule.Run(at: ago(60 * 24 * 4), outcome: .quiet, note: "Issue still open, no fix released")),
+                    InboxSchedule(id: "sc-2", name: "Dependency audit", prompt: "Run npm audit and report new high or critical findings.",
+                                  streamId: api050.id, every: 2, unit: .day, nextRunAt: ago(-60 * 5), paused: true),
                 ]),
                 InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin, web240], tasks: [
                     task("t-charts", "usage-charts", webMain, lastInteractedAt: ago(25), tabs: [

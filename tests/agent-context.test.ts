@@ -117,3 +117,17 @@ describe('agentContextForTab', () => {
     expect(agentContextForTab([{ ...running, host: 'srv' }], 'chat-1')).not.toContain('Autopilot')
   })
 })
+
+describe('scheduled runs', () => {
+  it('tells a scheduled run how to end quietly', () => {
+    const note = buildAgentContext({
+      project: { name: 'App', directory: '/tmp/app' },
+      stream: { name: 'main', isMain: true },
+      task: { name: 'SDK check · Nov 4', scheduledFrom: { scheduleId: 's', name: 'SDK check' } },
+      dir: '/tmp/app',
+      mcp: true
+    })
+    expect(note).toContain('scheduled run of "SDK check"')
+    expect(note).toContain('nothing_new')
+  })
+})

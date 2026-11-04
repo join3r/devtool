@@ -34,6 +34,7 @@ function fakeDeps(data: ProjectsData, archives: Record<string, ProjectArchive> =
   const started: StartTaskInput[] = []
   const sent: { taskId: string; text: string }[] = []
   let current = data
+  let ids = 0
   const deps: DevtoolMcpDeps = {
     peek: () => current,
     archive: (projectId) => archives[projectId] ?? emptyArchive(),
@@ -51,6 +52,12 @@ function fakeDeps(data: ProjectsData, archives: Record<string, ProjectArchive> =
     },
     sendToTask: async (_project, task, _tab, text) => { sent.push({ taskId: task.id, text }) },
     lastReply: async () => 'All done: added the button.',
+    commit: (next) => {
+      current = next
+      listeners.forEach(listener => listener())
+    },
+    callerMode: () => 'auto',
+    newId: () => `id-${++ids}`,
     now: () => Date.now()
   }
   return {
@@ -313,7 +320,7 @@ describe('agent wiring', () => {
     expect(args).toHaveLength(2)
     expect(args[0].startsWith('--mcp-config=')).toBe(true)
     expect(JSON.parse(args[0].slice('--mcp-config='.length))).toEqual({ mcpServers: { devtool: { type: 'http', ...endpoint } } })
-    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks,mcp__devtool__request_secret')
+    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks,mcp__devtool__request_secret,mcp__devtool__list_schedules,mcp__devtool__nothing_new')
   })
 
   it('starts a delegated task no looser than its caller', () => {
@@ -468,5 +475,49 @@ describe('request_secret', () => {
     deps.redact = (text) => text.split('sk-live-123456789').join('[secret KEY]')
     const result = await call(deps, 'get_task', { taskId: 'other' })
     expect(result.json.lastReply).toBe('I used [secret KEY] to call it.')
+  })
+})
+
+describe('schedule tools', () => {
+  it('schedule_task adds a schedule in the caller\'s project, in its mode; list and cancel see it', async () => {
+    const fake = fakeDeps(data())
+    const made = await call(fake.deps, 'schedule_task', { name: 'SDK check', prompt: 'Check whether the bug is fixed', every: 1, unit: 'week' })
+    expect(made.isError).toBe(false)
+    expect(made.json).toMatchObject({ name: 'SDK check', cadence: 'every week', permissionMode: 'auto', createdBy: 'Parent (parent)' })
+    const project = fake.deps.peek().projects.find(p => p.id === 'p1')!
+    expect(project.schedules).toHaveLength(1)
+    expect(project.schedules![0].mode).toBe('auto')
+    const listed = await call(fake.deps, 'list_schedules', {})
+    expect(listed.json.schedules.map((s: { name: string }) => s.name)).toEqual(['SDK check'])
+    const cancelled = await call(fake.deps, 'cancel_schedule', { scheduleId: made.json.scheduleId })
+    expect(cancelled.json).toMatchObject({ deleted: true })
+    expect(fake.deps.peek().projects.find(p => p.id === 'p1')!.schedules).toBeUndefined()
+  })
+
+  it('schedule_task refuses a bad cadence or a past first run', async () => {
+    const { deps } = fakeDeps(data())
+    expect((await call(deps, 'schedule_task', { name: 'x', prompt: 'y', every: 1, unit: 'month' })).isError).toBe(true)
+    expect((await call(deps, 'schedule_task', { name: 'x', prompt: 'y', every: 1, unit: 'day', firstRunAt: '2001-01-01T00:00:00Z' })).isError).toBe(true)
+  })
+
+  it('nothing_new marks only a scheduled run quiet', async () => {
+    const d = data()
+    d.projects[0].streams[0].tasks[0] = { ...d.projects[0].streams[0].tasks[0], scheduledFrom: { scheduleId: 's', name: 'S' } }
+    const fake = fakeDeps(d)
+    const quiet = await call(fake.deps, 'nothing_new', { note: 'Still open' })
+    expect(quiet.isError).toBe(false)
+    expect(fake.deps.peek().projects[0].streams[0].tasks[0].quietRun).toEqual({ note: 'Still open' })
+    expect((await call(fake.deps, 'nothing_new', {}, 'other-tab')).isError).toBe(true)
+  })
+})
+
+describe('schedule_task callers', () => {
+  it('refuses scheduled runs and delegated tasks', async () => {
+    const d = data()
+    d.projects[0].streams[0].tasks[0] = { ...d.projects[0].streams[0].tasks[0], scheduledFrom: { scheduleId: 's', name: 'S' } }
+    const { deps } = fakeDeps(d)
+    const args = { name: 'x', prompt: 'y', every: 1, unit: 'day' }
+    expect((await call(deps, 'schedule_task', args)).isError).toBe(true)
+    expect((await call(deps, 'schedule_task', args, 'other-tab')).isError).toBe(true)
   })
 })

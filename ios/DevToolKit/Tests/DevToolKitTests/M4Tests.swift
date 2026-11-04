@@ -232,6 +232,49 @@ import Testing
         }
     }
 
+    @Test func scheduleParamsMatchTheVectors() throws {
+        let file = try Vectors.load("chat-messages.json")
+        let update = try #require(file["scheduleUpdate"])
+        #expect(!update["params"].array.isEmpty)
+        for sample in update["params"].array {
+            let parsed = try ScheduleUpdateParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in update["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str.prefix(80))") { _ = try ScheduleUpdateParams.parse(try JSONValue.parse(json.str)) }
+        }
+        let run = try #require(file["scheduleRun"])
+        for sample in run["params"].array {
+            let parsed = try ScheduleRunParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in run["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try ScheduleRunParams.parse(try JSONValue.parse(json.str)) }
+        }
+    }
+
+    @Test func scheduleLinesReadAsTheDesktopSaysThem() {
+        let s = InboxSchedule(id: "s", name: "n", prompt: "p", every: 2, unit: .day, nextRunAt: 0,
+                              lastRun: .init(at: 0, outcome: .quiet, note: "Still open"))
+        #expect(s.cadence == "every 2 days")
+        #expect(s.lastRunLine == "Nothing new · Still open")
+        #expect(InboxSchedule(id: "s", name: "n", prompt: "p", every: 1, unit: .week, nextRunAt: 0).cadence == "every week")
+    }
+
+    @Test func mockDesktopRunsAndEditsSchedules() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor(RelayConnectionTests.isInbox)
+        let id = try await mock.updateSchedule(projectId: "p-api", .add(.init(name: "Nightly", prompt: "Run the tests", every: 1, unit: .day)))
+        let taskId = try await mock.runSchedule(projectId: "p-api", scheduleId: id)
+        #expect(!taskId.isEmpty)
+        try await mock.updateSchedule(projectId: "p-api", .pause(scheduleId: id, paused: true))
+        try await mock.updateSchedule(projectId: "p-api", .remove(scheduleId: id))
+        await #expect(throws: (any Error).self) { try await mock.updateSchedule(projectId: "p-api", .remove(scheduleId: id)) }
+        await mock.stop()
+    }
+
     @Test func blockersAreTheDesktopsQuestions() {
         #expect(TaskCloseBlocker.allCases == [.working, .unsaved])
     }
@@ -574,7 +617,7 @@ import Testing
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.taskBusy, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
-            DesktopFeature.tokensUsage, DesktopFeature.chatSearch,
+            DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let listed = try await mock.listBranches(projectId: "p-api")

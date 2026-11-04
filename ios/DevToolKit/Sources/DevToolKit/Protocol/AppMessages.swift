@@ -235,6 +235,8 @@ public enum DesktopFeature {
     public static let taskBusy = "task.busy"
     /// The desktop answers `queue.update` and `queue.run`, and sends `queue` (§8.16, §4.4).
     public static let queue = "queue"
+    /// The desktop answers `schedule.update` and `schedule.run`, and sends `schedules` (§8.25, §4.4).
+    public static let schedules = "schedules"
     /// The desktop answers `chat.bash` (§8.17).
     public static let chatBash = "chat.bash"
     /// The desktop answers `chat.search` (§8.23).
@@ -406,6 +408,35 @@ extension Inbox {
         return InboxQueuedPrompt(id: try o.str("id"), text: try o.str("text"), streamId: try o.str("streamId"))
     }
 
+    private static func parseSchedules(_ values: [JSONValue]) throws(ProtocolError) -> [InboxSchedule] {
+        var out: [InboxSchedule] = []
+        for value in values {
+            if let schedule = try parseSchedule(value) { out.append(schedule) }
+        }
+        return out
+    }
+
+    /// A unit this build doesn't know drops the schedule; an outcome it doesn't know drops the run (§4.4).
+    private static func parseSchedule(_ value: JSONValue) throws(ProtocolError) -> InboxSchedule? {
+        let o = try Fields(value, "schedule")
+        let unitName = try o.str("unit")
+        guard let unit = InboxSchedule.Unit(rawValue: unitName) else { return nil }
+        let every = try o.int("every")
+        if every < 1 { throw ProtocolError("every must be at least 1") }
+        var lastRun: InboxSchedule.Run?
+        if !o.isUnset("lastRun") {
+            let r = try Fields(o["lastRun"], "lastRun")
+            if let outcome = InboxSchedule.Run.Outcome(rawValue: try r.str("outcome")) {
+                lastRun = InboxSchedule.Run(at: try r.int("at"), outcome: outcome, taskId: try optStr(r, "taskId"), note: try optStr(r, "note"))
+            }
+        }
+        return InboxSchedule(
+            id: try o.str("id"), name: try o.str("name"), prompt: try o.str("prompt"),
+            streamId: try optStr(o, "streamId"), every: Int(every), unit: unit,
+            nextRunAt: try o.int("nextRunAt"), paused: o["paused"] == .bool(true), lastRun: lastRun
+        )
+    }
+
     private static func optInt(_ f: Fields, _ key: String) throws(ProtocolError) -> Int64? {
         f.isUnset(key) ? nil : try f.int(key)
     }
@@ -425,6 +456,7 @@ extension Inbox {
             lastStreamId: try optStr(o, "lastStreamId"),
             tasks: try o.array("tasks").map { (v) throws(ProtocolError) in try parseTask(v) },
             queue: o.isUnset("queue") ? [] : try o.array("queue").map { (v) throws(ProtocolError) in try parseQueuedPrompt(v) },
+            schedules: o.isUnset("schedules") ? [] : try parseSchedules(o.array("schedules")),
             missingFolder: o["missingFolder"] == .bool(true)
         )
     }
@@ -448,6 +480,7 @@ extension Inbox {
             landing: o.isUnset("landing") ? nil : try TaskLanding.parse(o["landing"]),
             // Malformed counts drop the counts, not the task.
             diff: o.isUnset("diff") ? nil : try? parseDiff(o["diff"]),
+            scheduled: try optStr(o, "scheduled"),
             tabs: tabs
         )
     }
@@ -512,6 +545,7 @@ extension InboxProject {
         if let lastStreamId { o["lastStreamId"] = .string(lastStreamId) }
         o["tasks"] = .array(tasks.map(\.json))
         if !queue.isEmpty { o["queue"] = .array(queue.map(\.json)) }
+        if !schedules.isEmpty { o["schedules"] = .array(schedules.map(\.json)) }
         if missingFolder { o["missingFolder"] = .bool(true) }
         return .object(o)
     }
@@ -529,6 +563,22 @@ extension InboxStream {
         if let run { o["run"] = run.json }
         if !commands.isEmpty { o["commands"] = .array(commands.map(\.json)) }
         if !runs.isEmpty { o["runs"] = .array(runs.map(\.json)) }
+        return .object(o)
+    }
+}
+
+extension InboxSchedule {
+    var json: JSONValue {
+        var o: JSONObject = ["id": .string(id), "name": .string(name), "prompt": .string(prompt),
+                             "every": .int(Int64(every)), "unit": .string(unit.rawValue), "nextRunAt": .int(nextRunAt)]
+        if let streamId { o["streamId"] = .string(streamId) }
+        if paused { o["paused"] = .bool(true) }
+        if let lastRun {
+            var r: JSONObject = ["at": .int(lastRun.at), "outcome": .string(lastRun.outcome.rawValue)]
+            if let taskId = lastRun.taskId { r["taskId"] = .string(taskId) }
+            if let note = lastRun.note { r["note"] = .string(note) }
+            o["lastRun"] = .object(r)
+        }
         return .object(o)
     }
 }
@@ -554,6 +604,7 @@ extension InboxTask {
         if let branch { o["branch"] = .string(branch) }
         if let landing { o["landing"] = landing.json }
         if let diff { o["diff"] = .object(["added": .int(Int64(diff.added)), "deleted": .int(Int64(diff.deleted))]) }
+        if let scheduled { o["scheduled"] = .string(scheduled) }
         o["tabs"] = .array(tabs.map(\.json))
         return .object(o)
     }

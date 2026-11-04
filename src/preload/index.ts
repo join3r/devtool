@@ -53,6 +53,7 @@ import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shar
 import type { AgentClisReport } from '../shared/agent-clis'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { PromptQueueRunResult } from '../shared/prompt-queue'
+import type { ScheduleRunResult, ScheduleUpdateRequest } from '../shared/schedules'
 import type { TokenUsageReport } from '../shared/token-usage'
 import type { PlanAccount } from '../shared/plan-limits'
 import type { TaskUsageSnapshot } from '../shared/task-usage'
@@ -585,6 +586,12 @@ const api = {
   /** Project Home's queue: start the queued prompt `itemId` as a new Claude chat task (main's PromptQueueRunner). */
   promptQueueRun: (projectId: string, itemId: string): Promise<PromptQueueRunResult> =>
     ipcRenderer.invoke('prompt-queue-run', projectId, itemId),
+  /** Schedules: add, edit, pause or delete one (main checks and saves it). */
+  scheduleUpdate: (projectId: string, req: ScheduleUpdateRequest): Promise<{ ok: true; scheduleId: string } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('schedule-update', projectId, req),
+  /** Schedules: Run now, a run outside the schedule (main's ScheduleRunner). */
+  scheduleRun: (projectId: string, scheduleId: string): Promise<ScheduleRunResult> =>
+    ipcRenderer.invoke('schedule-run', projectId, scheduleId),
 
   taskLand: (projectId: string, taskId: string, options?: { keepWorktree?: boolean }): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-land', projectId, taskId, options),

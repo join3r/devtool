@@ -628,6 +628,8 @@ var STREAM_COMMANDS_SET_OP = "stream.commands.set";
 var STREAM_COMMANDS_SUGGEST_OP = "stream.commands.suggest";
 var QUEUE_UPDATE_OP = "queue.update";
 var QUEUE_RUN_OP = "queue.run";
+var SCHEDULE_UPDATE_OP = "schedule.update";
+var SCHEDULE_RUN_OP = "schedule.run";
 var BRANCHES_LIST_OP = "branches.list";
 var TOKENS_USAGE_OP = "tokens.usage";
 var CHAT_SETTINGS_OP = "chat.settings";
@@ -657,6 +659,8 @@ var AppOp = {
   PinSet: PIN_SET_OP,
   QueueUpdate: QUEUE_UPDATE_OP,
   QueueRun: QUEUE_RUN_OP,
+  ScheduleUpdate: SCHEDULE_UPDATE_OP,
+  ScheduleRun: SCHEDULE_RUN_OP,
   TaskTriage: TASK_TRIAGE_OP,
   TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,

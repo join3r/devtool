@@ -295,6 +295,21 @@ extension DesktopConnection {
         return try decode(result, QueueRunResult.parse).taskId
     }
 
+    /// `schedule.update` (§8.25): one edit to the project's schedules. Returns
+    /// the schedule's id; the schedules come back in the next inbox.
+    @discardableResult
+    public func updateSchedule(projectId: String, _ action: ScheduleUpdateParams.Action) async throws -> String {
+        let result = try await request(TaskOp.updateSchedule, params: ScheduleUpdateParams(projectId: projectId, action: action).json)
+        return try decode(result) { (v) throws(ProtocolError) in try Fields(v, "result").str("scheduleId") }
+    }
+
+    /// `schedule.run` (§8.25): start a run of the schedule now. Returns the task's ID.
+    @discardableResult
+    public func runSchedule(projectId: String, scheduleId: String) async throws -> String {
+        let result = try await request(TaskOp.runSchedule, params: ScheduleRunParams(projectId: projectId, scheduleId: scheduleId).json, timeout: .seconds(60))
+        return try decode(result, QueueRunResult.parse).taskId
+    }
+
     /// `stream.new` (§8.12): a new stream at the end of the project's list,
     /// on a new worktree (`branch` nil: made from the name; `baseBranch` nil:
     /// the desktop's default base) or in the project folder. Returns its ID;

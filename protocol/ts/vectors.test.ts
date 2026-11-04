@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -211,6 +211,14 @@ describe('M2 vectors', () => {
     for (const s of file.queueRun.results) expect(parseQueueRunResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.queueRun.invalid.params) expect(() => parseQueueRunParams(JSON.parse(s)), s).toThrow()
     for (const s of file.queueRun.invalid.results) expect(() => parseQueueRunResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.scheduleUpdate.params) expect(parseScheduleUpdateParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.scheduleUpdate.results) expect(parseScheduleUpdateResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.scheduleUpdate.invalid.params) expect(() => parseScheduleUpdateParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.scheduleUpdate.invalid.results) expect(() => parseScheduleUpdateResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.scheduleRun.params) expect(parseScheduleRunParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.scheduleRun.results) expect(parseScheduleRunResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.scheduleRun.invalid.params) expect(() => parseScheduleRunParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.scheduleRun.invalid.results) expect(() => parseScheduleRunResult(JSON.parse(s)), s).toThrow()
     for (const s of file.settings.params) expect(parseChatSettingsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.settings.invalid.params) expect(() => parseChatSettingsParams(JSON.parse(s)), s).toThrow()
     for (const s of file.image.params) expect(parseChatImageParams(JSON.parse(s.json)), s.json).toEqual(s.expected)

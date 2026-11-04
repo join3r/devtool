@@ -287,6 +287,39 @@ export interface QueueRunParams { projectId: string; itemId: string }
 export interface QueueRunResult { taskId: string }
 
 /**
+ * `schedule.update` and `schedule.run` (SPEC.md §8.25): a project's schedules,
+ * prompts the desktop runs again every hour, day or week as a new task.
+ */
+export const SCHEDULE_UPDATE_OP = 'schedule.update'
+export const SCHEDULE_RUN_OP = 'schedule.run'
+/** The handshake feature (§8.1) a desktop lists when it answers both and sends `schedules` (§4.4). */
+export const SCHEDULES_FEATURE = 'schedules'
+export const SCHEDULE_ACTIONS = ['add', 'edit', 'pause', 'remove'] as const
+export type ScheduleAction = (typeof SCHEDULE_ACTIONS)[number]
+export const SCHEDULE_UPDATE_UNITS = ['hour', 'day', 'week'] as const
+
+/**
+ * `add` needs name, prompt, every and unit (streamId? and startAt? optional);
+ * `edit` scheduleId and any of name, prompt, every, unit, streamId (null: `main`),
+ * startAt; `pause` scheduleId and paused; `remove` scheduleId.
+ */
+export interface ScheduleUpdateParams {
+  projectId: string
+  action: ScheduleAction
+  scheduleId?: string
+  name?: string
+  prompt?: string
+  every?: number
+  unit?: (typeof SCHEDULE_UPDATE_UNITS)[number]
+  streamId?: string | null
+  startAt?: number
+  paused?: boolean
+}
+export interface ScheduleUpdateResult { scheduleId: string }
+export interface ScheduleRunParams { projectId: string; scheduleId: string }
+export interface ScheduleRunResult { taskId: string }
+
+/**
  * `branches.list` (SPEC.md §8.13): a project's local branches, for the New stream
  * sheet's From picker, and the one the desktop's dialog picks first.
  */
@@ -523,6 +556,9 @@ export const ChatLimits = {
   permissionRule: 2000,
   /** A queued prompt's text (§8.16), as `chat.send`'s. */
   queueText: 32000,
+  /** A schedule's name and prompt (§8.25). */
+  scheduleName: 120,
+  schedulePrompt: 32000,
   /** `stream.logs` text (§8.19): the end of the run's output. */
   runLogs: 200_000,
   /** `stream.commands.set` (§8.21): commands per list, and each one's name and command line. */
@@ -1766,6 +1802,83 @@ export function parseQueueRunParams(params: unknown): QueueRunParams {
 
 /** `queue.run` result (the phone's side). */
 export function parseQueueRunResult(value: unknown): QueueRunResult {
+  return { taskId: str(obj(value, 'result'), 'taskId') }
+}
+
+function scheduleText(o: Obj, key: string, limit: number): string {
+  const text = str(o, key).trim()
+  if (!text) fail(`${key} is empty`)
+  if (text.length > limit) fail(`${key} over ${limit} characters`)
+  return text
+}
+
+/**
+ * `schedule.update` params (the desktop's side). Throws ProtocolError — `bad-request` —
+ * on a missing `projectId`, an unknown `action`, or a field the action needs missing
+ * or malformed. Fields the action doesn't use are dropped.
+ */
+export function parseScheduleUpdateParams(params: unknown): ScheduleUpdateParams {
+  const o = obj(params, 'params')
+  const projectId = str(o, 'projectId')
+  const action = oneOf(o, 'action', SCHEDULE_ACTIONS)
+  const out: ScheduleUpdateParams = { projectId, action }
+  const every = (): void => {
+    const n = int(o, 'every')
+    if (n < 1) fail('every must be at least 1')
+    out.every = n
+  }
+  const startAt = (): void => {
+    const at = optInt(o, 'startAt')
+    if (at !== undefined) {
+      if (at <= 0) fail('startAt must be a time')
+      out.startAt = at
+    }
+  }
+  switch (action) {
+    case 'add': {
+      out.name = scheduleText(o, 'name', ChatLimits.scheduleName)
+      out.prompt = scheduleText(o, 'prompt', ChatLimits.schedulePrompt)
+      every()
+      out.unit = oneOf(o, 'unit', SCHEDULE_UPDATE_UNITS)
+      const streamId = optStr(o, 'streamId')
+      if (streamId !== undefined) out.streamId = streamId
+      startAt()
+      return out
+    }
+    case 'edit': {
+      out.scheduleId = str(o, 'scheduleId')
+      if (o.name !== undefined && o.name !== null) out.name = scheduleText(o, 'name', ChatLimits.scheduleName)
+      if (o.prompt !== undefined && o.prompt !== null) out.prompt = scheduleText(o, 'prompt', ChatLimits.schedulePrompt)
+      if (o.every !== undefined && o.every !== null) every()
+      if (o.unit !== undefined && o.unit !== null) out.unit = oneOf(o, 'unit', SCHEDULE_UPDATE_UNITS)
+      if (o.streamId === null) out.streamId = null
+      else if (o.streamId !== undefined) out.streamId = str(o, 'streamId')
+      startAt()
+      return out
+    }
+    case 'pause':
+      out.scheduleId = str(o, 'scheduleId')
+      out.paused = bool(o, 'paused')
+      return out
+    case 'remove':
+      out.scheduleId = str(o, 'scheduleId')
+      return out
+  }
+}
+
+/** `schedule.update` result (the phone's side). */
+export function parseScheduleUpdateResult(value: unknown): ScheduleUpdateResult {
+  return { scheduleId: str(obj(value, 'result'), 'scheduleId') }
+}
+
+/** `schedule.run` params (the desktop's side). Throws ProtocolError on a missing `projectId` or `scheduleId`. */
+export function parseScheduleRunParams(params: unknown): ScheduleRunParams {
+  const o = obj(params, 'params')
+  return { projectId: str(o, 'projectId'), scheduleId: str(o, 'scheduleId') }
+}
+
+/** `schedule.run` result (the phone's side). */
+export function parseScheduleRunResult(value: unknown): ScheduleRunResult {
   return { taskId: str(obj(value, 'result'), 'taskId') }
 }
 

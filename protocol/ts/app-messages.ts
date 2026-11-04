@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_SEARCH_OP, CHAT_QUEUE_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, CHAT_TASK_STOP_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_COMMANDS_GET_OP, STREAM_COMMANDS_SET_OP, STREAM_COMMANDS_SUGGEST_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, TOKENS_USAGE_OP, parseChatViewEvent, parseLimitWindow, parseTaskLanding } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_SEARCH_OP, CHAT_QUEUE_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, CHAT_TASK_STOP_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_COMMANDS_GET_OP, STREAM_COMMANDS_SET_OP, STREAM_COMMANDS_SUGGEST_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, TOKENS_USAGE_OP, parseChatViewEvent, parseLimitWindow, parseTaskLanding, SCHEDULE_RUN_OP, SCHEDULE_UPDATE_OP } from './chat-messages.ts'
 import type { ChatViewEvent, ChatViewLimitWindow, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -106,6 +106,8 @@ export interface InboxTask {
   landing?: TaskLanding
   /** Lines added and removed in the task's directory (§4.4); absent when nothing changed or unknown. */
   diff?: InboxTaskDiff
+  /** A run of one of the project's schedules (§4.4 `schedules`): that schedule's name. */
+  scheduled?: string
   tabs: InboxTab[]
 }
 
@@ -171,6 +173,33 @@ export interface InboxQueuedPrompt {
   streamId: string
 }
 
+/** The latest run of a schedule (§4.4 `schedules`). */
+export interface InboxScheduleRun {
+  /** Unix ms. */
+  at: number
+  outcome: 'running' | 'reported' | 'quiet' | 'failed' | 'skipped'
+  taskId?: string
+  note?: string
+}
+
+/** A prompt the desktop runs again every `every` `unit`s as a new task (§4.4 `schedules`, §8.25). */
+export interface InboxSchedule {
+  id: string
+  name: string
+  prompt: string
+  /** Absent: `main`. */
+  streamId?: string
+  every: number
+  unit: 'hour' | 'day' | 'week'
+  /** Unix ms of the next run (meaningless while `paused`). */
+  nextRunAt: number
+  paused?: true
+  lastRun?: InboxScheduleRun
+}
+
+export const SCHEDULE_UNITS = ['hour', 'day', 'week'] as const
+export const SCHEDULE_RUN_OUTCOMES = ['running', 'reported', 'quiet', 'failed', 'skipped'] as const
+
 export interface InboxProject {
   id: string
   name: string
@@ -184,6 +213,8 @@ export interface InboxProject {
   tasks: InboxTask[]
   /** Project Home's queued prompts, first to run first; absent when the queue is empty. */
   queue?: InboxQueuedPrompt[]
+  /** The project's schedules (§8.25), in the order they were made; absent when there are none. */
+  schedules?: InboxSchedule[]
   /** The project's folder is gone from the desktop (moved, renamed or deleted); New task there fails (§4.4). */
   missingFolder?: true
 }
@@ -276,6 +307,8 @@ export const AppOp = {
   PinSet: PIN_SET_OP,
   QueueUpdate: QUEUE_UPDATE_OP,
   QueueRun: QUEUE_RUN_OP,
+  ScheduleUpdate: SCHEDULE_UPDATE_OP,
+  ScheduleRun: SCHEDULE_RUN_OP,
   TaskTriage: TASK_TRIAGE_OP,
   TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,
@@ -483,6 +516,8 @@ function parseTask(value: unknown): InboxTask {
   const branch = optStr(o, 'branch')
   if (branch !== undefined) task.branch = branch
   if (o.landing !== undefined && o.landing !== null) task.landing = parseTaskLanding(o.landing)
+  const scheduled = optStr(o, 'scheduled')
+  if (scheduled !== undefined) task.scheduled = scheduled
   return task
 }
 
@@ -546,6 +581,36 @@ function parseQueuedPrompt(value: unknown): InboxQueuedPrompt {
   return { id: str(o, 'id'), text: str(o, 'text'), streamId: str(o, 'streamId') }
 }
 
+function parseSchedule(value: unknown): InboxSchedule | null {
+  const o = obj(value, 'schedule')
+  // A unit from a newer desktop: leave that schedule out rather than the inbox.
+  if (typeof o.unit === 'string' && !(SCHEDULE_UNITS as readonly string[]).includes(o.unit)) return null
+  const schedule: InboxSchedule = {
+    id: str(o, 'id'),
+    name: str(o, 'name'),
+    prompt: str(o, 'prompt'),
+    every: int(o, 'every'),
+    unit: oneOf(o, 'unit', SCHEDULE_UNITS),
+    nextRunAt: int(o, 'nextRunAt')
+  }
+  if (schedule.every < 1) fail('every must be at least 1')
+  const streamId = optStr(o, 'streamId')
+  if (streamId !== undefined) schedule.streamId = streamId
+  if (o.paused === true) schedule.paused = true
+  if (o.lastRun !== undefined && o.lastRun !== null) {
+    const r = obj(o.lastRun, 'lastRun')
+    if (typeof r.outcome !== 'string' || (SCHEDULE_RUN_OUTCOMES as readonly string[]).includes(r.outcome)) {
+      const run: InboxScheduleRun = { at: int(r, 'at'), outcome: oneOf(r, 'outcome', SCHEDULE_RUN_OUTCOMES) }
+      const taskId = optStr(r, 'taskId')
+      if (taskId !== undefined) run.taskId = taskId
+      const note = optStr(r, 'note')
+      if (note !== undefined) run.note = note
+      schedule.lastRun = run
+    }
+  }
+  return schedule
+}
+
 function parseProject(value: unknown): InboxProject {
   const o = obj(value, 'project')
   const project: InboxProject = {
@@ -562,6 +627,10 @@ function parseProject(value: unknown): InboxProject {
   if (o.queue !== undefined && o.queue !== null) {
     const queue = arr(o, 'queue').map(parseQueuedPrompt)
     if (queue.length > 0) project.queue = queue
+  }
+  if (o.schedules !== undefined && o.schedules !== null) {
+    const schedules = arr(o, 'schedules').map(parseSchedule).filter((s): s is InboxSchedule => s !== null)
+    if (schedules.length > 0) project.schedules = schedules
   }
   if (o.missingFolder === true) project.missingFolder = true
   return project

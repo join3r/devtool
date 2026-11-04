@@ -142,7 +142,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; streamCommands?: MobileServiceDeps['streamCommands']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; tokensUsage?: MobileServiceDeps['tokensUsage']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; streamCommands?: MobileServiceDeps['streamCommands']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; tokensUsage?: MobileServiceDeps['tokensUsage']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; updateSchedule?: MobileServiceDeps['updateSchedule']; runSchedule?: MobileServiceDeps['runSchedule']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -205,6 +205,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject
     triageTask: options.triageTask,
     updateQueue: options.updateQueue,
     runQueued: options.runQueued,
+    updateSchedule: options.updateSchedule,
+    runSchedule: options.runSchedule,
     chat: options.chat
   }
   const service = new MobileService(deps)
@@ -223,7 +225,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject
   }
 }
 
-function pairedSetup(options: { newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; streamCommands?: MobileServiceDeps['streamCommands']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; tokensUsage?: MobileServiceDeps['tokensUsage']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; streamCommands?: MobileServiceDeps['streamCommands']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; tokensUsage?: MobileServiceDeps['tokensUsage']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; updateSchedule?: MobileServiceDeps['updateSchedule']; runSchedule?: MobileServiceDeps['runSchedule']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -1145,6 +1147,53 @@ describe('MobileService queue.update and queue.run (SPEC.md §8.16)', () => {
     env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'queue.update', params: { projectId: 'p1', action: 'remove', itemId: 'q1' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
     env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'queue.run', params: { projectId: 'p1', itemId: 'q1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService schedule.update and schedule.run (SPEC.md §8.25)', () => {
+  const tick = () => new Promise((resolve) => setImmediate(resolve))
+
+  it('passes the parsed params through and answers with the result', async () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      updateSchedule: (params) => {
+        calls.push(params)
+        if (params.projectId !== 'p1') return { ok: false, code: 'not-found', message: 'No such project' }
+        return { ok: true, scheduleId: params.scheduleId ?? 'sc9' }
+      },
+      runSchedule: async (params) => {
+        calls.push(params)
+        return params.scheduleId === 'sc1' ? { ok: true, taskId: 't9' } : { ok: false, code: 'internal', message: 'Claude is turned off in Settings.' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'schedule.update', params: { projectId: 'p1', action: 'add', name: ' Check ', prompt: 'Go', every: 1, unit: 'week' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { scheduleId: 'sc9' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'schedule.update', params: { projectId: 'nope', action: 'remove', scheduleId: 'sc1' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such project' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'schedule.update', params: { projectId: 'p1', action: 'add', name: 'x', prompt: 'y', every: 1, unit: 'month' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 4, op: 'schedule.run', params: { projectId: 'p1', scheduleId: 'sc1' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 4, ok: true, result: { taskId: 't9' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 5, op: 'schedule.run', params: { projectId: 'p1', scheduleId: 'sc2' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 5, ok: false, error: { code: 'internal', message: 'Claude is turned off in Settings.' } })
+    expect(calls).toEqual([
+      { projectId: 'p1', action: 'add', name: 'Check', prompt: 'Go', every: 1, unit: 'week' },
+      { projectId: 'nope', action: 'remove', scheduleId: 'sc1' },
+      { projectId: 'p1', scheduleId: 'sc1' },
+      { projectId: 'p1', scheduleId: 'sc2' }
+    ])
+  })
+
+  it('is unsupported without the dependencies', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'schedule.update', params: { projectId: 'p1', action: 'remove', scheduleId: 'sc1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'schedule.run', params: { projectId: 'p1', scheduleId: 'sc1' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
   })
 })

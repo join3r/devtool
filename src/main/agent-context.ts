@@ -36,7 +36,7 @@ export interface SharedLink {
 export interface AgentContextInput {
   project: Pick<Project, 'name' | 'directory'>
   stream: Pick<Stream, 'name' | 'isMain' | 'workspace'>
-  task: Pick<Task, 'name' | 'workspace'>
+  task: Pick<Task, 'name' | 'workspace' | 'scheduledFrom'>
   /** The folder the agent runs in. */
   dir: string
   hook?: AgentContextHook
@@ -118,6 +118,7 @@ export function buildAgentContext(input: AgentContextInput): string {
   lines.push(...sharedLines(input.links ?? []))
   if (input.mcp) lines.push(...mcpLines(!!own))
   if (input.autopilot) lines.push(...autopilotLines(input.autopilot.review))
+  if (task.scheduledFrom) lines.push(...scheduledRunLines(task.scheduledFrom.name, !!input.mcp))
   return lines.join('\n')
 }
 
@@ -126,6 +127,8 @@ function mcpLines(ownWorktree: boolean): string[] {
   return [
     '- DevTool\'s MCP tools (server `devtool`: start_task, list_tasks, get_task, send_to_task, wait_for_tasks) start and follow other DevTool tasks in this project, each one its own agent that the user also sees in DevTool. ' +
       'Use them when the user asks you to hand work off or to work on several things in parallel; a new agent knows nothing of this conversation, so give it a complete brief.',
+    '- schedule_task, list_schedules and cancel_schedule (same server) manage the project\'s schedules: a prompt DevTool runs again every hour/day/week as a new task. ' +
+      'Use them when the user asks for something to be done or checked regularly ("check weekly whether X is fixed"); write the prompt as a complete brief that says what is worth reporting.',
     '- A task you start runs in your permission mode or a stricter one. In auto mode it works unattended (unless you pass `autopilot: false`): when it finishes DevTool lands its work into its stream as one commit and closes it. ' +
       (ownWorktree
         ? 'Its commits are not in your worktree until you update this task from its stream (the `/hook/update` call above).'
@@ -148,6 +151,21 @@ function autopilotLines(review: boolean): string[] {
     '- Anything that ends your turn waiting on the user stops Autopilot and hands the task back: a question, an offer such as "Want me to also…?", a permission request. ' +
       'So make reasonable calls yourself, finish the whole task in this turn, check it works, and end with a short summary of what you did and anything left open, not a question. ' +
       'If you really cannot go on without the user, say what you need and stop.',
+    '- Once the user writes to you, they are back: the usual rules apply from then on.'
+  ]
+}
+
+/**
+ * A schedule's run (`main/schedule-runner.ts`): unattended, and most runs find
+ * nothing new. The note is fixed for the session; once the user writes, they're back.
+ */
+function scheduledRunLines(name: string, mcp: boolean): string[] {
+  return [
+    `- This task is a scheduled run of "${name}": DevTool started it by itself and nobody is watching. Do the job in the prompt in this one turn, without asking questions.`,
+    mcp
+      ? '- If you find nothing new that the user needs to see, call the `devtool` MCP tool `nothing_new` with a one-line note of what you checked, then end your turn with that line: DevTool closes this task quietly. ' +
+        'Otherwise end with a short report of what is new; the task stays in the user\'s Inbox.'
+      : '- End with a short report; if nothing changed, say so in one line.',
     '- Once the user writes to you, they are back: the usual rules apply from then on.'
   ]
 }

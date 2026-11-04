@@ -20,7 +20,7 @@
         "t": { "const": "req" },
         "id": { "$ref": "#/$defs/id" },
         "op": { "type": "string", "description": "inbox.get, a chat.* op (SPEC.md §6.3), or a §7.4/§8 op such as task.new or stream.new" },
-        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams, stream.run #/$defs/streamRunParams, stream.logs #/$defs/streamLogsParams, stream.commands.get and stream.commands.suggest #/$defs/streamCommandsParams, stream.commands.set #/$defs/streamCommandsSetParams, tokens.usage #/$defs/tokensUsageParams." }
+        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams, schedule.update #/$defs/scheduleUpdateParams, schedule.run #/$defs/scheduleRunParams, stream.run #/$defs/streamRunParams, stream.logs #/$defs/streamLogsParams, stream.commands.get and stream.commands.suggest #/$defs/streamCommandsParams, stream.commands.set #/$defs/streamCommandsSetParams, tokens.usage #/$defs/tokensUsageParams." }
       }
     },
     "resOk": {
@@ -30,7 +30,7 @@
         "t": { "const": "res" },
         "id": { "$ref": "#/$defs/id" },
         "ok": { "const": true },
-        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run, #/$defs/streamRunResult and #/$defs/streamLogsResult for stream.run and stream.logs, #/$defs/streamCommandsResult, #/$defs/streamCommandsSetResult and #/$defs/streamCommandsSuggestResult for stream.commands.get, .set and .suggest, #/$defs/tokensUsageResult for tokens.usage." }
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run, #/$defs/scheduleUpdateResult and #/$defs/queueRunResult for schedule.update and schedule.run, #/$defs/streamRunResult and #/$defs/streamLogsResult for stream.run and stream.logs, #/$defs/streamCommandsResult, #/$defs/streamCommandsSetResult and #/$defs/streamCommandsSuggestResult for stream.commands.get, .set and .suggest, #/$defs/tokensUsageResult for tokens.usage." }
       }
     },
     "resErr": {
@@ -279,6 +279,35 @@
       "type": "object",
       "required": ["taskId"],
       "properties": { "taskId": { "type": "string" } }
+    },
+    "scheduleUpdateParams": {
+      "description": "schedule.update params (SPEC.md §8.23). add takes name, prompt, every, unit, streamId? and startAt?; edit scheduleId and any of those (streamId null: main); pause scheduleId and paused; remove scheduleId.",
+      "type": "object",
+      "required": ["projectId", "action"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "action": { "enum": ["add", "edit", "pause", "remove"] },
+        "scheduleId": { "type": "string" },
+        "name": { "type": "string", "pattern": "\\S", "maxLength": 120 },
+        "prompt": { "type": "string", "pattern": "\\S", "maxLength": 32000 },
+        "every": { "type": "integer", "minimum": 1 },
+        "unit": { "enum": ["hour", "day", "week"] },
+        "streamId": { "type": ["string", "null"] },
+        "startAt": { "type": "integer", "minimum": 1, "description": "The first run, Unix ms." },
+        "paused": { "type": "boolean" }
+      }
+    },
+    "scheduleUpdateResult": {
+      "description": "schedule.update result (SPEC.md §8.23): the schedule's id.",
+      "type": "object",
+      "required": ["scheduleId"],
+      "properties": { "scheduleId": { "type": "string" } }
+    },
+    "scheduleRunParams": {
+      "description": "schedule.run params (SPEC.md §8.23).",
+      "type": "object",
+      "required": ["projectId", "scheduleId"],
+      "properties": { "projectId": { "type": "string" }, "scheduleId": { "type": "string" } }
     },
     "taskCloseResult": {
       "description": "task.close result (SPEC.md §8.7): archived, a blocker to confirm, (version 3) a task with a worktree of its own that didn't land, or (task.close.choice, with ask) the desktop's close question.",

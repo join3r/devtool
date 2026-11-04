@@ -608,6 +608,66 @@ public struct StreamNewResult: Sendable, Equatable {
     }
 }
 
+/// `schedule.update` (§8.25) params: one edit to a project's schedules.
+public struct ScheduleUpdateParams: Sendable, Equatable {
+    /// The fields an `add` or `edit` carries; nil leaves a field as it is (edit).
+    public struct Fields: Sendable, Equatable {
+        public var name: String?
+        public var prompt: String?
+        public var every: Int?
+        public var unit: InboxSchedule.Unit?
+        /// `.some(nil)` on edit puts the runs back in `main`.
+        public var streamId: String??
+        /// Unix milliseconds of the first run.
+        public var startAt: Int64?
+
+        public init(name: String? = nil, prompt: String? = nil, every: Int? = nil, unit: InboxSchedule.Unit? = nil,
+                    streamId: String?? = nil, startAt: Int64? = nil) {
+            self.name = name
+            self.prompt = prompt
+            self.every = every
+            self.unit = unit
+            self.streamId = streamId
+            self.startAt = startAt
+        }
+    }
+
+    public enum Action: Sendable, Equatable {
+        case add(Fields)
+        case edit(scheduleId: String, Fields)
+        case pause(scheduleId: String, paused: Bool)
+        case remove(scheduleId: String)
+
+        public var name: String {
+            switch self {
+            case .add: "add"
+            case .edit: "edit"
+            case .pause: "pause"
+            case .remove: "remove"
+            }
+        }
+    }
+
+    public var projectId: String
+    public var action: Action
+
+    public init(projectId: String, action: Action) {
+        self.projectId = projectId
+        self.action = action
+    }
+}
+
+/// `schedule.run` (§8.25) params: start a run now.
+public struct ScheduleRunParams: Sendable, Equatable {
+    public var projectId: String
+    public var scheduleId: String
+
+    public init(projectId: String, scheduleId: String) {
+        self.projectId = projectId
+        self.scheduleId = scheduleId
+    }
+}
+
 /// `queue.update` (§8.16) params: one edit to Project Home's queue.
 public struct QueueUpdateParams: Sendable, Equatable {
     public enum Action: Sendable, Equatable {
@@ -802,6 +862,10 @@ public enum TaskOp {
     public static let updateQueue = "queue.update"
     /// `queue.run` (§8.16): start a queued prompt now.
     public static let runQueued = "queue.run"
+    /// `schedule.update` (§8.25).
+    public static let updateSchedule = "schedule.update"
+    /// `schedule.run` (§8.25).
+    public static let runSchedule = "schedule.run"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
     /// What `chat.settings` accepts: Claude's modes and a Codex chat's presets.
@@ -1430,6 +1494,93 @@ extension QueueUpdateParams {
         }
         return .object(fields)
     }
+}
+
+extension ScheduleUpdateParams {
+    /// The desktop's side (the mock's): mirrors protocol/ts `parseScheduleUpdateParams`.
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> ScheduleUpdateParams {
+        let o = try DevToolKit.Fields(value, "params")
+        let projectId = try o.str("projectId")
+        let name = try o.str("action")
+        func text(_ key: String, _ limit: Int) throws(ProtocolError) -> String {
+            let text = try o.str(key).trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { throw ProtocolError("\(key) is empty") }
+            if text.utf16.count > limit { throw ProtocolError("\(key) over \(limit) characters") }
+            return text
+        }
+        func every() throws(ProtocolError) -> Int {
+            let n = try o.int("every")
+            if n < 1 { throw ProtocolError("every must be at least 1") }
+            return Int(n)
+        }
+        func unit() throws(ProtocolError) -> InboxSchedule.Unit {
+            let raw = try o.str("unit")
+            guard let unit = InboxSchedule.Unit(rawValue: raw) else { throw ProtocolError("unknown unit \(raw)") }
+            return unit
+        }
+        func startAt() throws(ProtocolError) -> Int64? {
+            if o.isUnset("startAt") { return nil }
+            let at = try o.int("startAt")
+            if at <= 0 { throw ProtocolError("startAt must be a time") }
+            return at
+        }
+        let action: Action
+        switch name {
+        case "add":
+            var f = Fields(name: try text("name", InboxSchedule.nameLimit), prompt: try text("prompt", InboxSchedule.promptLimit),
+                           every: try every(), unit: try unit())
+            if !o.isUnset("streamId") { f.streamId = .some(try o.str("streamId")) }
+            f.startAt = try startAt()
+            action = .add(f)
+        case "edit":
+            let id = try o.str("scheduleId")
+            var f = Fields()
+            if !o.isUnset("name") { f.name = try text("name", InboxSchedule.nameLimit) }
+            if !o.isUnset("prompt") { f.prompt = try text("prompt", InboxSchedule.promptLimit) }
+            if !o.isUnset("every") { f.every = try every() }
+            if !o.isUnset("unit") { f.unit = try unit() }
+            if o["streamId"] == .null { f.streamId = .some(nil) } else if !o.isUnset("streamId") { f.streamId = .some(try o.str("streamId")) }
+            f.startAt = try startAt()
+            action = .edit(scheduleId: id, f)
+        case "pause": action = .pause(scheduleId: try o.str("scheduleId"), paused: try o.bool("paused"))
+        case "remove": action = .remove(scheduleId: try o.str("scheduleId"))
+        default: throw ProtocolError("unknown action \(name)")
+        }
+        return ScheduleUpdateParams(projectId: projectId, action: action)
+    }
+
+    public var json: JSONValue {
+        var o: JSONObject = ["projectId": .string(projectId), "action": .string(action.name)]
+        func put(_ f: Fields) {
+            if let name = f.name { o["name"] = .string(name) }
+            if let prompt = f.prompt { o["prompt"] = .string(prompt) }
+            if let every = f.every { o["every"] = .int(Int64(every)) }
+            if let unit = f.unit { o["unit"] = .string(unit.rawValue) }
+            if let streamId = f.streamId { o["streamId"] = streamId.map { .string($0) } ?? .null }
+            if let startAt = f.startAt { o["startAt"] = .int(startAt) }
+        }
+        switch action {
+        case .add(let f): put(f)
+        case .edit(let id, let f):
+            o["scheduleId"] = .string(id)
+            put(f)
+        case .pause(let id, let paused):
+            o["scheduleId"] = .string(id)
+            o["paused"] = .bool(paused)
+        case .remove(let id):
+            o["scheduleId"] = .string(id)
+        }
+        return .object(o)
+    }
+}
+
+extension ScheduleRunParams {
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> ScheduleRunParams {
+        let o = try Fields(value, "params")
+        return ScheduleRunParams(projectId: try o.str("projectId"), scheduleId: try o.str("scheduleId"))
+    }
+
+    public var json: JSONValue { .object(["projectId": .string(projectId), "scheduleId": .string(scheduleId)]) }
 }
 
 extension QueueUpdateResult {

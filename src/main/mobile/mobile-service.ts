@@ -56,6 +56,10 @@ import {
   parseQueueRunParams,
   type QueueUpdateParams,
   type QueueRunParams,
+  parseScheduleUpdateParams,
+  parseScheduleRunParams,
+  type ScheduleUpdateParams,
+  type ScheduleRunParams,
   type TaskNewParams,
   type TaskCloseParams,
   type TaskCloseResult,
@@ -285,6 +289,10 @@ export interface MobileServiceDeps {
   updateQueue?(params: QueueUpdateParams): { ok: true; itemId?: string } | { ok: false; code: string; message: string }
   /** `queue.run` (SPEC.md §8.16): starts a queued prompt as a new task. */
   runQueued?(params: QueueRunParams): Promise<{ ok: true; taskId: string } | { ok: false; code: string; message: string }>
+  /** `schedule.update` (SPEC.md §8.25). Without it (or `runSchedule`) both schedule ops answer `unsupported`. */
+  updateSchedule?(params: ScheduleUpdateParams): { ok: true; scheduleId: string } | { ok: false; code: string; message: string }
+  /** `schedule.run` (SPEC.md §8.25): starts a run of the schedule now. */
+  runSchedule?(params: ScheduleRunParams): Promise<{ ok: true; taskId: string } | { ok: false; code: string; message: string }>
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -1072,6 +1080,23 @@ export class MobileService {
       this.answerLater(session, id, message.op, () => parseQueueRunParams(message.params), async (params) => {
         const outcome = await runQueued(params)
         return outcome.ok ? { ok: true, result: { taskId: outcome.taskId }, log: `project=${params.projectId} task=${outcome.taskId}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.ScheduleUpdate && this.deps.updateSchedule) {
+      const updateSchedule = this.deps.updateSchedule
+      this.answerLater(session, id, message.op, () => parseScheduleUpdateParams(message.params), async (params) => {
+        const outcome = updateSchedule(params)
+        if (!outcome.ok) return outcome
+        return { ok: true, result: { scheduleId: outcome.scheduleId }, log: `project=${params.projectId} action=${params.action} schedule=${outcome.scheduleId}` }
+      })
+      return
+    }
+    if (message.op === AppOp.ScheduleRun && this.deps.runSchedule) {
+      const runSchedule = this.deps.runSchedule
+      this.answerLater(session, id, message.op, () => parseScheduleRunParams(message.params), async (params) => {
+        const outcome = await runSchedule(params)
+        return outcome.ok ? { ok: true, result: { taskId: outcome.taskId }, log: `project=${params.projectId} schedule=${params.scheduleId} task=${outcome.taskId}` } : outcome
       })
       return
     }

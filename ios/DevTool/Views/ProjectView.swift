@@ -14,6 +14,7 @@ struct ProjectView: View {
     @State private var newStream: NewStreamTarget?
     @State private var closing: CloseTaskRequest?
     @State private var queuePrompt: QueuePromptTarget?
+    @State private var scheduleTarget: ScheduleTarget?
     /// A stream just made from the New stream sheet: scrolled to once the inbox has it.
     @State private var createdStream: String?
     /// The stream whose app run logs are pushed (§8.19).
@@ -67,6 +68,9 @@ struct ProjectView: View {
             }
             .sheet(item: $queuePrompt) { target in
                 QueueSheet(target: target)
+            }
+            .sheet(item: $scheduleTarget) { target in
+                ScheduleSheet(target: target)
             }
             .sheet(item: $commands) { target in
                 CommandsSheet(target: target)
@@ -147,6 +151,7 @@ struct ProjectView: View {
                 }
             }
             queueSections(project)
+            scheduleSection(project, now: now)
             ForEach(streams(project)) { stream in
                 streamSection(stream, project: project, inbox: inbox, now: now)
             }
@@ -516,6 +521,80 @@ struct ProjectView: View {
         }
     }
 
+    // MARK: - Schedules (§8.25)
+
+    private var canEditSchedules: Bool { model.supports(DesktopFeature.schedules, on: ref.desktopId) }
+
+    /// The project's schedules, with New schedule at the end; hidden for a
+    /// desktop without the feature, and for projects that can't have them.
+    @ViewBuilder
+    private func scheduleSection(_ project: InboxProject, now: Date) -> some View {
+        if canEditSchedules, !project.remote || !project.schedules.isEmpty {
+            Section {
+                ForEach(project.schedules) { schedule in
+                    scheduleRow(schedule, project: project)
+                }
+                if !project.remote {
+                    Button("New schedule", systemImage: "plus") {
+                        scheduleTarget = ScheduleTarget(desktopId: ref.desktopId, projectId: project.id)
+                    }
+                    .disabled(offline)
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Text("Schedules")
+                    if !project.schedules.isEmpty {
+                        Text("\(project.schedules.count)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func scheduleRow(_ schedule: InboxSchedule, project: InboxProject) -> some View {
+        let starting = model.isStartingSchedule(schedule.id, desktopId: ref.desktopId)
+        let editable = !offline && !starting
+        let run = { Task { await model.runSchedule(schedule.id, projectId: project.id, desktopId: ref.desktopId) } }
+        let pause = { Task { await model.changeSchedule(.pause(scheduleId: schedule.id, paused: !schedule.paused), projectId: project.id, desktopId: ref.desktopId) } }
+        let remove = { Task { await model.changeSchedule(.remove(scheduleId: schedule.id), projectId: project.id, desktopId: ref.desktopId) } }
+        return Button {
+            scheduleTarget = ScheduleTarget(desktopId: ref.desktopId, projectId: project.id, schedule: schedule)
+        } label: {
+            ScheduleRow(schedule: schedule, starting: starting)
+        }
+        .buttonStyle(.plain)
+        .opacity(offline ? 0.55 : 1)
+        .swipeActions(edge: .leading) {
+            if editable {
+                Button { _ = run() } label: { Label("Run now", systemImage: "play.fill") }
+                    .tint(.accentColor)
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            if editable {
+                Button(role: .destructive) { _ = remove() } label: { Label("Delete", systemImage: "trash") }
+                Button { _ = pause() } label: {
+                    Label(schedule.paused ? "Resume" : "Pause", systemImage: schedule.paused ? "play.circle" : "pause.circle")
+                }
+                .tint(.orange)
+            }
+        }
+        .contextMenu {
+            Button("Run now", systemImage: "play.fill") { _ = run() }
+                .disabled(!editable)
+            Button("Edit", systemImage: "pencil") {
+                scheduleTarget = ScheduleTarget(desktopId: ref.desktopId, projectId: project.id, schedule: schedule)
+            }
+            Button(schedule.paused ? "Resume" : "Pause", systemImage: schedule.paused ? "play.circle" : "pause.circle") { _ = pause() }
+                .disabled(!editable)
+            Button("Delete", systemImage: "trash", role: .destructive) { _ = remove() }
+                .disabled(!editable)
+        }
+    }
+
     /// Tasks that need you first (newest attention first), then by last interaction.
     private func sorted(_ tasks: [InboxTask]) -> [InboxTask] {
         tasks.sorted { a, b in
@@ -561,9 +640,12 @@ struct ProjectTaskRow: View {
                 .accessibilityHidden(!(needsYou || task.unread))
                 .accessibilityLabel(needsYou ? "Needs you" : "Unread")
             VStack(alignment: .leading, spacing: 2) {
-                Text(task.name)
-                    .font(.body.weight(needsYou || task.unread ? .semibold : .regular))
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    ScheduledMark(task: task)
+                    Text(task.name)
+                }
+                .font(.body.weight(needsYou || task.unread ? .semibold : .regular))
+                .lineLimit(1)
                 HStack(spacing: 4) {
                     if task.status != .attention, let landing = task.landing {
                         LandingGlyph(landing: landing)

@@ -267,6 +267,27 @@ describe('buildInbox', () => {
     expect('queue' in buildInbox(data([project('p2', [])]), lookup(), DESKTOP, NOW).projects[0]).toBe(false)
   })
 
+  it('carries the schedules and marks their runs (SPEC.md §8.25)', () => {
+    const bugs: Stream = { id: 's-bugs', name: 'bugfixes', tasks: [] }
+    const p = project('p1', [], {
+      streams: [bugs],
+      schedules: [
+        { id: 'sc1', name: 'SDK check', prompt: 'Check', every: 1, unit: 'week', startAt: 1, nextRunAt: 2, createdAt: 0, mode: 'auto', lastRun: { at: 1, outcome: 'quiet', taskId: 't0', note: 'Still open' } },
+        { id: 'sc2', name: 'Audit', prompt: 'Audit', streamId: 's-bugs', every: 2, unit: 'day', startAt: 1, nextRunAt: 3, createdAt: 0, paused: true },
+        { id: 'sc3', name: 'Gone stream', prompt: 'x', streamId: 's-gone', every: 1, unit: 'hour', startAt: 1, nextRunAt: 4, createdAt: 0 }
+      ]
+    })
+    p.streams[0].tasks.push(fixtureTask({ id: 't1', name: 'SDK check · Nov 4', scheduledFrom: { scheduleId: 'sc1', name: 'SDK check' }, tabs: { left: [tab('a', 'claude-chat')], right: [] } }))
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW).projects
+    expect(wire.schedules).toEqual([
+      { id: 'sc1', name: 'SDK check', prompt: 'Check', every: 1, unit: 'week', nextRunAt: 2, lastRun: { at: 1, outcome: 'quiet', taskId: 't0', note: 'Still open' } },
+      { id: 'sc2', name: 'Audit', prompt: 'Audit', streamId: 's-bugs', every: 2, unit: 'day', nextRunAt: 3, paused: true },
+      { id: 'sc3', name: 'Gone stream', prompt: 'x', every: 1, unit: 'hour', nextRunAt: 4 }
+    ])
+    expect(wire.tasks[0].scheduled).toBe('SDK check')
+    expect('schedules' in buildInbox(data([project('p2', [])]), lookup(), DESKTOP, NOW).projects[0]).toBe(false)
+  })
+
   it('sends each stream\'s run command, the stream\'s own over the project\'s (SPEC.md §8.19)', () => {
     const own: Stream = { id: 's-own', name: 'own', tasks: [], runCommand: '  make serve  ' }
     const blank: Stream = { id: 's-blank', name: 'blank', tasks: [], runCommand: '   ' }

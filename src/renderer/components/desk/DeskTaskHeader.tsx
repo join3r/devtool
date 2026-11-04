@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Clock } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import type { Project, Task } from '../../../shared/types'
 import { canLandTask, useLandingOp } from '../../taskLanding'
@@ -12,6 +12,7 @@ import { isSnoozed } from '../inbox'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { useDeskDone } from './useDeskDone'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
+import { ScheduleModal } from './DeskSchedules'
 
 const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border-strong bg-transparent text-sm text-text cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
@@ -22,10 +23,25 @@ const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border-st
 export function DeskTaskTools({ project, task }: { project: Project; task: Task }): React.ReactElement {
   const { snoozeTask, unsnoozeTask, endAutopilot } = useApp()
   const [snoozeAt, setSnoozeAt] = useState<DeskSnoozeRequest | null>(null)
+  const [editSchedule, setEditSchedule] = useState(false)
   const snoozed = isSnoozed(task, Date.now())
+  const schedule = task.scheduledFrom ? project.schedules?.find(s => s.id === task.scheduledFrom!.scheduleId) : undefined
 
   return (
     <>
+      {task.scheduledFrom && (
+        <button
+          type="button"
+          className="shrink-0 mr-1.5 flex items-center gap-1 h-[22px] px-2 rounded-full border border-border bg-transparent text-xs text-text-muted cursor-pointer hover:text-text hover:bg-sel disabled:cursor-default disabled:hover:bg-transparent [-webkit-app-region:no-drag]"
+          title={schedule ? `A run of the schedule "${schedule.name}". Edit, pause or delete the schedule` : 'A run of a schedule that has since been deleted'}
+          disabled={!schedule}
+          onClick={() => setEditSchedule(true)}
+          data-testid="desk-task-schedule"
+        >
+          <Clock size={12} /> {task.scheduledFrom.name}
+        </button>
+      )}
+      {editSchedule && schedule && <ScheduleModal project={project} schedule={schedule} onClose={() => setEditSchedule(false)} />}
       {autopilotActive(task) && (
         <span
           className="shrink-0 mr-1.5 flex items-center gap-1 h-[22px] pl-2 pr-1 rounded-full border border-border text-xs text-text-muted"

@@ -87,6 +87,9 @@ import { registerHostMobileHandlers, registerMobileHandlers } from '../ipc/mobil
 import { registerTaskWorktreeHandlers } from '../ipc/task-worktrees'
 import { registerTaskLandingHandlers } from '../ipc/task-landing'
 import { registerPromptQueueHandlers } from '../ipc/prompt-queue'
+import { registerScheduleHandlers } from '../ipc/schedules'
+import { ScheduleRunner } from '../schedule-runner'
+import { applyScheduleOp, scheduleRequestToOp, scheduleStreamId, type ScheduleRunResult, type ScheduleUpdateRequest } from '../../shared/schedules'
 import { PromptQueueRunner } from '../prompt-queue-runner'
 import { QueuedTaskRunner } from '../queued-task-runner'
 import { AutopilotRunner } from '../autopilot'
@@ -112,7 +115,7 @@ import { SecretRequests, type SecretOutcome } from '../secrets/secret-requests'
 import { checkSecretFile, writeSecretFile } from '../secrets/secret-file'
 import { registerSecretHandlers } from '../ipc/secrets'
 import { redactDeep, redactSecrets } from '../../shared/secrets'
-import { agentModeFor, callerClaudeMode, handleMcpMessage, unrestrictedCaller, lastReplyFromTranscript, type RequestSecretInput, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
+import { agentModeFor, callerClaudeMode, handleMcpMessage, liveTaskState, unrestrictedCaller, lastReplyFromTranscript, type RequestSecretInput, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
 import { autopilotActive, autopilotSupported } from '../../shared/autopilot'
 import { statusTabs, taskStatus } from '../../shared/inbox-state'
 import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../../shared/hook-protocol'
@@ -127,6 +130,7 @@ import { closeTask, findClosableTab, landTask, removeTabFromData } from '../mobi
 import { setPinInData } from '../mobile/pin'
 import { triageTaskInData } from '../mobile/triage'
 import { queuedPromptForRun, updateQueueInData } from '../mobile/queue'
+import { scheduleForRun, updateScheduleInData } from '../mobile/schedules'
 import { tokensUsage } from '../mobile/token-usage'
 import { savedRunCommands, setStreamCommandsInData, streamCommandsInData, streamCommandsPlace } from '../mobile/stream-commands'
 import {
@@ -157,6 +161,7 @@ import {
   TASK_NEW_FEATURE,
   TASK_TRIAGE_FEATURE,
   QUEUE_FEATURE,
+  SCHEDULES_FEATURE,
   TOKENS_USAGE_FEATURE,
   SERVER_APP_NAME
 } from '../../../protocol/ts/index.ts'
@@ -167,6 +172,7 @@ import type {
   AppConfig,
   Project,
   ProjectsData,
+  Schedule,
   SshConfig,
   Tab,
   Task,
@@ -320,6 +326,8 @@ export class HostServices {
   )
   private readonly promptQueue: PromptQueueRunner
   private readonly queuedTasks: QueuedTaskRunner
+  /** Projects' schedules (`shared/schedules.ts`). */
+  private readonly schedules: ScheduleRunner
   /** Autopilot tasks, from their first turn to Done (desk redesign decision 7). */
   private readonly autopilot: AutopilotRunner
   private readonly notesStore: RevisionStore<NotesRecord>
@@ -485,6 +493,22 @@ export class HostServices {
       sendFirstPrompt: (projectId, taskId, tabId, prompt, mode, model) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt, mode, model),
       log: (message) => this.logDebug(message)
     })
+    this.schedules = new ScheduleRunner({
+      peek: () => this.projectsStore.peek(),
+      commit: (data) => { this.commitProjects(data) },
+      subscribe: (listener) => {
+        const stops = [this.activityRegistry.subscribe(() => listener()), this.projectsStore.subscribe(() => listener())]
+        return () => { for (const stop of stops) stop() }
+      },
+      taskState: (task) => liveTaskState(task, {
+        statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+        activityOf: (tabId) => this.activityRegistry.getActivity(tabId)
+      }, Date.now()).state,
+      blocker: (project) => this.chatTaskBlocker(project),
+      startRun: (project, schedule, now) => this.startScheduledRun(project, schedule, now),
+      closeQuietRun: (project, task) => this.closeQuietRun(project, task),
+      log: (message) => this.logDebug(message)
+    })
     this.forgetArchivesOfVanishedProjects()
     this.config = this.storage.loadConfig()
     this.scheduleDonePrune(DONE_PRUNE_FIRST_MS)
@@ -588,6 +612,7 @@ export class HostServices {
     void this.taskLanding.reconcile()
     this.promptQueue.start()
     this.queuedTasks.start()
+    this.schedules.start()
     this.taskUsage.start()
     this.autopilot.start()
     this.missingFolders.start()
@@ -665,7 +690,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -749,6 +774,18 @@ export class HostServices {
         if (!checked.ok) return checked
         // The runner's refusals (Claude off, a start in flight, the worktree) are messages to show.
         const result = await this.promptQueue.run(params.projectId, params.itemId)
+        return result.ok ? result : { ok: false, code: AppErrorCode.Internal, message: result.error }
+      },
+      updateSchedule: (params) => {
+        const outcome = updateScheduleInData(this.projectsStore.peek(), params)
+        if (!outcome.ok) return outcome
+        this.commitProjects(outcome.data)
+        return { ok: true, scheduleId: outcome.scheduleId }
+      },
+      runSchedule: async (params) => {
+        const checked = scheduleForRun(this.projectsStore.peek(), params)
+        if (!checked.ok) return checked
+        const result = await this.runScheduleNow(params.projectId, params.scheduleId)
         return result.ok ? result : { ok: false, code: AppErrorCode.Internal, message: result.error }
       },
       missingFolders: this.missingFolders,
@@ -1197,6 +1234,7 @@ export class HostServices {
     this.streamRunsUnsub?.()
     this.promptQueue.dispose()
     this.queuedTasks.dispose()
+    this.schedules.dispose()
     this.autopilot.dispose()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
@@ -1270,6 +1308,9 @@ export class HostServices {
         return () => { for (const stop of stops) stop() }
       },
       startTask: (input) => this.startTaskForAgent(input),
+      commit: (data) => { this.commitProjects(data) },
+      callerMode: (tabId) => this.callerPermissionMode(tabId),
+      newId: () => randomUUID(),
       sendToTask: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
       lastReply: async (tab, dir) => {
         if (tab.type !== 'claude-chat' || !tab.sessionId) return null
@@ -1315,13 +1356,6 @@ export class HostServices {
     const data = this.projectsStore.peek()
     const project = data.projects.find(p => p.id === input.projectId)
     if (!project) return { ok: false, error: 'No such project.' }
-    if (project.ssh || project.host) return { ok: false, error: 'That project runs on another machine; DevTool\'s tools start tasks only in projects on this one.' }
-    const blocked = this.agentTaskBlocker(project, input.agent)
-    if (blocked) return { ok: false, error: blocked }
-    if (this.missingFolders.peek().has(project.id)) return { ok: false, error: 'That project\'s folder is gone.' }
-    const streamId = input.streamId ?? currentStreamId(project)
-    const stream = project.streams.find(s => s.id === streamId)
-
     // Never looser than the agent asking: a task it starts can't do what it couldn't.
     // The caller's mode is read in its own agent's terms: a Codex preset is not a Claude mode.
     const callerType = data.projects.flatMap(p => p.streams).flatMap(st => st.tasks).flatMap(t => taskTabs(t)).find(t => t.id === input.callerTabId)?.type
@@ -1332,6 +1366,53 @@ export class HostServices {
     if (input.agent === 'pi' && !unrestrictedCaller(callerType, callerMode)) {
       return { ok: false, error: 'Pi asks no permissions, so only an agent that runs with none either (Claude bypassing permissions, Codex full access) can start a Pi task.' }
     }
+    const autopilot = input.autopilot && claudeMode === 'auto' && autopilotSupported(project)
+    const started = await this.startChatTaskFromMain({
+      project,
+      streamId: input.streamId,
+      prompt: input.prompt,
+      agent: input.agent,
+      mode,
+      model: input.model,
+      decorate: task => ({
+        ...task,
+        ...(autopilot ? { autopilot: { phase: 'working' as const, ...(input.review ? { review: true } : {}) } } : {}),
+        delegatedFrom: input.from
+      }),
+      log: `mcpStartTask from=${input.from.taskId} agent=${input.agent} model=${input.model ?? '-'} mode=${mode ?? '-'} autopilot=${autopilot}`
+    })
+    if (!started.ok) return started
+    return { ...started, autopilot, ...(mode ? { mode } : {}) }
+  }
+
+  /**
+   * A chat task main starts on its own (an agent's `start_task`, a schedule's
+   * run), the way the phone's New task does (no window needed). Two agents in
+   * one folder edit the same files, so a task that would start where another
+   * agent works gets a worktree of its own when it can, and otherwise waits its turn.
+   */
+  private async startChatTaskFromMain(opts: {
+    project: Project
+    streamId?: string
+    prompt: string
+    agent: AiTabType
+    mode: string | undefined
+    model?: string
+    /** The task's name; absent: one made from the prompt in the background. */
+    name?: string
+    decorate?: (task: Task) => Task
+    log: string
+  }): Promise<{ ok: true; taskId: string; queued: boolean; ownWorktree: boolean } | { ok: false; error: string }> {
+    const data = this.projectsStore.peek()
+    const project = data.projects.find(p => p.id === opts.project.id)
+    if (!project) return { ok: false, error: 'No such project.' }
+    if (project.ssh || project.host) return { ok: false, error: 'That project runs on another machine; DevTool starts tasks by itself only in projects on this one.' }
+    const blocked = this.agentTaskBlocker(project, opts.agent)
+    if (blocked) return { ok: false, error: blocked }
+    if (this.missingFolders.peek().has(project.id)) return { ok: false, error: 'That project\'s folder is gone.' }
+    const streamId = opts.streamId ?? currentStreamId(project)
+    const stream = project.streams.find(s => s.id === streamId)
+
     const now = Date.now()
     let extra: NewTaskExtra | undefined
     if (!(streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project))) {
@@ -1347,22 +1428,20 @@ export class HostServices {
       if (busy) {
         extra = (stream ?? findMainStream(project))?.isMain && canHaveMainTaskWorktrees(project)
           ? { ownWorktree: true }
-          : { queued: { prompt: input.prompt, ...(mode ? { mode } : {}), ...(input.model ? { model: input.model } : {}), at: now } }
+          : { queued: { prompt: opts.prompt, ...(opts.mode ? { mode: opts.mode } : {}), ...(opts.model ? { model: opts.model } : {}), at: now } }
       }
     }
-    const autopilot = input.autopilot && claudeMode === 'auto' && autopilotSupported(project)
-    const added = addChatTaskToProject(data, project, input.prompt, streamId, undefined, now, extra, input.agent)
+    const added = addChatTaskToProject(data, project, opts.prompt, streamId, undefined, now, extra, opts.agent)
     this.commitProjects({
       ...added.data,
-      projects: added.data.projects.map(p => (p.id !== project.id ? p : mapTaskInProject(p, added.taskId, task => ({
-        ...task,
-        ...(autopilot ? { autopilot: { phase: 'working' as const, ...(input.review ? { review: true } : {}) } } : {}),
-        delegatedFrom: input.from
-      }))))
+      projects: added.data.projects.map(p => (p.id !== project.id ? p : mapTaskInProject(p, added.taskId, task => {
+        const named = opts.name ? { ...task, name: opts.name } : task
+        return opts.decorate ? opts.decorate(named) : named
+      })))
     })
-    this.nameTaskInBackground(project.id, added.taskId, input.prompt)
-    this.logDebug(`mcpStartTask project=${project.id} task=${added.taskId} from=${input.from.taskId} agent=${input.agent} model=${input.model ?? '-'} mode=${mode ?? '-'} autopilot=${autopilot} start=${extra?.queued ? 'queue' : extra?.ownWorktree ? 'worktree' : 'here'}`)
-    const result = { ok: true as const, taskId: added.taskId, queued: !!extra?.queued, ownWorktree: !!extra?.ownWorktree, autopilot, ...(mode ? { mode } : {}) }
+    if (!opts.name) this.nameTaskInBackground(project.id, added.taskId, opts.prompt)
+    this.logDebug(`${opts.log} project=${project.id} task=${added.taskId} start=${extra?.queued ? 'queue' : extra?.ownWorktree ? 'worktree' : 'here'}`)
+    const result = { ok: true as const, taskId: added.taskId, queued: !!extra?.queued, ownWorktree: !!extra?.ownWorktree }
     // Queued: the queue runner sends the prompt (and makes any worktree) once its folder is free.
     if (extra?.queued) return result
 
@@ -1374,9 +1453,9 @@ export class HostServices {
     }
     // The task exists from here on: a failed start shows in its chat, and a retry would make a second task.
     try {
-      await this.sendFirstChatPrompt(project.id, added.taskId, added.tabId, input.prompt, mode, input.model)
+      await this.sendFirstChatPrompt(project.id, added.taskId, added.tabId, opts.prompt, opts.mode, opts.model)
     } catch (err) {
-      this.logDebug(`mcpStartTask start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
+      this.logDebug(`${opts.log} start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
     }
     return result
   }
@@ -1388,6 +1467,55 @@ export class HostServices {
     if (!this.isServer && agent === 'codex' && !this.config.enableCodex) return 'Codex is turned off in DevTool\'s Settings.'
     if (!this.isServer && agent === 'pi' && !this.config.enablePi) return 'Pi is turned off in DevTool\'s Settings.'
     return featureUnavailableReason(project, 'chat')
+  }
+
+  /** A schedule's run (`schedule-runner.ts`): a new task named after the schedule and the day. */
+  private async startScheduledRun(project: Project, schedule: Schedule, now: number): Promise<ScheduleRunResult> {
+    const day = new Date(now).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    const result = await this.startChatTaskFromMain({
+      project,
+      streamId: scheduleStreamId(project, schedule),
+      prompt: schedule.prompt,
+      agent: 'claude',
+      // Nobody watches a run: without a mode of its own it starts in auto, as a new chat does.
+      mode: schedule.mode ?? 'auto',
+      name: `${schedule.name} · ${day}`,
+      decorate: task => ({ ...task, scheduledFrom: { scheduleId: schedule.id, name: schedule.name } }),
+      log: `scheduleRun schedule=${schedule.id}`
+    })
+    return result.ok ? { ok: true, taskId: result.taskId } : result
+  }
+
+  /**
+   * A run whose agent found nothing new: closed. A run in a worktree of its own
+   * closes only when that worktree holds nothing to land; work nobody has seen
+   * never lands by itself, so such a run stays open in the Inbox instead.
+   */
+  private async closeQuietRun(project: Project, task: Task): Promise<boolean> {
+    if (task.workspace) {
+      const preview = await this.taskLanding.preview(project.id, task.id)
+      if (!preview || preview.commits > 0 || preview.uncommitted > 0) return false
+      const result = await this.taskLanding.landTask(project.id, task.id)
+      // Nothing to land: main archived it once the worktree went.
+      return result.status === 'nothing' || result.status === 'landed'
+    }
+    await this.archiveTaskFromMain(project, task)
+    return true
+  }
+
+  /** A window's or the phone's schedule edit, checked and saved. */
+  updateSchedule(projectId: string, req: ScheduleUpdateRequest): { ok: true; scheduleId: string } | { ok: false; code: string; error: string } {
+    const data = this.projectsStore.peek()
+    const project = data.projects.find(p => p.id === projectId)
+    if (!project) return { ok: false, code: 'not-found', error: 'No such project.' }
+    const outcome = scheduleRequestToOp(project, req, randomUUID, Date.now())
+    if (!outcome.ok) return { ok: false, code: outcome.code, error: outcome.message }
+    this.commitProjects({ ...data, projects: data.projects.map(p => (p.id === projectId ? applyScheduleOp(p, outcome.op) : p)) })
+    return { ok: true, scheduleId: outcome.scheduleId }
+  }
+
+  runScheduleNow(projectId: string, scheduleId: string): Promise<ScheduleRunResult> {
+    return this.schedules.runNow(projectId, scheduleId)
   }
 
   /** The permission mode a chat tab's agent runs in now; null for a terminal tab, whose mode main can't see. */
@@ -1771,6 +1899,13 @@ export class HostServices {
       }, projectId, streamId, files)
     })
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
+    registerScheduleHandlers(ipc, {
+      update: (projectId, req) => {
+        const result = this.updateSchedule(projectId, req)
+        return result.ok ? result : { ok: false, error: result.error }
+      },
+      run: (projectId, scheduleId) => this.runScheduleNow(projectId, scheduleId)
+    })
     registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })
     registerSecretHandlers(ipc, {
       requests: this.secretRequests,
