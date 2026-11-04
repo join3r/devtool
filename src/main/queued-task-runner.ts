@@ -10,7 +10,7 @@ export interface QueuedTaskRunnerDeps {
   /** Why a Claude chat can't start in the project now (Claude off), or null. */
   blocker(project: Project): string | null
   ensureWorktree(projectId: string, taskId: string): Promise<{ ok: true } | { ok: false; error: string }>
-  sendFirstPrompt(projectId: string, taskId: string, tabId: string, prompt: string, mode: string | undefined): Promise<void>
+  sendFirstPrompt(projectId: string, taskId: string, tabId: string, prompt: string, mode: string | undefined, model?: string): Promise<void>
   log(message: string): void
 }
 
@@ -103,7 +103,7 @@ export class QueuedTaskRunner {
     void (async () => {
       const worktree = await this.deps.ensureWorktree(projectId, task.id)
       if (!worktree.ok) throw new Error(`Couldn't create the task's worktree: ${worktree.error}`)
-      await this.deps.sendFirstPrompt(projectId, task.id, tabId, queued.prompt, queued.mode)
+      await this.deps.sendFirstPrompt(projectId, task.id, tabId, queued.prompt, queued.mode, queued.model)
     })().catch((err: unknown) => {
       const error = err instanceof Error ? err.message : String(err)
       this.starting.delete(tabId)

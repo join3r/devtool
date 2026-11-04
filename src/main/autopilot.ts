@@ -89,7 +89,7 @@ export function attentionReason(activity: AgentActivity | null): string {
   const waiting = activity?.waiting
   if (waiting?.kind === 'error') return `The turn failed: ${waiting.label}`
   if (waiting?.kind === 'permission') return `Wants a permission: ${waiting.label.replace(/^Permission:\s*/, '')}`
-  return 'Claude asked you something'
+  return 'The agent asked you something'
 }
 
 /** A landing's result as the reason a run stops, or null when it went through (or goes on). */
@@ -261,7 +261,7 @@ export class AutopilotRunner {
         try {
           await this.deps.sendToAgent(current.project, current.task, current.tab, codexFindingsPrompt(review.text))
         } catch (err) {
-          this.stop(task.id, `Couldn't send Codex's findings to Claude: ${err instanceof Error ? err.message : String(err)}`)
+          this.stop(task.id, `Couldn't send Codex's findings to the agent: ${err instanceof Error ? err.message : String(err)}`)
         }
         return
       }

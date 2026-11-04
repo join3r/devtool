@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import http from 'http'
 import {
+  agentModeFor,
+  callerClaudeMode,
+  unrestrictedCaller,
   claudeMcpArgs,
   delegatedMode,
   codexMcpArgs,
@@ -16,6 +19,7 @@ import {
 import { HookServer, MCP_PATH } from '../src/main/hook-server'
 import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../src/shared/hook-protocol'
 import { hasMcpTools } from '../src/main/agent-context'
+import { agentExtraArgs } from '../src/main/claude-chat/chat-manager'
 import { emptyArchive, type ProjectArchive } from '../src/shared/archive'
 import type { AgentActivity } from '../src/shared/agent-activity'
 import type { ProjectsData, TabStatusValue, Task } from '../src/shared/types'
@@ -133,7 +137,7 @@ describe('tools', () => {
   it('start_task starts in the caller\'s project and stream, on Autopilot, naming the caller', async () => {
     const { deps, started } = fakeDeps(data())
     const { json } = await call(deps, 'start_task', { prompt: '  Add a dark mode toggle  ' })
-    expect(started).toEqual([{ projectId: 'p1', streamId: 'main-p1', prompt: 'Add a dark mode toggle', autopilot: true, review: false, callerTabId: 'parent-tab', from: { taskId: 'parent', name: 'Parent' } }])
+    expect(started).toEqual([{ projectId: 'p1', streamId: 'main-p1', prompt: 'Add a dark mode toggle', agent: 'claude', autopilot: true, review: false, callerTabId: 'parent-tab', from: { taskId: 'parent', name: 'Parent' } }])
     expect(json).toMatchObject({ taskId: 'child', autopilot: true })
   })
 
@@ -142,7 +146,16 @@ describe('tools', () => {
     expect((await call(deps, 'start_task', {})).text).toMatch(/prompt/)
     expect((await call(deps, 'start_task', { prompt: 'x', streamId: 'nope' })).text).toMatch(/No such stream/)
     expect((await call(deps, 'start_task', { prompt: 'x', autopilot: 'yes' })).isError).toBe(true)
+    expect((await call(deps, 'start_task', { prompt: 'x', agent: 'gemini' })).text).toMatch(/agent/)
+    expect((await call(deps, 'start_task', { prompt: 'x', model: 'two words' })).text).toMatch(/model/)
     expect(started).toEqual([])
+  })
+
+  it('start_task passes the agent and model on', async () => {
+    const { deps, started } = fakeDeps(data())
+    const { json } = await call(deps, 'start_task', { prompt: 'Port it', agent: 'codex', model: ' gpt-5-codex ' })
+    expect(started[0]).toMatchObject({ agent: 'codex', model: 'gpt-5-codex', autopilot: true })
+    expect(json).toMatchObject({ agent: 'codex', model: 'gpt-5-codex' })
   })
 
   it('send_to_task reaches only tasks the caller started', async () => {
@@ -305,6 +318,24 @@ describe('agent wiring', () => {
 
   it('starts a delegated task no looser than its caller', () => {
     expect(delegatedMode('auto')).toBe('auto')
+    expect(agentModeFor('claude', 'acceptEdits')).toBe('acceptEdits')
+    expect(agentModeFor('codex', 'auto')).toBe('auto')
+    expect(agentModeFor('codex', 'acceptEdits')).toBe('ask')
+    expect(agentModeFor('codex', 'default')).toBe('read-only')
+    expect(agentModeFor('codex', 'dontAsk')).toBe('read-only')
+    expect(agentModeFor('codex', 'plan')).toBe('read-only')
+    // A Codex caller's preset is read as Codex's, not as a Claude mode.
+    expect(callerClaudeMode('codex-chat', 'auto')).toBe('acceptEdits')
+    expect(callerClaudeMode('codex-chat', 'full-access')).toBe('auto')
+    expect(callerClaudeMode('codex-chat', 'read-only')).toBe('default')
+    expect(callerClaudeMode('claude-chat', 'bypassPermissions')).toBe('auto')
+    expect(callerClaudeMode('codex', null)).toBe('default')
+    // Pi has no permissions: only callers with none either may start it.
+    expect(unrestrictedCaller('claude-chat', 'auto')).toBe(false)
+    expect(unrestrictedCaller('codex-chat', 'auto')).toBe(false)
+    expect(unrestrictedCaller('claude-chat', 'bypassPermissions')).toBe(true)
+    expect(unrestrictedCaller('codex-chat', 'full-access')).toBe(true)
+    expect(agentModeFor('pi', 'auto')).toBeUndefined()
     expect(delegatedMode('bypassPermissions')).toBe('auto')
     expect(delegatedMode('acceptEdits')).toBe('acceptEdits')
     expect(delegatedMode('default')).toBe('default')
@@ -379,5 +410,19 @@ describe('HookServer /mcp', () => {
       req.end('{nope')
     })
     expect(bad).toBe(400)
+  })
+})
+
+describe('agentExtraArgs (Codex and Pi chats)', () => {
+  const mcp = { url: 'http://127.0.0.1:1/mcp', headers: { 'X-Tab': 't' } }
+  it('gives Codex the MCP server and DevTool\'s note, Pi the note, ahead of the project\'s args', () => {
+    const codex = agentExtraArgs('codex', mcp, 'Note "x"', ['-c', 'model="o"'], 'darwin')!
+    expect(codex.slice(-4)).toEqual(['-c', 'developer_instructions="Note \\"x\\""', '-c', 'model="o"'])
+    expect(codex[1]).toMatch(/^mcp_servers\.devtool\.url=/)
+    expect(agentExtraArgs('pi', mcp, 'Note', ['--thinking', 'high'], 'darwin')).toEqual(['--append-system-prompt', 'Note', '--thinking', 'high'])
+  })
+  it('leaves the note out on Windows', () => {
+    expect(agentExtraArgs('pi', null, 'Note', undefined, 'win32')).toBeUndefined()
+    expect(agentExtraArgs('codex', null, 'Note', ['a'], 'win32')).toEqual(['a'])
   })
 })

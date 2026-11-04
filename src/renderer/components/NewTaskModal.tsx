@@ -277,6 +277,8 @@ export default function NewTaskModal({
             text: promptText,
             // Autopilot runs in auto mode unless you picked a mode yourself.
             ...(takesMode && (mode || run) ? { mode: mode || 'auto' } : {}),
+            // Codex on Autopilot works in its own auto preset, or its first question hands the task back.
+            ...(agent === 'codex-chat' && run ? { mode: 'auto' } : {}),
             ...(agent === 'claude-chat' && model ? { model } : {}),
             ...(agent === 'claude-chat' && effort ? { effort } : {}),
             ...(images.length > 0 ? { images: toChatImages(images) } : {})

@@ -200,7 +200,7 @@ describe('Images on a start', () => {
 })
 
 describe('Autopilot on a start', () => {
-  it('goes with a Claude chat in a project on this Mac only', () => {
+  it('goes with a chat (Claude, Codex or Pi) in a project on this Mac only', () => {
     const on = { on: true, review: true }
     expect(deskSubmission(devtool, beta, 'claude-chat', 'fix it', on).autopilot).toEqual({ review: true })
     expect(deskSubmission(devtool, beta, 'claude-chat', 'fix it', AUTOPILOT_OFF).autopilot).toBeUndefined()
@@ -209,6 +209,11 @@ describe('Autopilot on a start', () => {
     expect(deskSubmission(server, beta, 'claude-chat', 'fix it', on).autopilot).toBeUndefined()
     expect(autopilotAvailable(devtool, 'claude-chat')).toBe(true)
     expect(autopilotAvailable(server, 'claude-chat')).toBe(false)
+    expect(deskSubmission(devtool, beta, 'codex-chat', 'fix it', on)).toMatchObject({ autopilot: { review: true }, start: { prompt: { mode: 'auto' } } })
+    expect(deskSubmission(devtool, beta, 'codex-chat', 'fix it', AUTOPILOT_OFF).start?.prompt.mode).toBeUndefined()
+    expect(autopilotAvailable(devtool, 'codex-chat')).toBe(true)
+    expect(autopilotAvailable(devtool, 'pi-chat')).toBe(true)
+    expect(autopilotAvailable(devtool, 'pi')).toBe(false)
   })
 })
 

@@ -630,7 +630,7 @@ export class ClaudeChatManager {
       sessionId: config.sessionId,
       executable: this.deps.resolveLocalAgent(agent),
       env: { ...this.deps.localEnv(), [TAB_OWNER_ENV]: tabId },
-      extraArgs: codexExtraArgs(agent, this.deps.mcpEndpoint?.(tabId) ?? null, config.extraArgs),
+      extraArgs: agentExtraArgs(agent, this.deps.mcpEndpoint?.(tabId) ?? null, this.deps.agentContext?.(tabId) ?? null, config.extraArgs),
       model: runtime.model,
       permissionMode: runtime.permissionMode,
       effort: runtime.effort,
@@ -692,8 +692,17 @@ export class ClaudeChatManager {
   }
 }
 
-/** A Codex chat's args with DevTool's MCP server ahead of the project's own. Pi takes no `-c`. */
-function codexExtraArgs(agent: 'codex' | 'pi', mcp: DevtoolMcpEndpoint | null, extraArgs: string[] | undefined): string[] | undefined {
-  if (agent !== 'codex' || !mcp) return extraArgs
-  return [...codexMcpArgs(mcp), ...(extraArgs ?? [])]
+/**
+ * A Codex or Pi chat's args, DevTool's ahead of the project's own: for Codex its
+ * MCP server and DevTool's note as developer instructions (a TOML string; JSON's
+ * escapes are TOML's), for Pi the note appended to its system prompt. The note
+ * is left out on Windows, where an agent's `.cmd` shim runs under cmd.exe, which
+ * would reinterpret it.
+ */
+export function agentExtraArgs(agent: 'codex' | 'pi', mcp: DevtoolMcpEndpoint | null, context: string | null, extraArgs: string[] | undefined, platform: string = process.platform): string[] | undefined {
+  const note = platform !== 'win32' ? context : null
+  const ours = agent === 'codex'
+    ? [...(mcp ? codexMcpArgs(mcp) : []), ...(note ? ['-c', `developer_instructions=${JSON.stringify(note)}`] : [])]
+    : note ? ['--append-system-prompt', note] : []
+  return ours.length > 0 ? [...ours, ...(extraArgs ?? [])] : extraArgs
 }

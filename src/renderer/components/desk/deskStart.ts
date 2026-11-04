@@ -18,7 +18,7 @@ export const AUTOPILOT_OFF: DeskAutopilot = { on: false, review: false }
 
 /** Whether the chip can be offered for this start. */
 export function autopilotAvailable(project: Project | undefined, agent: PromptBoxAgent | null): boolean {
-  return !!project && agent === 'claude-chat' && autopilotSupported(project)
+  return !!project && !!agent && isChatTabType(agent) && autopilotSupported(project)
 }
 
 /**
@@ -77,16 +77,19 @@ export function deskSubmission(
   images?: readonly ChatImage[]
 ): NewTaskSubmission {
   const chat = agent === 'claude-chat'
-  // Any chat takes pictures; Autopilot and the mode are Claude's.
+  // Any chat takes pictures and Autopilot; the mode picker is Claude's.
   const anyChat = !!agent && agent.endsWith('-chat')
+  const onAutopilot = !!autopilot?.on && anyChat && autopilotSupported(project)
   return {
     target: { kind: 'project', projectId: project.id },
     ...(stream ? { streamId: stream.id } : {}),
-    ...(autopilot?.on && chat && autopilotSupported(project) ? { autopilot: { review: autopilot.review } } : {}),
+    ...(onAutopilot ? { autopilot: { review: autopilot!.review } } : {}),
     ...(agent
       ? { start: { agent, prompt: {
           text: prompt,
-          ...(chat || agent === 'claude' ? { mode: 'auto' as const } : {}),
+          // Claude starts in auto mode; Codex on Autopilot in its own auto preset (in its folder, never asking), or its
+          // first question would hand the task straight back. Pi has no modes.
+          ...(chat || agent === 'claude' || (onAutopilot && agent === 'codex-chat') ? { mode: 'auto' as const } : {}),
           ...(anyChat && images?.length ? { images: [...images] } : {})
         } } }
       : { terminal: { command: prompt } })

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { CLAUDE_CHAT_LABEL, createMainStream, isShellCommandProject, type Project, type ProjectsData, type Tab, type Task, type TaskQueuedStart } from '../../shared/types'
+import { CHAT_TAB_LABEL, chatTabTypeFor, createMainStream, isShellCommandProject, type Project, type AiTabType, type ProjectsData, type Tab, type Task, type TaskQueuedStart } from '../../shared/types'
 import { taskNameFromPrompt } from '../../shared/task-name'
 import { AppErrorCode } from '../../../protocol/ts/index.ts'
 import { addTaskToStream, canHaveMainTaskWorktrees, currentStreamId, resolveMainTabId, singlePane, streamGivesTaskWorktrees, withLastTask } from '../../shared/streams'
@@ -78,9 +78,11 @@ export function addChatTaskToProject(
   streamId?: string,
   ids: () => string = randomUUID,
   now: number = Date.now(),
-  extra?: NewTaskExtra
+  extra?: NewTaskExtra,
+  agent: AiTabType = 'claude'
 ): { data: ProjectsData; taskId: string; tabId: string } {
-  const tab: Tab = { id: ids(), type: 'claude-chat', title: CLAUDE_CHAT_LABEL, sessionId: ids() }
+  const type = chatTabTypeFor(agent)
+  const tab: Tab = { id: ids(), type, title: CHAT_TAB_LABEL[type], sessionId: ids() }
   const mainTabId = resolveMainTabId([tab])
   const task: Task = {
     id: ids(),

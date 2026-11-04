@@ -193,7 +193,7 @@ export function agentContextForTab(
         hook: task.workspace && hook ? { ...hook, tabId } : undefined,
         links: root ? sharedLinksIn(root) : [],
         mcp: hasMcpTools(taskTabs(task).find(tab => tab.id === tabId)?.type),
-        // Only the chat Autopilot follows (`autopilotTab`): the task's first Claude chat.
+        // Only the chat Autopilot follows (`autopilotTab`).
         ...(task.autopilot && autopilotActive(task) && autopilotSupported(project) && autopilotTab(task)?.id === tabId
           ? { autopilot: { review: !!task.autopilot.review } }
           : {})

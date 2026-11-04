@@ -4,7 +4,7 @@ import type { ArchivedTask, ProjectArchive } from '../shared/archive'
 import { autopilotActive, autopilotBusy, autopilotLine, autopilotNeedsYou, autopilotTab } from '../shared/autopilot'
 import { landingNeedsYou, statusTabs, taskStatus } from '../shared/inbox-state'
 import { taskDirectory, taskTabs } from '../shared/streams'
-import type { Project, ProjectsData, Stream, Tab, TabStatusValue, Task } from '../shared/types'
+import { AI_TAB_TYPES, type AiTabType, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
 import { hasMcpTools } from './agent-context'
 
 /**
@@ -72,6 +72,10 @@ export interface StartTaskInput {
   projectId: string
   streamId?: string
   prompt: string
+  /** The agent the task's chat runs. */
+  agent: AiTabType
+  /** The model it starts on; unset keeps the agent's default. */
+  model?: string
   autopilot: boolean
   review: boolean
   /** The tab asking: the new task gets no looser a permission mode than it has. */
@@ -117,6 +121,42 @@ export function delegatedMode(callerMode: string | null): string {
       return 'default'
   }
 }
+
+/**
+ * The caller's rights in Claude's terms, read from its own agent's mode: a
+ * Claude chat's through `delegatedMode`; a Codex chat's presets by what they
+ * let it do without asking (full access acts freely; auto and ask edit the
+ * folder; read-only edits nothing); anything else (a terminal tab, whose mode
+ * main can't see) asks.
+ */
+export function callerClaudeMode(callerTabType: string | undefined, callerMode: string | null): string {
+  if (callerTabType === 'claude-chat') return delegatedMode(callerMode)
+  if (callerTabType === 'codex-chat') {
+    if (callerMode === 'full-access') return 'auto'
+    if (callerMode === 'auto' || callerMode === 'ask') return 'acceptEdits'
+  }
+  return 'default'
+}
+
+/** A caller that already acts with no permission checks at all, so starting Pi (which has none) gives it nothing new. */
+export function unrestrictedCaller(callerTabType: string | undefined, callerMode: string | null): boolean {
+  return (callerTabType === 'claude-chat' && callerMode === 'bypassPermissions')
+    || (callerTabType === 'codex-chat' && callerMode === 'full-access')
+}
+
+/**
+ * The started agent's mode, from the caller's rights in Claude's terms
+ * (`callerClaudeMode`): Claude's as is; Codex's strictest preset that still
+ * allows as much (auto works without asking, acceptEdits edits the folder and
+ * asks for the rest, anything else reads only); nothing for Pi, which has no modes.
+ */
+export function agentModeFor(agent: AiTabType, claudeMode: string): string | undefined {
+  if (agent === 'claude') return claudeMode
+  if (agent === 'codex') return claudeMode === 'auto' ? 'auto' : claudeMode === 'acceptEdits' ? 'ask' : 'read-only'
+  return undefined
+}
+
+const MODEL_LIMIT = 200
 
 // ---- finding things ------------------------------------------------------------------
 
@@ -364,16 +404,19 @@ export const TOOLS: ToolDef[] = [
     name: 'start_task',
     title: 'Start a DevTool task',
     description:
-      'Start a new DevTool task in your project: a fresh Claude agent working on `prompt` by itself, in the user\'s DevTool, alongside you. Use it to hand off a self-contained piece of work (a feature, a fix, an investigation) instead of doing it yourself, or to work on several things in parallel. ' +
+      'Start a new DevTool task in your project: a fresh agent (Claude by default, or Codex or Pi) working on `prompt` by itself, in the user\'s DevTool, alongside you. Use it to hand off a self-contained piece of work (a feature, a fix, an investigation) instead of doing it yourself, or to work on several things in parallel. ' +
       'The new agent sees nothing of this conversation: write the prompt as a complete brief (goal, where to look, what done means). ' +
       'It starts in your permission mode, or a stricter one. By default it runs on Autopilot when your mode allows (auto or bypass): it works without asking, and when it finishes DevTool checks files changed and lands its work into its stream as one commit, then closes the task (state `done`). ' +
       'It gets a git worktree of its own when the stream or project allows; if it would share a folder with an agent already working there, it gets its own worktree or waits its turn (state `queued`). ' +
+      'Pi asks no permissions, so only an agent that runs with none either (Claude bypassing permissions, Codex full access) can start one. ' +
       'Returns its taskId; follow it with wait_for_tasks or get_task. Each task costs the user agent usage, so start one only for work worth a separate agent.',
     inputSchema: {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'The new agent\'s first message: a complete, self-contained brief.' },
         streamId: { type: 'string', description: 'A stream from list_tasks. Default: your stream.' },
+        agent: { type: 'string', enum: [...AI_TAB_TYPES], description: 'The agent that does the task. Default `claude`. `codex` and `pi` need turning on in DevTool\'s Settings.' },
+        model: { type: 'string', description: 'The model it starts on, as that agent names it (Claude: an alias like `opus` or `sonnet`, or a full model id; Codex: e.g. `gpt-5-codex`; Pi: `provider/model` from its config). Default: the agent\'s own default.' },
         autopilot: { type: 'boolean', description: 'Default true. False leaves the finished task open for the user (state `idle`) instead of landing it.' },
         codexReview: { type: 'boolean', description: 'Autopilot only, default false: a Codex review of its diff before landing, its findings sent back to the agent once.' }
       },
@@ -489,10 +532,17 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       if (prompt.length > PROMPT_LIMIT) throw new ToolError(`\`prompt\` is longer than ${PROMPT_LIMIT} characters.`)
       const streamId = str(args, 'streamId') ?? me.stream.id
       if (!project.streams.some(s => s.id === streamId)) throw new ToolError('No such stream in your project. list_tasks names them.')
+      const agentArg = str(args, 'agent') ?? 'claude'
+      if (!(AI_TAB_TYPES as readonly string[]).includes(agentArg)) throw new ToolError(`\`agent\` must be one of: ${AI_TAB_TYPES.join(', ')}.`)
+      const agent = agentArg as AiTabType
+      const model = str(args, 'model')?.trim() || undefined
+      if (model && (model.length > MODEL_LIMIT || /[\s\0]/.test(model))) throw new ToolError('`model` must be one model name, with no spaces.')
       const result = await deps.startTask({
         projectId: project.id,
         streamId,
         prompt,
+        agent,
+        ...(model ? { model } : {}),
         autopilot: bool(args, 'autopilot', true),
         review: bool(args, 'codexReview', false),
         callerTabId: caller.tabId,
@@ -503,10 +553,14 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const notes = [
         result.ownWorktree ? 'It works in a git worktree of its own.' : '',
         result.queued ? 'Another agent works in its folder, so it waits its turn (state `queued`).' : '',
-        !result.autopilot && bool(args, 'autopilot', true) ? 'Autopilot is off: it needs auto or bypass permissions, and your mode is stricter. The finished task stays open for the user.' : ''
+        !result.autopilot && bool(args, 'autopilot', true)
+          ? 'Autopilot is off: it needs auto or bypass permissions, and your mode is stricter. The finished task stays open for the user.'
+          : ''
       ].filter(Boolean)
       return {
         ...(found ? summarize(found, deps, deps.now?.() ?? Date.now(), me.task.id) : { taskId: result.taskId }),
+        agent,
+        ...(model ? { model } : {}),
         autopilot: result.autopilot,
         ...(result.mode ? { permissionMode: result.mode } : {}),
         ...(notes.length > 0 ? { note: notes.join(' ') } : {})

@@ -29,7 +29,7 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
       {autopilotActive(task) && (
         <span
           className="shrink-0 mr-1.5 flex items-center gap-1 h-[22px] pl-2 pr-1 rounded-full border border-border text-xs text-text-muted"
-          title={autopilotLine(task.autopilot) ?? 'Autopilot: lands the task and moves it to Done when Claude is finished'}
+          title={autopilotLine(task.autopilot) ?? 'Autopilot: lands the task and moves it to Done when the agent is finished'}
           data-testid="desk-task-autopilot"
         >
           {autopilotLine(task.autopilot) ?? 'Autopilot'}

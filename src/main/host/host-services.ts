@@ -68,7 +68,7 @@ import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
 import { registerHostSshHandlers } from '../ipc/host-ssh'
 import { detectAgentClis } from '../agent-clis'
-import { chatTabAgent, isChatTabType, isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { chatTabAgent, isChatTabType, isRemoteProject, isShellCommandProject, type AiTabType } from '../../shared/types'
 import {
   archiveTasksInData, archivedTabIds, archivedTaskEntry, doneRetentionCutoff, pruneArchive, syncArchiveCounts, vanishedProjectIds, withArchivedTasks,
   type ProjectArchive
@@ -107,7 +107,7 @@ import { ChatBridge } from '../mobile/chat-bridge'
 import { PushEmitter } from '../mobile/push-emitter'
 import { createStream, listProjectBranches, type StreamGit } from '../mobile/new-stream'
 import { addChatTaskToProject, addTaskWithChat, type NewTaskExtra } from '../mobile/new-task'
-import { delegatedMode, handleMcpMessage, lastReplyFromTranscript, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
+import { agentModeFor, callerClaudeMode, handleMcpMessage, unrestrictedCaller, lastReplyFromTranscript, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
 import { autopilotActive, autopilotSupported } from '../../shared/autopilot'
 import { statusTabs, taskStatus } from '../../shared/inbox-state'
 import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../../shared/hook-protocol'
@@ -461,7 +461,7 @@ export class HostServices {
         const result = await this.taskWorktrees.ensureTaskWorktree(projectId, taskId)
         return result.status === 'failed' ? { ok: false, error: result.error } : { ok: true }
       },
-      sendFirstPrompt: (projectId, taskId, tabId, prompt, mode) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt, mode),
+      sendFirstPrompt: (projectId, taskId, tabId, prompt, mode, model) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt, mode, model),
       log: (message) => this.logDebug(message)
     })
     this.forgetArchivesOfVanishedProjects()
@@ -1068,19 +1068,22 @@ export class HostServices {
   }
 
   /** A chat task main just added: start its runtime and send the first prompt, no window needed. */
-  private async sendFirstChatPrompt(projectId: string, taskId: string, tabId: string, prompt: string, permissionMode?: string): Promise<void> {
+  private async sendFirstChatPrompt(projectId: string, taskId: string, tabId: string, prompt: string, permissionMode?: string, model?: string): Promise<void> {
     const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
     const task = findTaskInProject(project, taskId)
     const tab = task ? taskTabs(task).find(t => t.id === tabId) : undefined
     if (!project || !task || !tab) throw new Error('The task is gone')
-    // The permission mode the New task composer last used, as a window's first prompt carries it.
-    const mode = permissionMode ?? this.config.promptBoxMode
-    if (mode && tab.sessionId && tab.type === 'claude-chat') {
+    // The permission mode the New task composer last used, as a window's first prompt carries it (a Claude mode).
+    const mode = permissionMode ?? (tab.type === 'claude-chat' ? this.config.promptBoxMode : undefined)
+    // Pi has no permission modes.
+    const setMode = mode && tab.type !== 'pi-chat'
+    if ((setMode || model) && tab.sessionId && isChatTabType(tab.type)) {
       if (!this.chatManager.snapshot(tab.id)) {
-        const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
+        const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId, chatTabAgent(tab.type)), () => {})
         stop()
       }
-      await this.chatManager.setPermissionMode(tab.id, mode)
+      if (setMode) await this.chatManager.setPermissionMode(tab.id, mode)
+      if (model) await this.chatManager.setModel(tab.id, model)
     }
     await this.sendToAgentTab(project, task, tab, prompt)
   }
@@ -1251,12 +1254,22 @@ export class HostServices {
     const project = data.projects.find(p => p.id === input.projectId)
     if (!project) return { ok: false, error: 'No such project.' }
     if (project.ssh || project.host) return { ok: false, error: 'That project runs on another machine; DevTool\'s tools start tasks only in projects on this one.' }
-    const blocked = this.chatTaskBlocker(project)
+    const blocked = this.agentTaskBlocker(project, input.agent)
     if (blocked) return { ok: false, error: blocked }
     if (this.missingFolders.peek().has(project.id)) return { ok: false, error: 'That project\'s folder is gone.' }
     const streamId = input.streamId ?? currentStreamId(project)
     const stream = project.streams.find(s => s.id === streamId)
 
+    // Never looser than the agent asking: a task it starts can't do what it couldn't.
+    // The caller's mode is read in its own agent's terms: a Codex preset is not a Claude mode.
+    const callerType = data.projects.flatMap(p => p.streams).flatMap(st => st.tasks).flatMap(t => taskTabs(t)).find(t => t.id === input.callerTabId)?.type
+    const callerMode = this.callerPermissionMode(input.callerTabId)
+    const claudeMode = callerClaudeMode(callerType, callerMode)
+    const mode = agentModeFor(input.agent, claudeMode)
+    // Pi asks no permissions at all: only a caller that runs with none either can start one.
+    if (input.agent === 'pi' && !unrestrictedCaller(callerType, callerMode)) {
+      return { ok: false, error: 'Pi asks no permissions, so only an agent that runs with none either (Claude bypassing permissions, Codex full access) can start a Pi task.' }
+    }
     const now = Date.now()
     let extra: NewTaskExtra | undefined
     if (!(streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project))) {
@@ -1272,13 +1285,11 @@ export class HostServices {
       if (busy) {
         extra = (stream ?? findMainStream(project))?.isMain && canHaveMainTaskWorktrees(project)
           ? { ownWorktree: true }
-          : { queued: { prompt: input.prompt, mode: delegatedMode(this.callerPermissionMode(input.callerTabId)), at: now } }
+          : { queued: { prompt: input.prompt, ...(mode ? { mode } : {}), ...(input.model ? { model: input.model } : {}), at: now } }
       }
     }
-    // Never looser than the agent asking: a task it starts can't do what it couldn't.
-    const mode = delegatedMode(this.callerPermissionMode(input.callerTabId))
-    const autopilot = input.autopilot && mode === 'auto' && autopilotSupported(project)
-    const added = addChatTaskToProject(data, project, input.prompt, streamId, undefined, now, extra)
+    const autopilot = input.autopilot && claudeMode === 'auto' && autopilotSupported(project)
+    const added = addChatTaskToProject(data, project, input.prompt, streamId, undefined, now, extra, input.agent)
     this.commitProjects({
       ...added.data,
       projects: added.data.projects.map(p => (p.id !== project.id ? p : mapTaskInProject(p, added.taskId, task => ({
@@ -1288,8 +1299,8 @@ export class HostServices {
       }))))
     })
     this.nameTaskInBackground(project.id, added.taskId, input.prompt)
-    this.logDebug(`mcpStartTask project=${project.id} task=${added.taskId} from=${input.from.taskId} mode=${mode} autopilot=${autopilot} start=${extra?.queued ? 'queue' : extra?.ownWorktree ? 'worktree' : 'here'}`)
-    const result = { ok: true as const, taskId: added.taskId, queued: !!extra?.queued, ownWorktree: !!extra?.ownWorktree, autopilot, mode }
+    this.logDebug(`mcpStartTask project=${project.id} task=${added.taskId} from=${input.from.taskId} agent=${input.agent} model=${input.model ?? '-'} mode=${mode ?? '-'} autopilot=${autopilot} start=${extra?.queued ? 'queue' : extra?.ownWorktree ? 'worktree' : 'here'}`)
+    const result = { ok: true as const, taskId: added.taskId, queued: !!extra?.queued, ownWorktree: !!extra?.ownWorktree, autopilot, ...(mode ? { mode } : {}) }
     // Queued: the queue runner sends the prompt (and makes any worktree) once its folder is free.
     if (extra?.queued) return result
 
@@ -1301,11 +1312,20 @@ export class HostServices {
     }
     // The task exists from here on: a failed start shows in its chat, and a retry would make a second task.
     try {
-      await this.sendFirstChatPrompt(project.id, added.taskId, added.tabId, input.prompt, mode)
+      await this.sendFirstChatPrompt(project.id, added.taskId, added.tabId, input.prompt, mode, input.model)
     } catch (err) {
       this.logDebug(`mcpStartTask start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
     }
     return result
+  }
+
+  /** Why an agent can't start a `agent` chat task in `project`, or null. */
+  private agentTaskBlocker(project: Project, agent: AiTabType): string | null {
+    if (agent === 'claude') return this.chatTaskBlocker(project)
+    if (isShellCommandProject(project)) return 'A shell-command project runs one command, not agents.'
+    if (!this.isServer && agent === 'codex' && !this.config.enableCodex) return 'Codex is turned off in DevTool\'s Settings.'
+    if (!this.isServer && agent === 'pi' && !this.config.enablePi) return 'Pi is turned off in DevTool\'s Settings.'
+    return featureUnavailableReason(project, 'chat')
   }
 
   /** The permission mode a chat tab's agent runs in now; null for a terminal tab, whose mode main can't see. */

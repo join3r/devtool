@@ -48,7 +48,7 @@ export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
     const task = target.kind === 'dir'
       ? addTaskInDirectory(target.directory, name, tabs)
       : addTask(target.projectId, name, tabs, streamId, {
-        ...(autopilot && start?.agent === 'claude-chat' ? { autopilot: { phase: 'working', ...(autopilot.review ? { review: true } : {}) } } : {}),
+        ...(autopilot && start && isChatTabType(start.agent) ? { autopilot: { phase: 'working', ...(autopilot.review ? { review: true } : {}) } } : {}),
         ...(ownWorktree ? { ownWorktree: true } : {})
       })
     if (start) titleTaskFromPrompt(task.id, name, start.prompt.text)

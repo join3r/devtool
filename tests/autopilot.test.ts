@@ -17,7 +17,7 @@ function git(dir: string, ...args: string[]): string {
   return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' })
 }
 
-const chatTab = (id: string) => ({ id, type: 'claude-chat' as const, title: 'Claude', sessionId: `s-${id}` })
+const chatTab = (id: string, type: 'claude-chat' | 'codex-chat' | 'pi-chat' = 'claude-chat') => ({ id, type, title: 'Claude', sessionId: `s-${id}` })
 
 /** The registry's statuses and activities, with its change feed. */
 function fakeActivity() {
@@ -56,9 +56,9 @@ describe('AutopilotRunner', () => {
   let archived: string[]
   let runner: AutopilotRunner
 
-  function setTask(autopilot: TaskAutopilot, options: { ownWorktree?: boolean } = {}): void {
+  function setTask(autopilot: TaskAutopilot, options: { ownWorktree?: boolean; chat?: 'claude-chat' | 'codex-chat' | 'pi-chat' } = {}): void {
     const task: Task = {
-      ...fixtureTask({ id: 't1', name: 'Fix the login bug', tabs: { left: [chatTab('tab-1')] }, ...(options.ownWorktree === false ? {} : { ownWorkspace: own }) }),
+      ...fixtureTask({ id: 't1', name: 'Fix the login bug', tabs: { left: [chatTab('tab-1', options.chat)] }, ...(options.ownWorktree === false ? {} : { ownWorkspace: own }) }),
       autopilot,
       lastInteractedAt: 1
     }
@@ -117,7 +117,7 @@ describe('AutopilotRunner', () => {
   }
 
   /** Autopilot running, then the task fired with the chip (as a window files it). */
-  function startWith(autopilot: TaskAutopilot, options: { ownWorktree?: boolean } = {}, overrides: Partial<AutopilotDeps> = {}): void {
+  function startWith(autopilot: TaskAutopilot, options: { ownWorktree?: boolean; chat?: 'claude-chat' | 'codex-chat' | 'pi-chat' } = {}, overrides: Partial<AutopilotDeps> = {}): void {
     data = { projects: [], tags: [], projectOrder: [], pinnedItems: [] }
     make(overrides).start()
     setTask(autopilot, options)
@@ -178,6 +178,13 @@ describe('AutopilotRunner', () => {
     expect(landCalls).toEqual([{ summary: 'Fixed the login bug.' }])
     expect(taskOf()?.autopilot?.phase).toBe('landing')
     expect(reviewCalls).toHaveLength(0)
+  })
+
+  it('follows a Codex or Pi chat as it does Claude\'s', async () => {
+    startWith({ phase: 'working' }, { chat: 'codex-chat' })
+    fs.writeFileSync(path.join(own.worktreePath, 'b.txt'), 'new\n')
+    await turn('Ported it.')
+    expect(landCalls).toEqual([{ summary: 'Ported it.' }])
   })
 
   it('counts the task\'s commits too, not only what is uncommitted', async () => {

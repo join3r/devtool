@@ -270,8 +270,10 @@ export interface Task {
 /** A queued task's first prompt, held until its folder is free (see `Task.queued`). */
 export interface TaskQueuedStart {
   prompt: string
-  /** Claude chat only: the permission mode the prompt starts with. */
+  /** The permission mode the prompt starts with (Claude's, or Codex's own). */
   mode?: string
+  /** The model the chat starts on; unset keeps the agent's default. */
+  model?: string
   /** When it was queued: the oldest of a folder's queued tasks starts first. */
   at: number
   /** Start it now, whoever else works there (Wake / Start now). */
