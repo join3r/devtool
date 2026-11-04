@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { runLogTaskId, statusHosts, statusPhone, statusRunLabel } from '../src/renderer/components/desk/statusBar'
+import { hostAlert, machinesLabel, runDockFolds, runLogTaskId, statusHosts, statusPhone, statusRunLabel } from '../src/renderer/components/desk/statusBar'
 import type { InboxApp } from '../src/renderer/components/inbox'
 import type { MobileState } from '../src/shared/mobile'
 import type { ServerStatus } from '../src/shared/servers'
@@ -47,6 +47,27 @@ describe('status bar hosts', () => {
     const hosts = statusHosts([project('a', { ssh: ssh('box') })], [server('s', 'old', 'incompatible')], {})
     expect(hosts[1]).toMatchObject({ detail: 'needs an update', tone: 'bad' })
     expect(hosts[2]).toMatchObject({ detail: 'not connected', tone: 'idle' })
+  })
+})
+
+describe('status bar machines', () => {
+  it('gives a chip of its own only to a server in trouble, not to one connecting or an SSH box at rest', () => {
+    const hosts = statusHosts(
+      [project('a', { ssh: ssh('box') })],
+      [server('s1', 'ok', 'online'), server('s2', 'off', 'offline'), server('s3', 'old', 'incompatible'), server('s4', 'wait', 'connecting'), server('s5', 'up', 'updating')],
+      {}
+    )
+    expect(hosts.filter(hostAlert).map(h => h.label)).toEqual(['off', 'old', 'up'])
+  })
+
+  it('names one machine, else counts them', () => {
+    expect(machinesLabel(statusHosts([], [], {}))).toBe('This Mac')
+    expect(machinesLabel(statusHosts([], [server('s', 'x', 'online')], {}))).toBe('2 machines')
+  })
+
+  it('folds the run dock past three runs', () => {
+    expect(runDockFolds(3)).toBe(false)
+    expect(runDockFolds(4)).toBe(true)
   })
 })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PlanLimits } from '../src/main/plan-limits'
-import { accountLabel, currentWindow, mergePlanAccounts, type PlanAccount } from '../src/shared/plan-limits'
+import { accountLabel, busiestAccount, currentWindow, mergePlanAccounts, type PlanAccount } from '../src/shared/plan-limits'
 import { emptyChatState, reduceChat, type ChatEvent, type ChatState } from '../src/shared/claude-chat'
 
 function tracker(now = 1000, ssh: Record<string, string> = {}): PlanLimits {
@@ -94,5 +94,25 @@ describe('plan-limits helpers', () => {
     const all = [{ email: 'me@a.dev' }, { email: 'me@b.dev' }, { email: 'ops@b.dev' }] as PlanAccount[]
     expect(accountLabel('ops@b.dev', all)).toBe('ops')
     expect(accountLabel('me@a.dev', all)).toBe('me@a.dev')
+  })
+})
+
+describe('busiestAccount', () => {
+  const account = (email: string, fiveHour?: number, sevenDay?: number): PlanAccount => ({
+    email,
+    fiveHour: fiveHour === undefined ? undefined : { utilization: fiveHour },
+    sevenDay: sevenDay === undefined ? undefined : { utilization: sevenDay },
+    readAt: 0,
+    hosts: []
+  })
+
+  it('picks the login nearest its 5-hour limit, else its weekly one', () => {
+    expect(busiestAccount([account('a', 7), account('b', 40)], 0)?.email).toBe('b')
+    expect(busiestAccount([account('a', undefined, 80), account('b', 10)], 0)?.email).toBe('a')
+  })
+
+  it('falls back to the first login before any has read a window, and none for no logins', () => {
+    expect(busiestAccount([account('a'), account('b')], 0)?.email).toBe('a')
+    expect(busiestAccount([], 0)).toBeUndefined()
   })
 })

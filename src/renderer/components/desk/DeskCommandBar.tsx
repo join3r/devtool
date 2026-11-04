@@ -20,7 +20,7 @@ import { PROMPT_BOX_AGENT_LABEL } from '../promptBox'
 import { createTab } from '../newTaskTabs'
 import { inboxApps } from '../inbox'
 import { openBench } from './benchState'
-import { openRunLog } from './DeskStatusBar'
+import { openRunLog } from './DeskRunDock'
 import { AUTOPILOT_OFF, autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
 import AutopilotChips from './AutopilotChips'
 import {

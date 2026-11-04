@@ -53,3 +53,22 @@ export function accountLabel(email: string, all: readonly PlanAccount[]): string
   const clash = all.some(other => other.email !== email && (other.email.split('@')[0] || other.email) === short)
   return clash ? email : short
 }
+
+/** The window that stops work first: the 5-hour one, else the weekly one. */
+export function leadWindow(account: PlanAccount, now: number): ChatLimitWindow | undefined {
+  return currentWindow(account.fiveHour, now) ?? currentWindow(account.sevenDay, now)
+}
+
+/** The login closest to its limit, for the status bar's one Claude chip; the first one when none has read a window yet. */
+export function busiestAccount(accounts: readonly PlanAccount[], now: number): PlanAccount | undefined {
+  let best: PlanAccount | undefined
+  let bestUsed = -1
+  for (const account of accounts) {
+    const used = leadWindow(account, now)?.utilization ?? -1
+    if (!best || used > bestUsed) {
+      best = account
+      bestUsed = used
+    }
+  }
+  return best
+}

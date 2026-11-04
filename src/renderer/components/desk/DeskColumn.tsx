@@ -15,6 +15,7 @@ import ProjectTileBadge from '../ProjectTileBadge'
 import { formatRelativeAge, groupInboxByProject, inboxSources, isSnoozed, partitionInbox, taskActivity, type InboxEntry } from '../inbox'
 import type { NewTaskSubmission } from '../newTask'
 import DeskCompose from './DeskCompose'
+import DeskRunDock from './DeskRunDock'
 import DeskRow, { AutopilotMark, bestActivity, type DeskRowKind } from './DeskRow'
 import DeskScopeMenu from './DeskScopeMenu'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
@@ -190,6 +191,8 @@ export default function DeskColumn({
   const diffs = useTaskDiffSummaries(diffSources)
   const grouped = config?.inboxLayout === 'grouped'
   const showTiles = config?.showProjectIcons ?? false
+  /** The run dock's height, so the list scrolls its last row clear of it. */
+  const [dockHeight, setDockHeight] = useState(0)
   const counts = deskTabCounts(lists)
 
   const [showOlder, setShowOlder] = useState(false)
@@ -530,7 +533,7 @@ export default function DeskColumn({
         </div>}
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-2" data-testid="desk-list">
+      <div className="flex-1 overflow-y-auto pb-2" style={dockHeight ? { paddingBottom: dockHeight } : undefined} data-testid="desk-list">
         {grouped && tab !== 'done' && (listed.length === 0
           ? empty(tab === 'inbox' ? (scope ? 'Nothing here. Ask something above.' : 'Inbox zero. Ask something above.') : tab === 'working' ? 'No agent is working.' : 'Nothing snoozed.')
           : groupInboxByProject(listed, [...pinnedIds]).map(group => (
@@ -567,6 +570,8 @@ export default function DeskColumn({
           />
         )}
       </div>
+
+      <DeskRunDock onHeight={setDockHeight} />
 
       <DeskScopeMenu
         anchor={scopeMenu}

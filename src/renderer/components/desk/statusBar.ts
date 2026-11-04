@@ -6,9 +6,12 @@ import type { InboxApp } from '../inbox'
 
 /**
  * The desk's status bar (change 7 of the redesign), one quiet line along the
- * bottom of the window: the hosts code runs on (this Mac, the paired DevTool
- * servers, the SSH boxes projects use) on the left; the stream commands that
- * run or crashed, and the phone, on the right. Colour means state only.
+ * bottom of the window that shows only what needs you: one chip for all the
+ * machines code runs on (this Mac, the paired DevTool servers, the SSH boxes
+ * projects use) and their tasks' load, a chip of its own for a machine in
+ * trouble or running hot, then the Claude limits and the phone. The stream
+ * commands that run or crashed live in the run dock over the Inbox. Colour
+ * means state only.
  */
 
 /** A dot's colour: green fine, grey idle or on its way, red broken, amber waiting on you. */
@@ -78,7 +81,27 @@ export function statusHosts(projects: readonly Project[], servers: readonly Serv
   return out
 }
 
-/** A run's words on the bar: "devtool · dev", "stem › beta · server crashed". */
+/**
+ * A host that gets a chip of its own beside the machines summary: a server that
+ * is offline, updating or needs an update, or anything broken. Connecting is on
+ * its way, and an SSH box at rest is fine (masters open on use).
+ */
+export function hostAlert(host: StatusHost): boolean {
+  if (host.tone === 'bad') return true
+  return host.kind === 'server' && host.detail !== undefined && host.detail !== 'connecting'
+}
+
+/** The machines summary's words: "This Mac" alone, else "3 machines". */
+export function machinesLabel(hosts: readonly StatusHost[]): string {
+  return hosts.length === 1 ? hosts[0].label : `${hosts.length} machines`
+}
+
+/** The run dock folds its rows into a "4 running" header past three. */
+export function runDockFolds(count: number): boolean {
+  return count > 3
+}
+
+/** A run's words in a tooltip: "devtool · dev", "stem › beta · server crashed". */
 export function statusRunLabel(app: InboxApp): string {
   const where = app.stream.isMain ? app.project.name : `${app.project.name} › ${app.stream.name}`
   return `${where} · ${app.run.name}${app.crashed ? ' crashed' : ''}`

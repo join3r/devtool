@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from 'react'
 import { menuCls } from '../ui'
 import { usePlanLimits } from '../../planLimits'
-import { accountLabel, currentWindow, type PlanAccount } from '../../../shared/plan-limits'
+import { busiestAccount, currentWindow, leadWindow, type PlanAccount } from '../../../shared/plan-limits'
 import type { ChatLimitWindow } from '../../../shared/claude-chat'
 import { formatResetAt, formatResetIn, limitTone } from '../claude-chat/UsageMeter'
 
 /**
- * The status bar's plan limits (redesign option A): one chip per claude.ai
- * login the Claude tabs run on, on this Mac, its SSH boxes and its servers, so
- * hosts sharing a login show once. A chip is the 5-hour bar over the weekly one,
- * the login's name and the 5-hour share used, plus the countdown once it runs
- * hot; hovering shows both windows, their resets and the hosts on it.
+ * The status bar's plan limits: one Claude chip for every claude.ai login the
+ * Claude tabs run on (this Mac, its SSH boxes and its servers). It shows the
+ * login nearest its limit: the 5-hour bar over the weekly one and the 5-hour
+ * share used, plus the countdown once it runs hot. Hovering shows each login's
+ * windows, their resets and the hosts on it.
  */
 
 const TONE_TEXT = { success: 'text-success', warn: 'text-warn', danger: 'text-danger' } as const
@@ -65,38 +65,45 @@ const CHIP = 'flex items-center gap-1.5 h-full px-2.5 border-r-[0.5px] border-ha
 export default function PlanLimitChips(): React.ReactElement | null {
   const accounts = usePlanLimits()
   const now = useNow()
-  const [hover, setHover] = useState<{ email: string; rect: DOMRect } | null>(null)
-  if (accounts.length === 0) return null
-
-  const shown = hover ? accounts.find(account => account.email === hover.email) : undefined
+  const [hover, setHover] = useState<DOMRect | null>(null)
+  const lead = busiestAccount(accounts, now)
+  if (!lead) return null
   return (
     <>
-      {accounts.map(account => (
-        <Chip
-          key={account.email}
-          account={account}
-          label={accountLabel(account.email, accounts)}
-          now={now}
-          onShow={(rect) => setHover({ email: account.email, rect })}
-          onHide={() => setHover(current => current?.email === account.email ? null : current)}
-        />
-      ))}
-      {hover && shown && <Details account={shown} rect={hover.rect} now={now} />}
+      <Chip
+        account={lead}
+        accounts={accounts}
+        now={now}
+        onShow={setHover}
+        onHide={() => setHover(null)}
+      />
+      {hover && <Details accounts={accounts} rect={hover} now={now} />}
     </>
   )
 }
 
-function Chip({ account, label, now, onShow, onHide }: {
+/** The window's share in words, for a screen reader. */
+function spoken(account: PlanAccount, now: number): string {
+  const fiveHour = currentWindow(account.fiveHour, now)
+  const sevenDay = currentWindow(account.sevenDay, now)
+  const parts = [
+    fiveHour && `5-hour limit ${Math.round(fiveHour.utilization)}% used`,
+    sevenDay && `weekly limit ${Math.round(sevenDay.utilization)}% used`
+  ].filter(Boolean)
+  return `${account.email}: ${parts.join(', ')}`
+}
+
+/** One chip for every login: the bars and share of the one nearest its limit; hovering shows each. */
+function Chip({ account, accounts, now, onShow, onHide }: {
   account: PlanAccount
-  label: string
+  accounts: readonly PlanAccount[]
   now: number
   onShow: (rect: DOMRect) => void
   onHide: () => void
 }): React.ReactElement {
   const fiveHour = currentWindow(account.fiveHour, now)
   const sevenDay = currentWindow(account.sevenDay, now)
-  // The 5-hour window is the one that stops work today; without it, the weekly one.
-  const lead = fiveHour ?? sevenDay
+  const lead = leadWindow(account, now)
   const tone = lead ? limitTone(lead.utilization) : 'success'
   const reset = tone !== 'success' && lead?.resetsAt ? formatResetIn(lead.resetsAt, now) : ''
   const show = (e: React.SyntheticEvent<HTMLButtonElement>): void => onShow(e.currentTarget.getBoundingClientRect())
@@ -104,7 +111,7 @@ function Chip({ account, label, now, onShow, onHide }: {
     <button
       type="button"
       className={CHIP}
-      aria-label={`${account.email}: ${fiveHour ? `5-hour limit ${Math.round(fiveHour.utilization)}% used` : ''}${fiveHour && sevenDay ? ', ' : ''}${sevenDay ? `weekly limit ${Math.round(sevenDay.utilization)}% used` : ''}`}
+      aria-label={`Claude plan limits. ${accounts.map(each => spoken(each, now)).join('. ')}`}
       onMouseEnter={show}
       onFocus={show}
       onMouseLeave={onHide}
@@ -115,7 +122,7 @@ function Chip({ account, label, now, onShow, onHide }: {
         <Bar window={fiveHour} />
         <Bar window={sevenDay} />
       </span>
-      <span className="truncate">{label}</span>
+      <span>Claude</span>
       {lead && (
         <span className={tone === 'success' ? '' : TONE_TEXT[tone]}>
           {Math.round(lead.utilization)}%{reset && reset !== 'now' ? ` · ↺ ${reset}` : ''}
@@ -125,25 +132,29 @@ function Chip({ account, label, now, onShow, onHide }: {
   )
 }
 
-/** The popover above a chip: fixed, so the bar's overflow clip doesn't cut it; right-aligned to the chip. */
-function Details({ account, rect, now }: { account: PlanAccount; rect: DOMRect; now: number }): React.ReactElement {
-  const fiveHour = currentWindow(account.fiveHour, now)
-  const sevenDay = currentWindow(account.sevenDay, now)
+/** The popover above the chip: fixed, so the bar's overflow clip doesn't cut it; right-aligned to the chip. One block per login. */
+function Details({ accounts, rect, now }: { accounts: readonly PlanAccount[]; rect: DOMRect; now: number }): React.ReactElement {
   return (
     <div
       role="tooltip"
-      className={`fixed z-(--z-menu) pointer-events-none w-72 flex flex-col gap-2.5 px-3 py-2.5 text-xs tabular-nums ${menuCls}`}
+      className={`fixed z-(--z-menu) pointer-events-none w-72 flex flex-col gap-3 px-3 py-2.5 text-xs tabular-nums ${menuCls}`}
       style={{ right: Math.max(8, window.innerWidth - rect.right), bottom: window.innerHeight - rect.top + 8 }}
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-medium text-text truncate">{account.email}</span>
-        {account.plan && <span className="text-text-muted capitalize shrink-0">{account.plan}</span>}
-      </div>
-      {fiveHour && <WindowRow label="5-hour limit" window={fiveHour} now={now} />}
-      {sevenDay && <WindowRow label="Weekly limit" window={sevenDay} now={now} />}
-      {account.hosts.length > 0 && (
-        <div className="border-t-[0.5px] border-hair pt-2 text-text-muted">Used by {account.hosts.join(', ')}</div>
-      )}
+      {accounts.map((account, index) => {
+        const fiveHour = currentWindow(account.fiveHour, now)
+        const sevenDay = currentWindow(account.sevenDay, now)
+        return (
+          <div key={account.email} className={`flex flex-col gap-2.5 ${index > 0 ? 'border-t-[0.5px] border-hair pt-3' : ''}`}>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="font-medium text-text truncate">{account.email}</span>
+              {account.plan && <span className="text-text-muted capitalize shrink-0">{account.plan}</span>}
+            </div>
+            {fiveHour && <WindowRow label="5-hour limit" window={fiveHour} now={now} />}
+            {sevenDay && <WindowRow label="Weekly limit" window={sevenDay} now={now} />}
+            {account.hosts.length > 0 && <div className="text-text-muted">Used by {account.hosts.join(', ')}</div>}
+          </div>
+        )
+      })}
     </div>
   )
 }
