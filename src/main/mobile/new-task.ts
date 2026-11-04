@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto'
-import { CLAUDE_CHAT_LABEL, createMainStream, isShellCommandProject, type Project, type ProjectsData, type Tab, type Task } from '../../shared/types'
+import { CLAUDE_CHAT_LABEL, createMainStream, isShellCommandProject, type Project, type ProjectsData, type Tab, type Task, type TaskQueuedStart } from '../../shared/types'
 import { taskNameFromPrompt } from '../../shared/task-name'
 import { AppErrorCode } from '../../../protocol/ts/index.ts'
-import { addTaskToStream, currentStreamId, resolveMainTabId, singlePane, withLastTask } from '../../shared/streams'
+import { addTaskToStream, canHaveMainTaskWorktrees, currentStreamId, resolveMainTabId, singlePane, streamGivesTaskWorktrees, withLastTask } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 
 /**
@@ -31,13 +31,21 @@ export function newTaskProject(
   return { ok: true, project }
 }
 
+/**
+ * What `task.new`'s `start` (§8.4) makes of the task: `queued` waits, snoozed,
+ * until no other agent works in its folder (`main/queued-task-runner.ts`);
+ * `ownWorktree` gives a `main` task a worktree of its own.
+ */
+export type NewTaskExtra = Pick<Task, 'queued' | 'ownWorktree'>
+
 export function addTaskWithChat(
   data: ProjectsData,
   projectId: string,
   prompt: string,
   streamId?: string,
   ids: () => string = randomUUID,
-  now: number = Date.now()
+  now: number = Date.now(),
+  start?: { start?: 'queue' | 'worktree'; mode?: string }
 ): NewTaskResult {
   const found = newTaskProject(data, projectId)
   if (!found.ok) return found
@@ -45,7 +53,18 @@ export function addTaskWithChat(
   if (streamId !== undefined && !project.streams.some((stream) => stream.id === streamId)) {
     return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
   }
-  return { ok: true, ...addChatTaskToProject(data, project, prompt, streamId, ids, now) }
+  let extra: NewTaskExtra | undefined
+  if (start?.start === 'queue') {
+    const queued: TaskQueuedStart = { prompt, ...(start.mode ? { mode: start.mode } : {}), at: now }
+    extra = { queued }
+  } else if (start?.start === 'worktree') {
+    const target = project.streams.find((stream) => stream.id === (streamId ?? currentStreamId(project)))
+    if (!target?.isMain) return { ok: false, code: AppErrorCode.BadRequest, message: 'Only a task in main can take a worktree of its own' }
+    if (!canHaveMainTaskWorktrees(project)) return { ok: false, code: AppErrorCode.Unsupported, message: 'This project\'s tasks can\'t have worktrees of their own' }
+    // Main giving them anyway: every new task gets one, flag or not.
+    if (!streamGivesTaskWorktrees(target)) extra = { ownWorktree: true }
+  }
+  return { ok: true, ...addChatTaskToProject(data, project, prompt, streamId, ids, now, extra) }
 }
 
 /**
@@ -58,7 +77,8 @@ export function addChatTaskToProject(
   prompt: string,
   streamId?: string,
   ids: () => string = randomUUID,
-  now: number = Date.now()
+  now: number = Date.now(),
+  extra?: NewTaskExtra
 ): { data: ProjectsData; taskId: string; tabId: string } {
   const tab: Tab = { id: ids(), type: 'claude-chat', title: CLAUDE_CHAT_LABEL, sessionId: ids() }
   const mainTabId = resolveMainTabId([tab])
@@ -67,7 +87,9 @@ export function addChatTaskToProject(
     name: taskNameFromPrompt(prompt),
     panes: singlePane([tab]),
     ...(mainTabId ? { mainTabId } : {}),
-    lastInteractedAt: now
+    lastInteractedAt: now,
+    ...(extra?.queued ? { queued: extra.queued } : {}),
+    ...(extra?.ownWorktree ? { ownWorktree: true as const } : {})
   }
   const target = streamId ?? currentStreamId(project)
   const withTask: Project = withLastTask(

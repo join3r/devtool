@@ -7,7 +7,7 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { composeTarget } from './deskInbox'
 import { deskEvents } from './deskEvents'
-import { autopilotAvailable, busyInSameFolder, canQueueStart, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, writeLastWhere, type WhereOption } from './deskStart'
+import { autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, writeLastWhere, type WhereOption } from './deskStart'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import SameFolderWarning from './SameFolderWarning'
@@ -70,6 +70,9 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     () => (target && agent ? busyInSameFolder(target.project, target.stream, (tabId) => statuses[tabId]) : []),
     [target, agent, statuses]
   )
+  const [pickedChoice, setPickedChoice] = useState<BusyChoice | null>(null)
+  const choices = target ? busyChoices(target.project, target.stream, canQueueStart(agent, images.length)) : []
+  const choice = effectiveBusyChoice(busy, choices, pickedChoice)
 
   const found = mentionAt(text, caret)
   const mention = found && found.start !== dismissedAt ? found : null
@@ -112,18 +115,22 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     })
   }
 
-  const fire = (onAutopilot: boolean, queue = false): void => {
+  /** Sends as the same-folder warning says (`choice`); ⌘↵'s Autopilot doesn't wait in the queue, so it starts here instead. */
+  const fire = (onAutopilot: boolean): void => {
     const prompt = text.trim()
     if (!prompt || !target) return
     writeLastWhere(target.project, target.stream)
-    if (queue) {
+    const autopilot = onAutopilot && canAutopilot
+    if (choice === 'queue' && !autopilot) {
       onCompose({ ...deskSubmission(target.project, target.stream, agent, prompt), queue: true })
     } else {
-      onCompose(deskSubmission(target.project, target.stream, agent, prompt, onAutopilot && canAutopilot ? { on: true, review: config.autopilotReview } : null, toChatImages(images)))
+      const submission = deskSubmission(target.project, target.stream, agent, prompt, autopilot ? { on: true, review: config.autopilotReview } : null, toChatImages(images))
+      onCompose(choice === 'worktree' ? { ...submission, ownWorktree: true } : submission)
     }
     edit('', 0)
     attachments.clear()
     setOverride(null)
+    setPickedChoice(null)
   }
 
   const whereLabel = target
@@ -215,7 +222,9 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
           project={target.project}
           stream={target.stream}
           busy={busy}
-          onQueue={canQueueStart(agent, images.length) ? () => fire(false, true) : undefined}
+          choices={choices}
+          choice={choice}
+          onChoose={setPickedChoice}
         />
       )}
       <WhereMenu

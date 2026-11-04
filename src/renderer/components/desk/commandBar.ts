@@ -17,6 +17,7 @@ import type { DeskScope, Project, Stream, Task } from '../../../shared/types'
 import { isEphemeralProject } from '../../../shared/types'
 import { findStreamOfTask, findTaskInProject, lastUsedStream } from '../../../shared/streams'
 import { fuzzyMatch, FUZZY_SCORE_FLOOR } from '../../palette/fuzzy'
+import type { BusyChoice } from './deskStart'
 import { computeFrecencyMultiplier, type FrecencyState } from '../../palette/frecency'
 import type { InboxApp } from '../inbox'
 
@@ -193,6 +194,7 @@ export function targetLabel(target: BarTarget): string {
 export type BarItem =
   | { kind: 'start'; id: 'start'; target: BarTarget }
   | { kind: 'queue'; id: 'queue'; target: BarTarget }
+  | { kind: 'worktree'; id: 'worktree'; target: BarTarget }
   | { kind: 'complete'; id: string; sigil: '@' | '#'; value: string; project: Project; stream?: Stream }
   | { kind: 'task'; id: string; title: string; project: Project; stream: Stream | undefined; task: Task }
   | { kind: 'project'; id: string; title: string; project: Project }
@@ -219,10 +221,12 @@ export interface BarSources {
   /** The target project's files (relative paths), once loaded; `/` mode only. */
   files: readonly string[] | null
   /**
-   * Other agents work in the folder the started task would go to and it is a
-   * chat: offer queueing it behind them (`Task.queued`).
+   * Other agents work in the folder the started task would go to: what the
+   * start can do about it (`busyChoices`), the default first. Queue files it
+   * behind them (`Task.queued`), Own worktree gives it one (`Task.ownWorktree`),
+   * Start here is the plain Start task.
    */
-  queueable?: boolean
+  busyChoices?: readonly BusyChoice[]
 }
 
 type Ranked = { item: BarItem; score: number }
@@ -383,10 +387,12 @@ export function barSections(bar: ResolvedBar, sources: BarSources, here: BarHere
     ? {
         key: 'start',
         label: null,
-        items: [
-          { kind: 'start', id: 'start', target: bar.target },
-          ...(sources.queueable ? [{ kind: 'queue' as const, id: 'queue' as const, target: bar.target }] : [])
-        ]
+        items: (sources.busyChoices?.length ? sources.busyChoices : ['here' as const]).map((choice): BarItem => {
+          const target = bar.target!
+          if (choice === 'queue') return { kind: 'queue', id: 'queue', target }
+          if (choice === 'worktree') return { kind: 'worktree', id: 'worktree', target }
+          return { kind: 'start', id: 'start', target }
+        })
       }
     : null
   const matchSection: BarSection | null = matches.length > 0 ? { key: 'matches', label: 'Matches', items: matches } : null

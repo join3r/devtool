@@ -1396,6 +1396,36 @@
           "projectId": "p1",
           "prompt": "Go"
         }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"start\":\"queue\",\"mode\":\"auto\"}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Go",
+          "mode": "auto",
+          "start": "queue"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"start\":\"worktree\",\"images\":[{\"mediaType\":\"image/png\",\"data\":\"iVBORw0K\"}]}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Go",
+          "images": [
+            {
+              "mediaType": "image/png",
+              "data": "iVBORw0K"
+            }
+          ],
+          "start": "worktree"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"start\":null}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Go"
+        }
       }
     ],
     "results": [
@@ -1423,6 +1453,8 @@
         "{\"projectId\":\"p1\",\"streamId\":7,\"prompt\":\"Go\"}",
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":[{\"mediaType\":\"image/tiff\",\"data\":\"AAAA\"}]}",
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":[{\"mediaType\":\"image/png\",\"data\":\"\"}]}",
+        "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"start\":\"later\"}",
+        "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"start\":\"queue\",\"images\":[{\"mediaType\":\"image/png\",\"data\":\"iVBORw0K\"}]}",
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":\"photo\"}",
         "null"
       ],

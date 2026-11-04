@@ -231,6 +231,8 @@ public enum DesktopFeature {
     public static let taskLand = "task.land"
     /// The desktop's `chat.send` and `task.new` take `images` (§6.3, §8.4).
     public static let sendImages = "send.images"
+    /// The desktop's `task.new` takes `start`: queue it, or a worktree of its own (§8.4).
+    public static let taskBusy = "task.busy"
     /// The desktop answers `queue.update` and `queue.run`, and sends `queue` (§8.16, §4.4).
     public static let queue = "queue"
     /// The desktop answers `chat.bash` (§8.17).

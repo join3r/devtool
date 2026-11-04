@@ -113,12 +113,12 @@ describe('barSections', () => {
   const sections = (input: string, here = nowhere, extra: Partial<BarSources> = {}) =>
     barSections(resolveBar(input, projects, here), sources(extra), here, {}, NOW)
 
-  it('offers Start task first for a prompt, and queueing only when the folder is busy', () => {
+  it('offers Start task first for a prompt, and the busy folder\'s choices (default first) only when it is busy', () => {
     const result = sections('refactor the whole settings page please')
     expect(result[0].key).toBe('start')
     expect(result[0].items.map(i => i.kind)).toEqual(['start'])
-    const busy = sections('refactor the whole settings page please', nowhere, { queueable: true })
-    expect(busy[0].items.map(i => i.kind)).toEqual(['start', 'queue'])
+    const busy = sections('refactor the whole settings page please', nowhere, { busyChoices: ['queue', 'worktree', 'here'] })
+    expect(busy[0].items.map(i => i.kind)).toEqual(['queue', 'worktree', 'start'])
   })
 
   it('puts a match first when the words name it', () => {

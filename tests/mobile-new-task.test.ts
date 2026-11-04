@@ -87,3 +87,33 @@ describe('addTaskWithChat streams (SPEC.md §8.4)', () => {
     expect(addTaskWithChat(data(), 'p1', 'Go', 'archived')).toMatchObject({ ok: false, code: 'not-found' })
   })
 })
+
+describe('addTaskWithChat start (SPEC.md §8.4, feature task.busy)', () => {
+  const task = (result: ReturnType<typeof addTaskWithChat>) => (result.ok ? projectTasks(result.data.projects[0]).find(t => t.id === result.taskId) : undefined)
+
+  it('queues the prompt instead of sending it', () => {
+    const result = addTaskWithChat(data(), 'p1', 'Go', undefined, counter(), 42, { start: 'queue', mode: 'auto' })
+    expect(task(result)?.queued).toEqual({ prompt: 'Go', mode: 'auto', at: 42 })
+    expect(task(result)?.ownWorktree).toBeUndefined()
+  })
+
+  it('gives a main task its own worktree with main\'s task worktrees off', () => {
+    const result = addTaskWithChat(data(), 'p1', 'Go', undefined, counter(), 42, { start: 'worktree' })
+    expect(task(result)?.ownWorktree).toBe(true)
+  })
+
+  it('needs no flag when main gives every new task a worktree', () => {
+    const on = data()
+    on.projects[0] = { ...on.projects[0], streams: on.projects[0].streams.map(s => (s.isMain ? { ...s, taskWorktrees: true as const } : s)) }
+    const result = addTaskWithChat(on, 'p1', 'Go', undefined, counter(), 42, { start: 'worktree' })
+    expect(result.ok).toBe(true)
+    expect(task(result)?.ownWorktree).toBeUndefined()
+  })
+
+  it('refuses a worktree outside main', () => {
+    const streams = data()
+    const p = streams.projects[0]
+    streams.projects[0] = { ...p, streams: [...p.streams, { id: 's2', name: 'side', tasks: [] }] }
+    expect(addTaskWithChat(streams, 'p1', 'Go', 's2', counter(), 42, { start: 'worktree' })).toMatchObject({ ok: false, code: 'bad-request' })
+  })
+})

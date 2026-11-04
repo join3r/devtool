@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { busyInSameFolder, sameFolderWarning } from '../src/renderer/components/desk/deskStart'
+import { busyChoices, busyInSameFolder, canStartInOwnWorktree, effectiveBusyChoice, sameFolderWarning } from '../src/renderer/components/desk/deskStart'
 import { createMainStream } from '../src/shared/types'
 import type { Project, Stream, Task, TabStatusValue, WorkspaceConfig } from '../src/shared/types'
 import { singlePane } from '../src/shared/streams'
@@ -41,5 +41,37 @@ describe('busyInSameFolder', () => {
     const p = project([task('main-task')], [old])
     expect(busyInSameFolder(p, old, working('x', 'main-task')).map(t => t.id)).toEqual(['x'])
     expect(sameFolderWarning(p, old, [old.tasks[0]])).toMatch(/^"x" is already working in the old worktree/)
+  })
+})
+
+describe('busy folder choices', () => {
+  const busy = [task('a')]
+
+  it('offers Queue, Own worktree and Start here in main with task worktrees off, Queue first', () => {
+    const p = project([task('a')])
+    const choices = busyChoices(p, undefined, true)
+    expect(choices).toEqual(['queue', 'worktree', 'here'])
+    expect(effectiveBusyChoice(busy, choices, null)).toBe('queue')
+    expect(effectiveBusyChoice(busy, choices, 'worktree')).toBe('worktree')
+  })
+
+  it('defaults to Own worktree when the start cannot wait (a terminal, pictures)', () => {
+    const p = project([task('a')])
+    const choices = busyChoices(p, undefined, false)
+    expect(choices).toEqual(['worktree', 'here'])
+    expect(effectiveBusyChoice(busy, choices, 'queue')).toBe('worktree')
+  })
+
+  it('has no choice while the folder is free', () => {
+    const p = project([task('a')])
+    expect(effectiveBusyChoice([], busyChoices(p, undefined, true), 'here')).toBeNull()
+  })
+
+  it('offers no Own worktree outside main, over SSH, or for a shell-command project', () => {
+    const old: Stream = { id: 's', name: 'old', workspace: workspace('/tmp/p-old'), tasks: [task('x')] }
+    expect(canStartInOwnWorktree(project([], [old]), old)).toBe(false)
+    expect(canStartInOwnWorktree({ ...project([]), ssh: { host: 'h', remoteDir: '/r' } } as Project, undefined)).toBe(false)
+    expect(canStartInOwnWorktree({ ...project([]), shellCommand: { command: 'top' } }, undefined)).toBe(false)
+    expect(canStartInOwnWorktree(project([]), undefined)).toBe(true)
   })
 })

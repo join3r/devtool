@@ -1,7 +1,7 @@
 import type { AppConfig, DeskScope, Project, PromptBoxAgent, Stream, Task } from '../../../shared/types'
 import { isChatTabType } from '../../../shared/types'
 import type { ChatImage } from '../../../shared/claude-chat'
-import { findMainStream, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
+import { canHaveMainTaskWorktrees, findMainStream, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
 import { isTaskWorking, type StatusOf } from '../sidebar/closeRules'
 import { availablePromptAgents, pickPromptAgent } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
@@ -121,12 +121,44 @@ export function canQueueStart(agent: PromptBoxAgent | null, images = 0): boolean
   return !!agent && isChatTabType(agent) && images === 0
 }
 
-/** The warning's one line: who works where, and what to do about it. */
+/**
+ * What a start does when its folder is busy (the same-folder warning's choice):
+ * wait for the agents there (`queue`), take a worktree of its own (`worktree`),
+ * or start in the folder alongside them (`here`).
+ */
+export type BusyChoice = 'queue' | 'worktree' | 'here'
+
+/**
+ * Whether a new task in `stream` can take a worktree of its own although the
+ * stream doesn't give them: `main` with its task worktrees off, in a project
+ * that supports them (`Task.ownWorktree`).
+ */
+export function canStartInOwnWorktree(project: Project, stream: Stream | undefined): boolean {
+  const target = stream ?? findMainStream(project)
+  return !!target?.isMain && !streamGivesTaskWorktrees(target) && canHaveMainTaskWorktrees(project)
+}
+
+/** The warning's choices, the default first: Queue when the start can wait, then Own worktree, and always Start here. */
+export function busyChoices(project: Project, stream: Stream | undefined, canQueue: boolean): BusyChoice[] {
+  return [
+    ...(canQueue ? ['queue' as const] : []),
+    ...(canStartInOwnWorktree(project, stream) ? ['worktree' as const] : []),
+    'here'
+  ]
+}
+
+/** The choice a start follows: none while the folder is free, else the picked one while it is offered, else the default. */
+export function effectiveBusyChoice(busy: readonly Task[], choices: readonly BusyChoice[], picked: BusyChoice | null): BusyChoice | null {
+  if (busy.length === 0) return null
+  return picked && choices.includes(picked) ? picked : choices[0]
+}
+
+/** The warning's one line: who works where. */
 export function sameFolderWarning(project: Project, stream: Stream | undefined, busy: readonly Task[]): string {
   const target = stream ?? findMainStream(project)
   const where = target?.workspace ? `the ${target.name} worktree` : 'the project folder'
   const who = busy.length === 1 ? `"${busy[0].name}" is` : `${busy.length} agents are`
-  return `${who} already working in ${where}. Two agents there edit the same files; a new stream gives this one its own worktree.`
+  return `${who} already working in ${where}. Two agents there edit the same files.`
 }
 
 /** When you last worked in a stream: its most recently touched task. */

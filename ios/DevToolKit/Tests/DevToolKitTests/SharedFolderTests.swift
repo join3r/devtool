@@ -41,4 +41,25 @@ import Testing
         #expect(busy.map(\.id) == ["x"])
         #expect(project.sameFolderWarning(release, busy: busy).hasPrefix("“x” is already working in the release worktree"))
     }
+
+    @Test func busyChoicesInMainWithoutTaskWorktrees() {
+        let project = InboxProject(id: "p", name: "p", streams: [main, release], tasks: [task("a", main)])
+        let busy = project.busyInSameFolder(nil)
+        let choices = project.busyChoices(nil, canQueue: true)
+        #expect(choices == [.queue, .worktree, .here])
+        #expect(effectiveBusyChoice(busy: busy, choices: choices, picked: nil) == .queue)
+        #expect(effectiveBusyChoice(busy: busy, choices: choices, picked: .worktree) == .worktree)
+        #expect(effectiveBusyChoice(busy: [], choices: choices, picked: .here) == nil)
+        // Pictures don't wait in the queue: Own worktree comes first.
+        #expect(project.busyChoices(nil, canQueue: false) == [.worktree, .here])
+        #expect(BusyChoice.queue.start == .queue && BusyChoice.here.start == nil)
+    }
+
+    @Test func noOwnWorktreeOutsideMainOrOverSSH() {
+        let project = InboxProject(id: "p", name: "p", streams: [main, folder], tasks: [])
+        #expect(!project.canStartInOwnWorktree(folder))
+        #expect(project.canStartInOwnWorktree(nil))
+        let remote = InboxProject(id: "p", name: "p", remote: true, streams: [main], tasks: [])
+        #expect(!remote.canStartInOwnWorktree(nil))
+    }
 }

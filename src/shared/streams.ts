@@ -124,13 +124,22 @@ export function setMainTaskWorktrees(project: Project, on: boolean): Project {
 }
 
 /**
+ * Whether `task` of `stream` works in a worktree of its own: every task of a
+ * stream that gives them ({@link streamGivesTaskWorktrees}), and a `main` task
+ * asked for one (`Task.ownWorktree`) with main's task worktrees off.
+ */
+export function taskGetsOwnWorktree(stream: Stream | undefined, task: Task): boolean {
+  return streamGivesTaskWorktrees(stream) || (!!task.ownWorktree && !!stream?.isMain)
+}
+
+/**
  * Whether `task` is still to get a worktree of its own before its first tab
  * spawns: its stream gives them ({@link streamGivesTaskWorktrees}), the
  * project supports them ({@link taskWorktreesSupported}), and the task has no
  * worktree yet and does not share the stream's.
  */
 export function needsTaskWorktree(project: Project, stream: Stream, task: Task): boolean {
-  return streamGivesTaskWorktrees(stream)
+  return taskGetsOwnWorktree(stream, task)
     && taskWorktreesSupported(project)
     && !task.workspace
     && !task.sharesStreamWorktree
@@ -145,7 +154,7 @@ export function needsTaskWorktree(project: Project, stream: Stream, task: Task):
  * new one. Anywhere else it works in the stream's directory, as before.
  */
 export function reopensInOwnWorktree(project: Project, stream: Stream, task: Task): boolean {
-  return streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project)
+  return taskGetsOwnWorktree(stream, task) && taskWorktreesSupported(project)
     && !task.sharesStreamWorktree
 }
 

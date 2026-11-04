@@ -114,6 +114,8 @@ struct NewTaskSheet: View {
     /// before the inbox that lists it arrives).
     @State private var newStream: NewStreamTarget?
     @State private var createdStreamId: String?
+    /// The same-folder warning's pick (`task.busy`); nil follows its default.
+    @State private var pickedChoice: BusyChoice?
 
     init(target: NewTaskTarget) {
         self.target = target
@@ -385,6 +387,17 @@ struct NewTaskSheet: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     }
+                    let choices = busyChoices(project, busy: busy, desktopId: selection.desktopId)
+                    if choices.count > 1 {
+                        Picker("Start it", selection: Binding(
+                            get: { effectiveBusyChoice(busy: busy, choices: choices, picked: pickedChoice) ?? .here },
+                            set: { pickedChoice = $0 }
+                        )) {
+                            ForEach(choices, id: \.self) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(sending || offline)
+                    }
                     if model.supports(DesktopFeature.streamNew, on: selection.desktopId) {
                         Button("New stream…") {
                             newStream = NewStreamTarget(desktopId: selection.desktopId, projectId: project.id)
@@ -397,6 +410,20 @@ struct NewTaskSheet: View {
             }
         }
     }
+    /// What a start can do about the busy folder, for a desktop that lists
+    /// `task.busy`: just Start here for one that doesn't.
+    private func busyChoices(_ project: InboxProject, busy: [InboxTask], desktopId: String) -> [BusyChoice] {
+        guard !busy.isEmpty, model.supports(DesktopFeature.taskBusy, on: desktopId) else { return [.here] }
+        return project.busyChoices(selectedStream, canQueue: images.isEmpty || !imagesSupported)
+    }
+
+    /// The choice Send follows: the warning's pick while it shows, else none.
+    private var busyChoice: BusyChoice? {
+        guard let project = selectedProject, let selection, targetStreamId == selectedStream?.id else { return nil }
+        let busy = project.busyInSameFolder(selectedStream)
+        return effectiveBusyChoice(busy: busy, choices: busyChoices(project, busy: busy, desktopId: selection.desktopId), picked: pickedChoice)
+    }
+
     private var trimmed: String { prompt.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var offline: Bool { selection.map { model.isOffline($0.desktopId) } ?? true }
     /// The picked desktop takes pictures with `task.new`.
@@ -427,17 +454,20 @@ struct NewTaskSheet: View {
         sending = true
         error = nil
         do {
-            let picked = imagesSupported ? images.map(\.image) : []
+            let start = busyChoice?.start
+            // A queued task's prompt waits on the desktop, and pictures don't wait with it.
+            let picked = imagesSupported && start != .queue ? images.map(\.image) : []
             let encoded = await Task.detached(priority: .userInitiated) { PickedImage.encode(picked) }.value
             // A stream that has gone since the picker was filled: let the desktop pick.
             let route = try await model.newTask(
                 desktopId: selection.desktopId, projectId: selection.projectId, streamId: targetStreamId,
-                prompt: trimmed, mode: mode.isEmpty ? nil : mode, images: encoded
+                prompt: trimmed, mode: mode.isEmpty ? nil : mode, images: encoded, start: start
             )
             lastProject = selection.id
             dismiss()
             // RootView waits for the task to appear in the inbox, then pushes the chat.
-            model.requestedChat = route
+            // A queued one waits in Snoozed instead: there is nothing to watch yet.
+            if start != .queue { model.requestedChat = route }
         } catch {
             self.error = error.localizedDescription
             sending = false

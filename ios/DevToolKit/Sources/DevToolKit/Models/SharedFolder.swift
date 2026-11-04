@@ -31,6 +31,55 @@ extension InboxProject {
         let target = stream ?? mainStream
         let place = target?.branch != nil ? "the \(target?.name ?? "stream") worktree" : "the project folder"
         let who = busy.count == 1 ? "“\(busy[0].name)” is" : "\(busy.count) agents are"
-        return "\(who) already working in \(place). Two agents there edit the same files; a new stream gives this one its own worktree."
+        return "\(who) already working in \(place). Two agents there edit the same files."
     }
+}
+
+/// What a new task does when its folder is busy (`task.busy`, §8.4), as the
+/// desktop's warning asks: wait, take a worktree of its own, or start there.
+public enum BusyChoice: String, Sendable, Equatable, CaseIterable {
+    case queue
+    case worktree
+    case here
+
+    public var label: String {
+        switch self {
+        case .queue: "Queue"
+        case .worktree: "Own worktree"
+        case .here: "Start here"
+        }
+    }
+
+    /// What `task.new` sends for it; nil starts the task in the folder now.
+    public var start: TaskNewParams.Start? {
+        switch self {
+        case .queue: .queue
+        case .worktree: .worktree
+        case .here: nil
+        }
+    }
+}
+
+extension InboxProject {
+    /// Whether a new task in `stream` (nil: `main`) can take a worktree of its
+    /// own although the stream doesn't give them: `main` without
+    /// `taskWorktrees`, in a project that isn't `remote`.
+    public func canStartInOwnWorktree(_ stream: InboxStream?) -> Bool {
+        guard let target = stream ?? mainStream, !remote else { return false }
+        return target.isMain && target.branch == nil && !target.taskWorktrees
+    }
+
+    /// The warning's choices, the default first: Queue when the start can
+    /// wait (no pictures), then Own worktree, and always Start here.
+    public func busyChoices(_ stream: InboxStream?, canQueue: Bool) -> [BusyChoice] {
+        (canQueue ? [.queue] : []) + (canStartInOwnWorktree(stream) ? [.worktree] : []) + [.here]
+    }
+}
+
+/// The choice a start follows: none while the folder is free, else the picked
+/// one while it is offered, else the default.
+public func effectiveBusyChoice(busy: [InboxTask], choices: [BusyChoice], picked: BusyChoice?) -> BusyChoice? {
+    guard !busy.isEmpty else { return nil }
+    if let picked, choices.contains(picked) { return picked }
+    return choices.first
 }

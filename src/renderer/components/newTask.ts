@@ -39,6 +39,11 @@ export interface NewTaskSubmission {
    * agent works in its folder, and main sends the prompt then (`Task.queued`).
    */
   queue?: boolean
+  /**
+   * Own worktree (same-folder warning): a `main` task with main's task worktrees
+   * off still gets a worktree of its own (`Task.ownWorktree`).
+   */
+  ownWorktree?: boolean
 }
 
 export interface NewTaskDraft {

@@ -11,7 +11,7 @@ import NoteTab from './NoteTab'
 import { AI_TAB_META, AI_TAB_TYPES, chatTabAgent, isChatTabType } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
-import { findStreamOfTask, needsTaskWorktree, streamGivesTaskWorktrees, streamTakesLandings, tabSpawnDir, taskTabs, taskWorktreesSupported, waitsForTaskWorktree } from '../../shared/streams'
+import { findStreamOfTask, needsTaskWorktree, streamTakesLandings, taskGetsOwnWorktree, tabSpawnDir, taskTabs, taskWorktreesSupported, waitsForTaskWorktree } from '../../shared/streams'
 import { isStatusTab } from '../../shared/inbox-state'
 import { featureAvailable } from '../../shared/project-features'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
@@ -386,7 +386,7 @@ function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
   retry: () => void
 } {
   const stream = findStreamOfTask(project, task.id)
-  const possible = (streamGivesTaskWorktrees(stream) || (!!task.workspace && streamTakesLandings(stream))) && taskWorktreesSupported(project) && !task.sharesStreamWorktree
+  const possible = (taskGetsOwnWorktree(stream, task) || (!!task.workspace && streamTakesLandings(stream))) && taskWorktreesSupported(project) && !task.sharesStreamWorktree
   const state = useTaskWorktreeState(task.id, possible)
   // A DevTool server's task is made there: asked once the server can answer.
   const hostOnline = useServerOnline(project.host)

@@ -21,7 +21,7 @@ import { createTab } from '../newTaskTabs'
 import { inboxApps } from '../inbox'
 import { openBench } from './benchState'
 import { openRunLog } from './DeskStatusBar'
-import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, canQueueStart, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
 import AutopilotChips from './AutopilotChips'
 import {
   barSections, completeToken, resolveBar, targetLabel,
@@ -126,6 +126,10 @@ export default function DeskCommandBar(): React.ReactElement | null {
     [open, agent, bar.target, input, statuses]
   )
   const queueable = busy.length > 0 && canQueueStart(agent)
+  const choices = useMemo(
+    () => (busy.length > 0 && bar.target ? busyChoices(bar.target.project, bar.target.stream, queueable) : undefined),
+    [busy, bar.target, queueable]
+  )
 
   const sections = useMemo<BarSection[]>(() => {
     if (!open) return []
@@ -136,9 +140,9 @@ export default function DeskCommandBar(): React.ReactElement | null {
       commands: paletteCommandEntities(actions),
       notes,
       files: filesDir && files?.dir === filesDir.dir ? files.list : null,
-      queueable
+      busyChoices: choices
     }, here, frecency, Date.now())
-  }, [open, bar, projects, composeProjects, runs, dismissed, actions, notes, filesDir, files, here, frecency, queueable])
+  }, [open, bar, projects, composeProjects, runs, dismissed, actions, notes, filesDir, files, here, frecency, choices])
   const flat = useMemo(() => sections.flatMap(section => section.items), [sections])
 
   useEffect(() => { setSelected(0) }, [input])
@@ -157,9 +161,11 @@ export default function DeskCommandBar(): React.ReactElement | null {
 
   const close = (): void => setOpen(false)
 
-  const startTask = (target: BarTarget, prompt: string): void => {
+  /** `ownWorktree`: the busy folder's Own worktree (`Task.ownWorktree`). */
+  const startTask = (target: BarTarget, prompt: string, ownWorktree = false): void => {
     writeLastWhere(target.project, target.stream)
-    fileNewTask(deskSubmission(target.project, target.stream, agent, prompt, autopilot))
+    const submission = deskSubmission(target.project, target.stream, agent, prompt, autopilot)
+    fileNewTask(ownWorktree ? { ...submission, ownWorktree: true } : submission)
     close()
   }
 
@@ -182,6 +188,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
     const prompt = bar.query.trim()
     if (item.kind === 'start') { if (prompt) startTask(item.target, prompt); return }
     if (item.kind === 'queue') { if (prompt) queueTask(item.target, prompt); return }
+    if (item.kind === 'worktree') { if (prompt) startTask(item.target, prompt, true); return }
     if (item.kind === 'complete') {
       if (bar.completing) setInput(completeToken(input, bar.completing, item.sigil, item.value))
       inputRef.current?.focus()
@@ -436,10 +443,18 @@ function BarRow({ item, index, selected, agent, busy, theme, onHover, onClick }:
               )}
             </span>
           </div>
-          {kbd('↵')}
+          {(selected || busy.length === 0) && kbd('↵')}
         </div>
       )
     }
+    case 'worktree':
+      return (
+        <div {...common} className={`${ROW} py-2 ${bg}`}>
+          <span className="w-[22px] text-center text-text-muted">⎇</span>
+          <span className="flex-1 truncate">Own worktree: start now, land it into the project folder when done</span>
+          {selected && kbd('↵')}
+        </div>
+      )
     case 'queue':
       return (
         <div {...common} className={`${ROW} py-2 ${bg}`}>

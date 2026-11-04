@@ -13,7 +13,7 @@ import { agentTakesMode, setPendingPrompt, taskNameFromPrompt } from '../compone
  */
 export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
   const { addTask, addTaskInDirectory, titleTaskFromPrompt, updateConfig } = useApp()
-  return useCallback(({ target, streamId, start, terminal, autopilot, queue }: NewTaskSubmission) => {
+  return useCallback(({ target, streamId, start, terminal, autopilot, queue, ownWorktree }: NewTaskSubmission) => {
     if (queue && start && target.kind === 'project' && isChatTabType(start.agent)) {
       // No pending prompt: main sends it once the folder is free. Autopilot and
       // pictures don't wait in the queue.
@@ -47,9 +47,10 @@ export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
     }
     const task = target.kind === 'dir'
       ? addTaskInDirectory(target.directory, name, tabs)
-      : addTask(target.projectId, name, tabs, streamId, autopilot && start?.agent === 'claude-chat'
-        ? { autopilot: { phase: 'working', ...(autopilot.review ? { review: true } : {}) } }
-        : undefined)
+      : addTask(target.projectId, name, tabs, streamId, {
+        ...(autopilot && start?.agent === 'claude-chat' ? { autopilot: { phase: 'working', ...(autopilot.review ? { review: true } : {}) } } : {}),
+        ...(ownWorktree ? { ownWorktree: true } : {})
+      })
     if (start) titleTaskFromPrompt(task.id, name, start.prompt.text)
     return task
   }, [addTask, addTaskInDirectory, titleTaskFromPrompt, updateConfig])

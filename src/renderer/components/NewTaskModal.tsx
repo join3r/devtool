@@ -12,7 +12,7 @@ import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickProm
 import { currentStreamId } from '../../shared/streams'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
 import AutopilotChips from './desk/AutopilotChips'
-import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, canQueueStart, type DeskAutopilot } from './desk/deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, type DeskAutopilot } from './desk/deskStart'
 import SameFolderWarning from './desk/SameFolderWarning'
 import { useAllTabStatuses } from '../context/TabStatusContext'
 
@@ -163,6 +163,7 @@ export default function NewTaskModal({
     () => (project && !terminal ? busyInSameFolder(project, stream, (tabId) => statuses[tabId]) : []),
     [project, stream, terminal, statuses]
   )
+  const [pickedChoice, setPickedChoice] = useState<BusyChoice | null>(null)
   // Shell-command projects run their own command in every terminal.
   const takesCommand = terminal && !project?.shellCommand
   const agents = useMemo(
@@ -180,6 +181,8 @@ export default function NewTaskModal({
   const images = takesImages ? attachments.images : []
   // Images go with a prompt: one alone would name the task and branch after nothing.
   const imagesNeedPrompt = images.length > 0 && !promptText
+  const choices = project ? busyChoices(project, stream, canQueueStart(agent ?? null, images.length) && !!promptText) : []
+  const choice = effectiveBusyChoice(busy, choices, pickedChoice)
 
   /** Point the composer somewhere else, dropping everything the old target loaded. */
   const selectTarget = (next: NewTaskTarget): void => {
@@ -253,10 +256,15 @@ export default function NewTaskModal({
   const draft = { target, prompt: promptText }
   const valid = isNewTaskDraftValid(draft) && !imagesNeedPrompt
 
-  /** `forceAutopilot`: ⌘↵, which starts on Autopilot even with the chip off (the chip's review choice still holds). */
+  /**
+   * `forceAutopilot`: ⌘↵, which starts on Autopilot even with the chip off (the
+   * chip's review choice still holds). A busy folder's warning decides the rest
+   * (`choice`); Autopilot doesn't wait in the queue, so it starts here instead.
+   */
   const handleCreate = (forceAutopilot = false): void => {
     if (!valid || !target) return
     const run = canAutopilot && promptText && (forceAutopilot || autopilot.on) ? autopilot : null
+    if (choice === 'queue' && !run) { handleQueue(); return }
     const where = target.kind === 'project' && streamId ? { streamId } : {}
     if (terminal) {
       onCreate({ target, ...where, terminal: takesCommand && promptText ? { command: promptText } : {} })
@@ -275,7 +283,11 @@ export default function NewTaskModal({
           }
         }
       : undefined
-    onCreate({ target, ...where, start, ...(run && start ? { autopilot: { review: run.review } } : {}) })
+    onCreate({
+      target, ...where, start,
+      ...(run && start ? { autopilot: { review: run.review } } : {}),
+      ...(choice === 'worktree' ? { ownWorktree: true } : {})
+    })
   }
 
   /** The warning's Queue: the chat starts once the agents in its folder finish. */
@@ -471,7 +483,9 @@ export default function NewTaskModal({
               stream={stream}
               busy={busy}
               offerStream={false}
-              onQueue={canQueueStart(agent ?? null, images.length) ? handleQueue : undefined}
+              choices={choices}
+              choice={choice}
+              onChoose={setPickedChoice}
             />
           )}
 

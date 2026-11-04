@@ -19,7 +19,8 @@ import {
   findStreamOfTask,
   findTaskInProject,
   taskMoveBlocker,
-  waitsForTaskWorktree
+  waitsForTaskWorktree,
+  reopensInOwnWorktree
 } from '../src/shared/streams'
 import { retargetPath } from '../src/shared/workspace-path'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
@@ -132,6 +133,16 @@ describe('task worktrees', () => {
     expect(needs({ ...project(), ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } }, 'ws')).toBe(false)
     const unmarked = fixtureProject({ id: 'p', tasks: [{ id: 'ws', workspace }] })
     expect(needsTaskWorktree(unmarked, unmarked.streams[1], unmarked.streams[1].tasks[0])).toBe(false)
+  })
+
+  it('gives a main task asked for its own worktree one, with main\'s task worktrees off', () => {
+    const p = fixtureProject({ id: 'p', directory: '/repo', tasks: [{ id: 'asked', ownWorktree: true }, { id: 'plain' }] })
+    const main = p.streams.find(s => s.isMain)!
+    expect(needs(p as ReturnType<typeof project>, 'asked')).toBe(true)
+    expect(needs(p as ReturnType<typeof project>, 'plain')).toBe(false)
+    expect(reopensInOwnWorktree(p, main, findTaskInProject(p, 'asked')!)).toBe(true)
+    expect(reopensInOwnWorktree(p, main, findTaskInProject(p, 'plain')!)).toBe(false)
+    expect(needs({ ...p, ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } } as ReturnType<typeof project>, 'asked')).toBe(false)
   })
 
   it('marks a new worktree stream, and only a worktree stream', () => {

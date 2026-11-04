@@ -454,13 +454,25 @@ public struct TaskNewParams: Sendable, Equatable {
     /// Pictures sent with the prompt (`task.images`): at most
     /// `SentImage.maxCount`, `SentImage.maxData` base64 characters in all.
     public var images: [SentImage]
+    /// What the task does about other agents in its folder (`task.busy`);
+    /// nil starts it there now.
+    public var start: Start?
 
-    public init(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [SentImage] = []) {
+    /// `start` (§8.4): wait for the folder, or take a worktree of its own.
+    public enum Start: String, Sendable, Equatable, CaseIterable {
+        /// Held, snoozed, until no other agent works in its folder. Takes no pictures.
+        case queue
+        /// A `main` task's own worktree, with main's task worktrees off.
+        case worktree
+    }
+
+    public init(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [SentImage] = [], start: Start? = nil) {
         self.projectId = projectId
         self.streamId = streamId
         self.prompt = prompt
         self.mode = mode
         self.images = images
+        self.start = start
     }
 }
 
@@ -1225,8 +1237,8 @@ extension SentImage {
 }
 
 extension TaskNewParams {
-    /// The desktop's side: a missing `projectId`, a blank or over-long prompt, or an
-    /// unknown `mode` throws (`bad-request`).
+    /// The desktop's side: a missing `projectId`, a blank or over-long prompt, an
+    /// unknown `mode` or `start`, or `start: queue` with images throws (`bad-request`).
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> TaskNewParams {
         let o = try Fields(value, "params")
         let projectId = try o.str("projectId")
@@ -1235,7 +1247,15 @@ extension TaskNewParams {
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ProtocolError("prompt is empty") }
         let mode = try o.optStr("mode")
         if let mode, !TaskOp.modes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
-        return TaskNewParams(projectId: projectId, streamId: try o.optStr("streamId"), prompt: prompt, mode: mode, images: try SentImage.parseList(o))
+        let streamId = try o.optStr("streamId")
+        let images = try SentImage.parseList(o)
+        var start: Start?
+        if let raw = try o.optStr("start") {
+            guard let parsed = Start(rawValue: raw) else { throw ProtocolError("unknown start \(raw)") }
+            if parsed == .queue, !images.isEmpty { throw ProtocolError("a queued task takes no images") }
+            start = parsed
+        }
+        return TaskNewParams(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images, start: start)
     }
 
     public var json: JSONValue {
@@ -1244,6 +1264,7 @@ extension TaskNewParams {
         fields["prompt"] = .string(prompt)
         if let mode { fields["mode"] = .string(mode) }
         if !images.isEmpty { fields["images"] = SentImage.json(images) }
+        if let start { fields["start"] = .string(start.rawValue) }
         return .object(fields)
     }
 }

@@ -716,7 +716,11 @@ function chatMessages(): unknown {
         text({ projectId: 'p1', prompt: 'Go', workspace: true }),
         // `images` (feature `send.images`) go with the prompt; an empty list is no images.
         text({ projectId: 'p1', prompt: 'What is wrong here?', images: [{ mediaType: 'image/jpeg', data: '/9j/4AAQ' }, { mediaType: 'image/png', data: 'iVBORw0K' }] }),
-        text({ projectId: 'p1', prompt: 'Go', images: [] })
+        text({ projectId: 'p1', prompt: 'Go', images: [] }),
+        // `start` (feature `task.busy`): wait for the folder, or take a worktree of its own.
+        text({ projectId: 'p1', prompt: 'Go', start: 'queue', mode: 'auto' }),
+        text({ projectId: 'p1', prompt: 'Go', start: 'worktree', images: [{ mediaType: 'image/png', data: 'iVBORw0K' }] }),
+        text({ projectId: 'p1', prompt: 'Go', start: null })
       ].map((json) => ({ json, expected: parseTaskNewParams(JSON.parse(json)) })),
       results: [text({ taskId: 'task-new', tabId: 'tab-new' }), text({ taskId: 'task-new', tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseTaskNewResult(JSON.parse(json)) })),
       invalid: {
@@ -728,6 +732,8 @@ function chatMessages(): unknown {
           text({ projectId: 'p1', streamId: 7, prompt: 'Go' }),
           text({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/tiff', data: 'AAAA' }] }),
           text({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/png', data: '' }] }),
+          text({ projectId: 'p1', prompt: 'Go', start: 'later' }),
+          text({ projectId: 'p1', prompt: 'Go', start: 'queue', images: [{ mediaType: 'image/png', data: 'iVBORw0K' }] }),
           text({ projectId: 'p1', prompt: 'Go', images: 'photo' }),
           'null'
         ],

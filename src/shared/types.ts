@@ -247,6 +247,13 @@ export interface Task {
    * of older worktree streams (`adoptTaskWorktrees` in streams-migration.ts).
    */
   sharesStreamWorktree?: true
+  /**
+   * The task gets a worktree of its own although its stream doesn't give them:
+   * a `main` task started with the same-folder warning's Own worktree while
+   * another agent works in the project folder. It lands back into the project
+   * folder like any task worktree (`taskGetsOwnWorktree`).
+   */
+  ownWorktree?: true
   landing?: TaskLanding
   /** Autopilot (desk redesign decision 7): main takes the task from its first turn to Done by itself. */
   autopilot?: TaskAutopilot

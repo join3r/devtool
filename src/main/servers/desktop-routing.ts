@@ -254,7 +254,7 @@ export class DesktopRouting {
         const gives = streamGivesTaskWorktrees(stream)
         if (!gives && !stream.isMain) continue
         for (const task of stream.tasks) {
-          if ((gives || task.workspace) && !task.sharesStreamWorktree && this.index.taskOf(task.id, serverId)) ids.push(task.id)
+          if ((gives || task.workspace || task.ownWorktree) && !task.sharesStreamWorktree && this.index.taskOf(task.id, serverId)) ids.push(task.id)
         }
       }
     }

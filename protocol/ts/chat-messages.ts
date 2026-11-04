@@ -46,7 +46,21 @@ export const SEND_IMAGES_FEATURE = 'send.images'
 
 /** A picture a phone sends with a message (§6.3, §8.4). */
 export interface SentImage { mediaType: string; data: string }
-export interface TaskNewParams { projectId: string; streamId?: string; prompt: string; mode?: TaskNewMode; images?: SentImage[] }
+/**
+ * The handshake feature (§8.1) a desktop lists when `task.new` takes `start`:
+ * what a task does when another agent already works in its folder.
+ */
+export const TASK_BUSY_FEATURE = 'task.busy'
+
+/**
+ * `task.new`'s `start` (§8.4): `queue` waits until no other agent works in the
+ * task's folder, `worktree` gives a `main` task a worktree of its own with
+ * main's task worktrees off. Absent, the task starts in its stream's folder now.
+ */
+export const TASK_NEW_STARTS = ['queue', 'worktree'] as const
+export type TaskNewStart = (typeof TASK_NEW_STARTS)[number]
+
+export interface TaskNewParams { projectId: string; streamId?: string; prompt: string; mode?: TaskNewMode; images?: SentImage[]; start?: TaskNewStart }
 export interface TaskNewResult { taskId: string; tabId: string }
 
 /**
@@ -1106,7 +1120,8 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
  * a missing `projectId`, a blank prompt or one over {@link ChatLimits.send}
  * characters, a `mode` outside {@link TASK_NEW_MODES}, or `images` that aren't
  * {@link CHAT_IMAGE_TYPES} or go over {@link ChatLimits.sentImages} /
- * {@link ChatLimits.sentImageData}.
+ * {@link ChatLimits.sentImageData}, a `start` outside {@link TASK_NEW_STARTS},
+ * or `start: queue` with images (pictures don't wait in the queue).
  */
 export function parseTaskNewParams(params: unknown): TaskNewParams {
   const o = obj(params, 'params')
@@ -1124,6 +1139,12 @@ export function parseTaskNewParams(params: unknown): TaskNewParams {
   }
   const images = sentImages(o)
   if (images) out.images = images
+  const start = optStr(o, 'start')
+  if (start !== undefined) {
+    if (!(TASK_NEW_STARTS as readonly string[]).includes(start)) fail(`unknown start ${start}`)
+    if (start === 'queue' && images) fail('a queued task takes no images')
+    out.start = start as TaskNewStart
+  }
   return out
 }
 
