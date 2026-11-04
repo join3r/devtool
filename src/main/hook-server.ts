@@ -26,6 +26,16 @@ const TAB_TOKEN_ENDPOINTS = new Set(['land', 'update'])
  */
 export type HookResponder = (endpoint: string, tabId: string, body: Record<string, unknown>) => Promise<string | undefined> | string | undefined
 
+/**
+ * Answers one POST to `/mcp` (DevTool's MCP server, `devtool-mcp.ts`): the
+ * JSON-RPC answer, or undefined when there is none to send (202). `signal`
+ * aborts when the client hangs up, so a long wait stops with it.
+ */
+export type McpHandler = (tabId: string, body: unknown, signal: AbortSignal) => Promise<unknown>
+
+/** The MCP endpoint's path on the hook server. */
+export const MCP_PATH = '/mcp'
+
 function headerValue(headers: http.IncomingHttpHeaders, name: string): string | undefined {
   const raw = headers[name.toLowerCase()]
   if (Array.isArray(raw)) return raw[0]
@@ -50,6 +60,7 @@ export class HookServer extends EventEmitter {
   /** Keys {@link tabToken}. Never leaves this process: the shared token does (hook commands, Pi's env), so it can't key tab tokens. */
   private readonly tabSecret = crypto.randomBytes(32)
   private responder: HookResponder | null = null
+  private mcpHandler: McpHandler | null = null
 
   /** `logger` traces every inbound hook, including rejects — the only way to tell
    *  "the agent never called" from "it called with no tab id". */
@@ -75,9 +86,91 @@ export class HookServer extends EventEmitter {
     this.responder = responder
   }
 
+  setMcpHandler(handler: McpHandler | null): void {
+    this.mcpHandler = handler
+  }
+
+  /**
+   * `/mcp`: MCP's Streamable HTTP transport, stateless. Only POST, only with the
+   * tab's own token (the tools act as that tab), answered with plain JSON.
+   */
+  private serveMcp(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { Allow: 'POST' })
+      res.end()
+      return
+    }
+    const tabId = headerValue(req.headers, HOOK_TAB_ID_HEADER)
+    if (!tabId || !hookTokensMatch(headerValue(req.headers, HOOK_TOKEN_HEADER), this.tabToken(tabId))) {
+      this.logger?.(`mcp reject-unauthorized tabId=${tabId ?? ''}`)
+      res.writeHead(401)
+      res.end()
+      return
+    }
+    const handler = this.mcpHandler
+    if (!handler) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    const chunks: Buffer[] = []
+    let size = 0
+    let tooLarge = false
+    req.on('data', (chunk: Buffer | string) => {
+      if (tooLarge) return
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+      size += buf.length
+      if (size > MAX_HOOK_BODY_BYTES) {
+        tooLarge = true
+        res.writeHead(413)
+        res.end()
+        req.destroy()
+        return
+      }
+      chunks.push(buf)
+    })
+    req.on('end', () => {
+      if (tooLarge) return
+      let body: unknown
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }))
+        return
+      }
+      const aborter = new AbortController()
+      res.on('close', () => { if (!res.writableFinished) aborter.abort() })
+      Promise.resolve()
+        .then(() => handler(tabId, body, aborter.signal))
+        .then(
+          (answer) => {
+            if (res.destroyed) return
+            if (answer === undefined) {
+              res.writeHead(202)
+              res.end()
+              return
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(answer))
+          },
+          (err: unknown) => {
+            this.logger?.(`mcp error tabId=${tabId} error=${err instanceof Error ? err.message : String(err)}`)
+            if (res.destroyed) return
+            res.writeHead(500)
+            res.end()
+          }
+        )
+    })
+  }
+
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = http.createServer((req, res) => {
+        if (req.url === MCP_PATH || req.url?.startsWith(`${MCP_PATH}?`)) {
+          this.serveMcp(req, res)
+          return
+        }
         const match = req.url?.match(/^\/hook\/(.+)$/)
         const endpoint = match?.[1]
 

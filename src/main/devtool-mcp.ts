@@ -1,0 +1,699 @@
+import type { AgentActivity } from '../shared/agent-activity'
+import { describeActivity } from '../shared/agent-activity'
+import type { ArchivedTask, ProjectArchive } from '../shared/archive'
+import { autopilotActive, autopilotBusy, autopilotLine, autopilotNeedsYou, autopilotTab } from '../shared/autopilot'
+import { landingNeedsYou, statusTabs, taskStatus } from '../shared/inbox-state'
+import { taskDirectory, taskTabs } from '../shared/streams'
+import type { Project, ProjectsData, Stream, Tab, TabStatusValue, Task } from '../shared/types'
+import { hasMcpTools } from './agent-context'
+
+/**
+ * DevTool's MCP server: tools an agent DevTool started uses to run DevTool
+ * itself, so one task can hand parts of its work to tasks of their own and
+ * follow them. It speaks MCP's Streamable HTTP transport on the hook server's
+ * `/mcp` (`hook-server.ts`), statelessly: every POST is one JSON-RPC message
+ * (or a batch) answered with plain JSON, no event stream and no session.
+ *
+ * The caller is the tab named by the request's tab id and tab token, so a
+ * leaked token acts as that one tab and nothing else.
+ */
+
+export const MCP_SERVER_NAME = 'devtool'
+
+/** Where one tab's agent reaches the server: the URL, and the headers that say which tab it is. */
+export interface DevtoolMcpEndpoint {
+  url: string
+  headers: Record<string, string>
+}
+
+/**
+ * The tools an agent may use without asking: the read-only ones. Starting a
+ * task and messaging one go through the tab's own permission mode (in auto
+ * mode Claude's classifier decides, so an Autopilot run isn't stopped by them).
+ */
+export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
+
+/** The server as Claude's MCP config (`--mcp-config`, the Agent SDK's `mcpServers`) names it. */
+export function claudeMcpServers(endpoint: DevtoolMcpEndpoint): Record<string, { type: 'http'; url: string; headers: Record<string, string> }> {
+  return { [MCP_SERVER_NAME]: { type: 'http', url: endpoint.url, headers: endpoint.headers } }
+}
+
+/**
+ * `claude` flags for a terminal tab. Both take variadic values, so they use the
+ * `--flag=value` form, which takes exactly one: a first prompt after them stays
+ * the prompt.
+ */
+export function claudeMcpArgs(endpoint: DevtoolMcpEndpoint): string[] {
+  return [`--mcp-config=${JSON.stringify({ mcpServers: claudeMcpServers(endpoint) })}`, `--allowedTools=${MCP_ALLOW_RULES.join(',')}`]
+}
+
+/** `codex` config overrides (`-c key=value`, TOML values; JSON strings are TOML strings). */
+export function codexMcpArgs(endpoint: DevtoolMcpEndpoint): string[] {
+  const headers = Object.entries(endpoint.headers).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(', ')
+  return [
+    '-c', `mcp_servers.${MCP_SERVER_NAME}.url=${JSON.stringify(endpoint.url)}`,
+    '-c', `mcp_servers.${MCP_SERVER_NAME}.http_headers={ ${headers} }`
+  ]
+}
+const SERVER_VERSION = '1.0.0'
+const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']
+const DEFAULT_PROTOCOL = '2025-06-18'
+
+/** How much of a task's last reply a tool result carries; the end is kept (the summary is there). */
+export const REPLY_LIMIT = 8000
+const PROMPT_LIMIT = 100_000
+const WAIT_DEFAULT_S = 600
+const WAIT_MAX_S = 3600
+/** A task that has shown no activity yet, this soon after it was made, is still starting. */
+const STARTING_MS = 2 * 60_000
+
+export interface StartTaskInput {
+  /** The caller's own project: tasks start nowhere else. */
+  projectId: string
+  streamId?: string
+  prompt: string
+  autopilot: boolean
+  review: boolean
+  /** The tab asking: the new task gets no looser a permission mode than it has. */
+  callerTabId: string
+  /** The task asking; the new task names it as where it came from. */
+  from: { taskId: string; name: string }
+}
+
+export type StartTaskResult =
+  | { ok: true; taskId: string; queued: boolean; ownWorktree: boolean; autopilot: boolean; mode?: string }
+  | { ok: false; error: string }
+
+export interface DevtoolMcpDeps {
+  peek(): ProjectsData
+  archive(projectId: string): ProjectArchive
+  statusOf(tabId: string): TabStatusValue
+  activityOf(tabId: string): AgentActivity | null
+  /** Calls `listener` on any change to the projects or to a tab's status. */
+  subscribe(listener: () => void): () => void
+  startTask(input: StartTaskInput): Promise<StartTaskResult>
+  /** Sends `text` to the task's agent, as typing it in would. */
+  sendToTask(project: Project, task: Task, tab: Tab, text: string): Promise<void>
+  /** The agent's last reply in `tab`, read from its transcript in `dir`; null when there is none. */
+  lastReply(tab: Tab, dir: string): Promise<string | null>
+  now?(): number
+}
+
+/**
+ * The permission mode a task an agent starts runs in: the caller's, never
+ * looser. Auto and bypass give auto (no task is started bypassing); plan mode
+ * would leave it unable to work, so it asks instead; a mode main can't see (a
+ * terminal tab's) asks too.
+ */
+export function delegatedMode(callerMode: string | null): string {
+  switch (callerMode) {
+    case 'auto':
+    case 'bypassPermissions':
+      return 'auto'
+    case 'acceptEdits':
+    case 'dontAsk':
+      return callerMode
+    default:
+      return 'default'
+  }
+}
+
+// ---- finding things ------------------------------------------------------------------
+
+interface LiveTask {
+  kind: 'live'
+  project: Project
+  stream: Stream
+  task: Task
+}
+
+interface ClosedTask {
+  kind: 'closed'
+  project: Project
+  entry: ArchivedTask
+}
+
+type FoundTask = LiveTask | ClosedTask
+
+function findTabOwner(data: ProjectsData, tabId: string): LiveTask | null {
+  for (const project of data.projects) {
+    for (const stream of project.streams ?? []) {
+      const task = stream.tasks.find(t => taskTabs(t).some(tab => tab.id === tabId))
+      if (task) return { kind: 'live', project, stream, task }
+    }
+  }
+  return null
+}
+
+function findLiveTask(data: ProjectsData, taskId: string): LiveTask | null {
+  for (const project of data.projects) {
+    for (const stream of project.streams ?? []) {
+      const task = stream.tasks.find(t => t.id === taskId)
+      if (task) return { kind: 'live', project, stream, task }
+    }
+  }
+  return null
+}
+
+function findClosedTask(data: ProjectsData, deps: DevtoolMcpDeps, taskId: string, projectId: string): ClosedTask | null {
+  for (const project of data.projects) {
+    if (project.id !== projectId) continue
+    let archive: ProjectArchive
+    try {
+      archive = deps.archive(project.id)
+    } catch {
+      continue
+    }
+    const entry = archive.tasks.find(e => e.task.id === taskId)
+      ?? archive.streams.flatMap(s => s.doneTasks).find(e => e.task.id === taskId)
+    if (entry) return { kind: 'closed', project, entry }
+  }
+  return null
+}
+
+/** A task of project `projectId`, open or closed: an agent sees no other project's. */
+function findTask(data: ProjectsData, deps: DevtoolMcpDeps, taskId: string, projectId: string): FoundTask | null {
+  const live = findLiveTask(data, taskId)
+  if (live) return live.project.id === projectId ? live : null
+  return findClosedTask(data, deps, taskId, projectId)
+}
+
+/** The tab whose conversation stands for the task: Autopilot's chat, else its main or first agent tab. */
+function conversationTab(task: Task): Tab | undefined {
+  return autopilotTab(task) ?? statusTabs(task)[0]
+}
+
+// ---- a task's state ------------------------------------------------------------------
+
+/**
+ * Where a task is, in the words an agent acts on:
+ *  - `starting`, `queued`, `working`: not done yet; wait.
+ *  - `needs_you`: stopped on something only a person (or you) can answer.
+ *  - `idle`: its agent finished its turn and waits for the next message.
+ *  - `exited`: its agent's process is gone.
+ *  - `done`: closed; with Autopilot that means its work landed.
+ */
+export type McpTaskState = 'starting' | 'queued' | 'working' | 'needs_you' | 'idle' | 'exited' | 'done'
+
+export function settled(state: McpTaskState): boolean {
+  return state !== 'starting' && state !== 'queued' && state !== 'working'
+}
+
+export function liveTaskState(task: Task, deps: Pick<DevtoolMcpDeps, 'statusOf' | 'activityOf'>, now: number): { state: McpTaskState; detail?: string } {
+  if (task.queued) {
+    return { state: 'queued', detail: task.queued.error ? `Its start failed: ${task.queued.error}` : 'Waits until no other agent works in its folder' }
+  }
+  const tabs = statusTabs(task)
+  const statuses: Record<string, TabStatusValue> = {}
+  for (const tab of tabs) statuses[tab.id] = deps.statusOf(tab.id)
+  const status = taskStatus(task, statuses)
+  const activityTab = tabs.find(tab => statuses[tab.id] === status) ?? tabs[0]
+  const activity = activityTab ? deps.activityOf(activityTab.id) : null
+  const said = describeActivity(activity ?? undefined, status)
+
+  if (landingNeedsYou(task)) return { state: 'needs_you', detail: `Its landing stopped (${task.landing?.state})` }
+  if (status === 'attention') return { state: 'needs_you', detail: said ?? 'Its agent waits on an answer' }
+  if (status === 'working') return { state: 'working', ...(autopilotLine(task.autopilot) ?? said ? { detail: autopilotLine(task.autopilot) ?? said } : {}) }
+  if (autopilotBusy(task)) return { state: 'working', detail: autopilotLine(task.autopilot) ?? 'Autopilot is at work' }
+  // Between a turn and Autopilot's next step (review, landing): it moves on by itself.
+  if (autopilotActive(task)) return { state: 'working', detail: 'Autopilot is between steps' }
+  if (status === 'exited') return { state: 'exited', detail: 'Its agent exited' }
+  if (autopilotNeedsYou(task)) return { state: 'needs_you', detail: `Autopilot handed it back: ${task.autopilot?.reason ?? 'no reason given'}` }
+  const seen = tabs.some(tab => deps.activityOf(tab.id) !== null)
+  if (!seen && now - (task.lastInteractedAt ?? 0) < STARTING_MS) return { state: 'starting' }
+  return { state: 'idle', detail: 'Its agent finished its turn and waits for a message' }
+}
+
+function closedDetail(entry: ArchivedTask): string {
+  if (entry.task.autopilot?.phase === 'landing') return `Autopilot landed its work into ${entry.streamName || 'its stream'} and closed it`
+  if (entry.task.landing) return `Closed (landing ${entry.task.landing.state})`
+  return `Closed${entry.task.workspace ? ', its branch landed into ' + (entry.streamName || 'its stream') : ''}`
+}
+
+interface TaskSummary {
+  taskId: string
+  name: string
+  project: string
+  projectId: string
+  stream: string
+  streamId: string
+  state: McpTaskState
+  detail?: string
+  branch?: string
+  folder?: string
+  autopilot?: string
+  startedBy?: string
+  you?: true
+}
+
+function summarize(found: FoundTask, deps: DevtoolMcpDeps, now: number, callerTaskId?: string): TaskSummary {
+  if (found.kind === 'closed') {
+    const { project, entry } = found
+    return {
+      taskId: entry.task.id,
+      name: entry.task.name,
+      project: project.name,
+      projectId: project.id,
+      stream: entry.streamName,
+      streamId: entry.streamId,
+      state: 'done',
+      detail: closedDetail(entry),
+      ...(entry.task.delegatedFrom ? { startedBy: `${entry.task.delegatedFrom.name} (${entry.task.delegatedFrom.taskId})` } : {})
+    }
+  }
+  const { project, stream, task } = found
+  const { state, detail } = liveTaskState(task, deps, now)
+  const branch = task.workspace?.branchName ?? (stream.isMain ? undefined : stream.workspace?.branchName)
+  return {
+    taskId: task.id,
+    name: task.name,
+    project: project.name,
+    projectId: project.id,
+    stream: stream.name,
+    streamId: stream.id,
+    state,
+    ...(detail ? { detail } : {}),
+    ...(branch ? { branch } : {}),
+    ...(project.ssh ? {} : { folder: taskDirectory(project, task) }),
+    ...(task.autopilot ? { autopilot: task.autopilot.phase === 'stopped' ? `stopped: ${task.autopilot.reason ?? ''}` : task.autopilot.phase } : {}),
+    ...(task.delegatedFrom ? { startedBy: `${task.delegatedFrom.name} (${task.delegatedFrom.taskId})` } : {}),
+    ...(task.id === callerTaskId ? { you: true as const } : {})
+  }
+}
+
+function stateOf(found: FoundTask | null, deps: DevtoolMcpDeps, now: number): McpTaskState | null {
+  if (!found) return null
+  return found.kind === 'closed' ? 'done' : liveTaskState(found.task, deps, now).state
+}
+
+/** The end of `text`, at most `limit` characters. */
+export function tail(text: string, limit = REPLY_LIMIT): string {
+  return text.length > limit ? `…${text.slice(text.length - limit + 1)}` : text
+}
+
+async function withReply(summary: TaskSummary, found: FoundTask, deps: DevtoolMcpDeps): Promise<TaskSummary & { lastReply?: string }> {
+  const task = found.kind === 'live' ? found.task : found.entry.task
+  const tab = conversationTab(task)
+  if (!tab) return summary
+  const dir = found.kind === 'live' ? taskDirectory(found.project, task) : found.entry.dir
+  let reply = await deps.lastReply(tab, dir).catch(() => null)
+  reply = reply ?? (found.kind === 'live' ? deps.activityOf(tab.id)?.lastAnswer ?? null : null)
+  return reply ? { ...summary, lastReply: tail(reply) } : summary
+}
+
+// ---- transcript ----------------------------------------------------------------------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function blocks(message: unknown): unknown[] | string | null {
+  if (!isRecord(message)) return null
+  const content = message.content
+  if (typeof content === 'string' || Array.isArray(content)) return content
+  return null
+}
+
+/**
+ * The text of the agent's last reply in a Claude transcript (`getSessionMessages`
+ * entries, oldest first): every main-thread assistant text after the last prompt
+ * a person (or DevTool) typed. Tool results and subagents' messages don't count.
+ */
+export function lastReplyFromTranscript(entries: readonly unknown[]): string | null {
+  const texts: string[] = []
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (!isRecord(entry)) continue
+    if (entry.isSidechain === true || (entry.parent_tool_use_id !== undefined && entry.parent_tool_use_id !== null)) continue
+    const content = blocks(entry.message)
+    if (entry.type === 'user') {
+      const typed = typeof content === 'string' || (Array.isArray(content) && content.some(b => isRecord(b) && b.type === 'text'))
+      if (typed) break
+      continue
+    }
+    if (entry.type !== 'assistant' || !Array.isArray(content)) continue
+    const text = content
+      .filter((b): b is Record<string, unknown> => isRecord(b) && b.type === 'text' && typeof b.text === 'string')
+      .map(b => (b.text as string).trim())
+      .filter(Boolean)
+      .join('\n\n')
+    if (text) texts.unshift(text)
+  }
+  return texts.length > 0 ? texts.join('\n\n') : null
+}
+
+// ---- tools ---------------------------------------------------------------------------
+
+interface ToolDef {
+  name: string
+  title: string
+  description: string
+  inputSchema: Record<string, unknown>
+  annotations?: Record<string, unknown>
+}
+
+export const TOOLS: ToolDef[] = [
+  {
+    name: 'list_tasks',
+    title: 'List DevTool tasks',
+    description: 'Your project\'s streams (a stream is a branch line; `main` is the project folder\'s own branch) and its open tasks, each with its state. The task marked `you` is the one you are working in.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true }
+  },
+  {
+    name: 'start_task',
+    title: 'Start a DevTool task',
+    description:
+      'Start a new DevTool task in your project: a fresh Claude agent working on `prompt` by itself, in the user\'s DevTool, alongside you. Use it to hand off a self-contained piece of work (a feature, a fix, an investigation) instead of doing it yourself, or to work on several things in parallel. ' +
+      'The new agent sees nothing of this conversation: write the prompt as a complete brief (goal, where to look, what done means). ' +
+      'It starts in your permission mode, or a stricter one. By default it runs on Autopilot when your mode allows (auto or bypass): it works without asking, and when it finishes DevTool checks files changed and lands its work into its stream as one commit, then closes the task (state `done`). ' +
+      'It gets a git worktree of its own when the stream or project allows; if it would share a folder with an agent already working there, it gets its own worktree or waits its turn (state `queued`). ' +
+      'Returns its taskId; follow it with wait_for_tasks or get_task. Each task costs the user agent usage, so start one only for work worth a separate agent.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'The new agent\'s first message: a complete, self-contained brief.' },
+        streamId: { type: 'string', description: 'A stream from list_tasks. Default: your stream.' },
+        autopilot: { type: 'boolean', description: 'Default true. False leaves the finished task open for the user (state `idle`) instead of landing it.' },
+        codexReview: { type: 'boolean', description: 'Autopilot only, default false: a Codex review of its diff before landing, its findings sent back to the agent once.' }
+      },
+      required: ['prompt'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_task',
+    title: 'Get a DevTool task',
+    description: 'A task\'s state and its agent\'s last reply (the end of it, when long), for a task in your project. Works for closed tasks too (state `done`).',
+    inputSchema: {
+      type: 'object',
+      properties: { taskId: { type: 'string' } },
+      required: ['taskId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true }
+  },
+  {
+    name: 'send_to_task',
+    title: 'Message a DevTool task',
+    description: 'Send a message to the agent of a task you started, as if the user typed it: an answer to its question, a correction, a follow-up. Sent while it works, it reaches the agent at its next step.',
+    inputSchema: {
+      type: 'object',
+      properties: { taskId: { type: 'string' }, message: { type: 'string' } },
+      required: ['taskId', 'message'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'wait_for_tasks',
+    title: 'Wait for DevTool tasks',
+    description:
+      'Block until tasks in your project have settled (state `idle`, `needs_you`, `exited` or `done`), or until the timeout. Returns each task\'s state and its last reply. ' +
+      'A task in `needs_you` waits on an answer: read its last reply and answer with send_to_task, or tell the user.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 50 },
+        until: { type: 'string', enum: ['all', 'any'], description: 'Default `all`: every task settled. `any`: the first one.' },
+        timeoutSeconds: { type: 'number', description: `Default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}. Call again to keep waiting.` }
+      },
+      required: ['taskIds'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true }
+  }
+]
+
+class ToolError extends Error {}
+
+function str(args: Record<string, unknown>, key: string, required: true): string
+function str(args: Record<string, unknown>, key: string, required?: false): string | undefined
+function str(args: Record<string, unknown>, key: string, required = false): string | undefined {
+  const value = args[key]
+  if (value === undefined || value === null || value === '') {
+    if (required) throw new ToolError(`\`${key}\` is required.`)
+    return undefined
+  }
+  if (typeof value !== 'string') throw new ToolError(`\`${key}\` must be a string.`)
+  return value
+}
+
+function bool(args: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = args[key]
+  if (value === undefined || value === null) return fallback
+  if (typeof value !== 'boolean') throw new ToolError(`\`${key}\` must be true or false.`)
+  return value
+}
+
+interface Caller {
+  tabId: string
+}
+
+/**
+ * The caller: a live task's agent tab of a kind DevTool gives these tools.
+ * Everything it reaches is in its own project; a tab that is no such agent
+ * reaches nothing.
+ */
+function callerTask(data: ProjectsData, tabId: string): LiveTask {
+  const me = findTabOwner(data, tabId)
+  const tab = me ? taskTabs(me.task).find(t => t.id === tabId) : undefined
+  if (!me || !tab || !hasMcpTools(tab.type)) throw new ToolError('Only an agent in a DevTool task can use these tools.')
+  return me
+}
+
+async function callTool(name: string, args: Record<string, unknown>, caller: Caller, deps: DevtoolMcpDeps, signal?: AbortSignal): Promise<unknown> {
+  const now = deps.now?.() ?? Date.now()
+  const data = deps.peek()
+  const me = callerTask(data, caller.tabId)
+  const { project } = me
+  const find = (from: ProjectsData, taskId: string): FoundTask | null => findTask(from, deps, taskId, project.id)
+
+  switch (name) {
+    case 'list_tasks':
+      return {
+        project: project.name,
+        streams: (project.streams ?? []).map(stream => ({
+          streamId: stream.id,
+          name: stream.name,
+          ...(stream.isMain ? { main: true } : {}),
+          ...(stream.workspace ? { branch: stream.workspace.branchName } : {}),
+          ...(stream.id === me.stream.id ? { yours: true } : {})
+        })),
+        tasks: (project.streams ?? []).flatMap(stream =>
+          stream.tasks.map(task => summarize({ kind: 'live', project, stream, task }, deps, now, me.task.id)))
+      }
+
+    case 'start_task': {
+      const prompt = str(args, 'prompt', true).trim()
+      if (!prompt) throw new ToolError('`prompt` is empty.')
+      if (prompt.length > PROMPT_LIMIT) throw new ToolError(`\`prompt\` is longer than ${PROMPT_LIMIT} characters.`)
+      const streamId = str(args, 'streamId') ?? me.stream.id
+      if (!project.streams.some(s => s.id === streamId)) throw new ToolError('No such stream in your project. list_tasks names them.')
+      const result = await deps.startTask({
+        projectId: project.id,
+        streamId,
+        prompt,
+        autopilot: bool(args, 'autopilot', true),
+        review: bool(args, 'codexReview', false),
+        callerTabId: caller.tabId,
+        from: { taskId: me.task.id, name: me.task.name }
+      })
+      if (!result.ok) throw new ToolError(result.error)
+      const found = find(deps.peek(), result.taskId)
+      const notes = [
+        result.ownWorktree ? 'It works in a git worktree of its own.' : '',
+        result.queued ? 'Another agent works in its folder, so it waits its turn (state `queued`).' : '',
+        !result.autopilot && bool(args, 'autopilot', true) ? 'Autopilot is off: it needs auto or bypass permissions, and your mode is stricter. The finished task stays open for the user.' : ''
+      ].filter(Boolean)
+      return {
+        ...(found ? summarize(found, deps, deps.now?.() ?? Date.now(), me.task.id) : { taskId: result.taskId }),
+        autopilot: result.autopilot,
+        ...(result.mode ? { permissionMode: result.mode } : {}),
+        ...(notes.length > 0 ? { note: notes.join(' ') } : {})
+      }
+    }
+
+    case 'get_task': {
+      const taskId = str(args, 'taskId', true)
+      const found = find(data, taskId)
+      if (!found) throw new ToolError('No such task in your project. list_tasks names the open ones.')
+      return withReply(summarize(found, deps, now, me.task.id), found, deps)
+    }
+
+    case 'send_to_task': {
+      const taskId = str(args, 'taskId', true)
+      const message = str(args, 'message', true)
+      if (message.length > PROMPT_LIMIT) throw new ToolError(`\`message\` is longer than ${PROMPT_LIMIT} characters.`)
+      if (me.task.id === taskId) throw new ToolError('That is your own task.')
+      const found = find(data, taskId)
+      if (!found) throw new ToolError('No such task in your project.')
+      if (found.kind === 'closed') throw new ToolError('That task is closed.')
+      // Only your own: another task's agent is the user's to direct.
+      if (found.task.delegatedFrom?.taskId !== me.task.id) throw new ToolError('You can message only tasks you started.')
+      if (found.task.queued) throw new ToolError('That task has not started yet (it is queued). Wait for it first.')
+      const tab = conversationTab(found.task)
+      if (!tab) throw new ToolError('That task has no agent to send to.')
+      await deps.sendToTask(found.project, found.task, tab, message)
+      return { sent: true, ...summarize(found, deps, deps.now?.() ?? Date.now(), me.task.id) }
+    }
+
+    case 'wait_for_tasks': {
+      const raw = args.taskIds
+      if (!Array.isArray(raw) || raw.length === 0 || !raw.every(id => typeof id === 'string')) throw new ToolError('`taskIds` must be a list of task ids.')
+      const taskIds = [...new Set(raw as string[])].slice(0, 50)
+      if (taskIds.includes(me.task.id)) throw new ToolError('You can\'t wait for your own task.')
+      const until = args.until === 'any' ? 'any' : 'all'
+      const timeout = typeof args.timeoutSeconds === 'number' && args.timeoutSeconds > 0
+        ? Math.min(args.timeoutSeconds, WAIT_MAX_S)
+        : WAIT_DEFAULT_S
+      for (const taskId of taskIds) {
+        if (!find(data, taskId)) throw new ToolError(`No such task in your project: ${taskId}`)
+      }
+      const timedOut = !(await waitUntilSettled(taskIds, until, timeout * 1000, deps, signal, project.id))
+      const after = deps.peek()
+      const tasks = await Promise.all(taskIds.map(async taskId => {
+        const found = find(after, taskId)
+        if (!found) return { taskId, state: 'gone', detail: 'Deleted' }
+        const summary = summarize(found, deps, deps.now?.() ?? Date.now(), me.task.id)
+        return settled(summary.state) ? withReply(summary, found, deps) : summary
+      }))
+      return { timedOut, tasks }
+    }
+
+    default:
+      throw new ToolError(`Unknown tool: ${name}`)
+  }
+}
+
+/**
+ * Resolves true once `until` of the tasks have settled, false at the timeout or
+ * when `signal` aborts (the caller hung up). Closed tasks are looked up once:
+ * a closed task stays closed.
+ */
+export function waitUntilSettled(
+  taskIds: readonly string[],
+  until: 'all' | 'any',
+  timeoutMs: number,
+  deps: DevtoolMcpDeps,
+  signal?: AbortSignal,
+  projectId?: string
+): Promise<boolean> {
+  const done = new Set<string>()
+  const check = (): boolean => {
+    const data = deps.peek()
+    const now = deps.now?.() ?? Date.now()
+    for (const taskId of taskIds) {
+      if (done.has(taskId)) continue
+      const live = findLiveTask(data, taskId)
+      const found = live ?? (projectId ? findClosedTask(data, deps, taskId, projectId) : null)
+      const state = stateOf(found, deps, now)
+      if (state === null || settled(state)) done.add(taskId)
+    }
+    return until === 'any' ? done.size > 0 : done.size === taskIds.length
+  }
+  if (check()) return Promise.resolve(true)
+  if (signal?.aborted) return Promise.resolve(false)
+  return new Promise(resolve => {
+    let finished = false
+    let pending = false
+    const finish = (result: boolean): void => {
+      if (finished) return
+      finished = true
+      unsubscribe()
+      clearTimeout(timer)
+      clearInterval(poll)
+      signal?.removeEventListener('abort', onAbort)
+      resolve(result)
+    }
+    const onAbort = (): void => finish(false)
+    // Coalesce a burst of changes into one look.
+    const changed = (): void => {
+      if (pending || finished) return
+      pending = true
+      queueMicrotask(() => {
+        pending = false
+        if (!finished && check()) finish(true)
+      })
+    }
+    const unsubscribe = deps.subscribe(changed)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    // `starting` turns into `idle` with time alone, which no event announces.
+    const poll = setInterval(changed, 15_000)
+    signal?.addEventListener('abort', onAbort)
+  })
+}
+
+// ---- JSON-RPC ------------------------------------------------------------------------
+
+type JsonRpcId = string | number | null
+
+interface JsonRpcResponse {
+  jsonrpc: '2.0'
+  id: JsonRpcId
+  result?: unknown
+  error?: { code: number; message: string }
+}
+
+function reply(id: JsonRpcId, result: unknown): JsonRpcResponse {
+  return { jsonrpc: '2.0', id, result }
+}
+
+function failure(id: JsonRpcId, code: number, message: string): JsonRpcResponse {
+  return { jsonrpc: '2.0', id, error: { code, message } }
+}
+
+async function handleOne(message: unknown, caller: Caller, deps: DevtoolMcpDeps, signal?: AbortSignal): Promise<JsonRpcResponse | undefined> {
+  if (!isRecord(message) || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
+    // A response from the client (we never ask it anything) or garbage.
+    if (isRecord(message) && message.jsonrpc === '2.0' && message.method === undefined) return undefined
+    return failure(null, -32600, 'Invalid request')
+  }
+  const isNotification = !('id' in message)
+  const id = (message.id ?? null) as JsonRpcId
+  const params = isRecord(message.params) ? message.params : {}
+  if (isNotification) return undefined
+
+  switch (message.method) {
+    case 'initialize': {
+      const asked = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
+      return reply(id, {
+        protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : DEFAULT_PROTOCOL,
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: MCP_SERVER_NAME, title: 'DevTool', version: SERVER_VERSION },
+        instructions:
+          'DevTool is the app that runs you. These tools start, follow and message other DevTool tasks (each one its own agent), ' +
+          'so you can hand off self-contained work or run several pieces in parallel and collect their results.'
+      })
+    }
+    case 'ping':
+      return reply(id, {})
+    case 'tools/list':
+      return reply(id, { tools: TOOLS })
+    case 'tools/call': {
+      const name = typeof params.name === 'string' ? params.name : ''
+      if (!TOOLS.some(tool => tool.name === name)) return failure(id, -32602, `Unknown tool: ${name}`)
+      const args = isRecord(params.arguments) ? params.arguments : {}
+      try {
+        const result = await callTool(name, args, caller, deps, signal)
+        return reply(id, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] })
+      } catch (err) {
+        const text = err instanceof ToolError ? err.message : `DevTool failed: ${err instanceof Error ? err.message : String(err)}`
+        return reply(id, { content: [{ type: 'text', text }], isError: true })
+      }
+    }
+    default:
+      return failure(id, -32601, `Method not found: ${message.method}`)
+  }
+}
+
+/**
+ * One POST to `/mcp`: a JSON-RPC message or a batch. Undefined when nothing
+ * needs an answer (notifications only), which the transport sends as 202.
+ */
+export async function handleMcpMessage(body: unknown, caller: Caller, deps: DevtoolMcpDeps, signal?: AbortSignal): Promise<unknown> {
+  if (Array.isArray(body)) {
+    const answers = (await Promise.all(body.map(message => handleOne(message, caller, deps, signal)))).filter(Boolean)
+    return answers.length > 0 ? answers : undefined
+  }
+  return handleOne(body, caller, deps, signal)
+}

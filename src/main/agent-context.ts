@@ -43,6 +43,8 @@ export interface AgentContextInput {
   links?: SharedLink[]
   /** The task runs on Autopilot and this is the chat it follows: what Autopilot does when the turn ends. */
   autopilot?: { review: boolean }
+  /** The agent has DevTool's MCP tools (`devtool-mcp.ts`). */
+  mcp?: boolean
 }
 
 function code(text: string): string {
@@ -114,8 +116,21 @@ export function buildAgentContext(input: AgentContextInput): string {
   }
 
   lines.push(...sharedLines(input.links ?? []))
+  if (input.mcp) lines.push(...mcpLines(!!own))
   if (input.autopilot) lines.push(...autopilotLines(input.autopilot.review))
   return lines.join('\n')
+}
+
+/** What DevTool's MCP tools are for, and what a task they start does with its work. */
+function mcpLines(ownWorktree: boolean): string[] {
+  return [
+    '- DevTool\'s MCP tools (server `devtool`: start_task, list_tasks, get_task, send_to_task, wait_for_tasks) start and follow other DevTool tasks in this project, each one its own agent that the user also sees in DevTool. ' +
+      'Use them when the user asks you to hand work off or to work on several things in parallel; a new agent knows nothing of this conversation, so give it a complete brief.',
+    '- A task you start runs in your permission mode or a stricter one. In auto mode it works unattended (unless you pass `autopilot: false`): when it finishes DevTool lands its work into its stream as one commit and closes it. ' +
+      (ownWorktree
+        ? 'Its commits are not in your worktree until you update this task from its stream (the `/hook/update` call above).'
+        : 'Its work lands on the stream\'s branch, not in this folder\'s uncommitted state.')
+  ]
 }
 
 /**
@@ -177,6 +192,7 @@ export function agentContextForTab(
         dir: taskDirectory(project, task),
         hook: task.workspace && hook ? { ...hook, tabId } : undefined,
         links: root ? sharedLinksIn(root) : [],
+        mcp: hasMcpTools(taskTabs(task).find(tab => tab.id === tabId)?.type),
         // Only the chat Autopilot follows (`autopilotTab`): the task's first Claude chat.
         ...(task.autopilot && autopilotActive(task) && autopilotSupported(project) && autopilotTab(task)?.id === tabId
           ? { autopilot: { review: !!task.autopilot.review } }
@@ -185,4 +201,10 @@ export function agentContextForTab(
     }
   }
   return null
+}
+
+/** Tab kinds DevTool hands its MCP server to (`claude` and `codex` terminals, Claude and Codex chats). */
+export function hasMcpTools(type: string | undefined): boolean {
+  if (type === 'claude' || type === 'claude-chat' || type === 'codex-chat') return true
+  return type === 'codex' && process.platform !== 'win32'
 }

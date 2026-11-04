@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { claudeMcpServers, MCP_ALLOW_RULES, type DevtoolMcpEndpoint } from '../devtool-mcp'
 import type {
   CanUseTool,
   HookCallbackMatcher,
@@ -322,6 +323,8 @@ export interface ChatSessionOptions {
   effort?: string
   /** DevTool's note on where the agent runs (`agent-context.ts`), after Claude Code's own system prompt. */
   appendSystemPrompt?: string
+  /** DevTool's MCP server for this tab (`devtool-mcp.ts`), its read-only tools allowed without asking; null for none. */
+  mcp?: DevtoolMcpEndpoint | null
   /** Remote projects spawn through ssh; local ones let the SDK spawn. */
   spawn?: (options: SpawnOptions) => SpawnedProcess
   /**
@@ -458,6 +461,7 @@ export class ChatSession {
       ...(o.permissionMode ? { permissionMode: o.permissionMode as PermissionMode } : {}),
       ...(o.effort ? { effort: o.effort as Options['effort'] } : {}),
       ...(o.spawn ? { spawnClaudeCodeProcess: o.spawn } : {}),
+      ...(o.mcp ? { mcpServers: claudeMcpServers(o.mcp), allowedTools: MCP_ALLOW_RULES } : {}),
       // A project's own `--settings` would collide with this one; it wins, and the
       // tab loses SessionStart status and the cold-cache warning.
       ...('settings' in extra ? {} : { settings: { hooks: { SessionStart: [{ hooks: [SESSION_START_HOOK] }] } } }),

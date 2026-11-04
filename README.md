@@ -28,6 +28,8 @@ Windows support (Git Bash terminals, portable Node, `.cmd` agent shims) was cont
 
 **AI Tool Integration** -- Dedicated tabs for Pi (primary), Claude Code, and Codex. Hook server enables bidirectional communication with AI tools running in terminals.
 
+**Agent Tools (MCP)** -- Agents DevTool starts get a `devtool` MCP server (Claude terminal and chat tabs, Codex terminal and chat tabs; not Pi yet). An agent can start other tasks in its own project (`start_task`, in its own permission mode or a stricter one, on Autopilot by default when that mode is auto, in a worktree of their own when it would share a busy folder), list the project's tasks, read a task's state and last reply, message tasks it started, and wait for tasks to finish. Only the read-only tools skip the permission prompt. The server runs on the hook server's `/mcp`, and each agent authenticates with its own tab token, so a token only lets that one tab act. Tasks started this way remember which task started them (`Task.delegatedFrom`). Code: `src/main/devtool-mcp.ts`.
+
 **Conda Environments** -- Pick a conda or micromamba env per local project (Project Settings). New agent tabs prepend that env onto PATH; new interactive terminals run a login shell, then `conda activate` the project env (Windows Git Bash uses `--rcfile` so conda init in `.bash_profile` is kept). Notebook tabs start ipykernel with the same env. Already-open tabs keep their env. DevTool does not create or delete envs.
 
 **Remote SSH Projects** -- Connect to remote machines via SSH with port forwarding, SOCKS proxy tunneling, key authentication, health checks, and auto-reconnection.

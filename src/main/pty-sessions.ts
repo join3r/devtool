@@ -1,4 +1,5 @@
 import os from 'os'
+import { claudeMcpArgs, codexMcpArgs, type DevtoolMcpEndpoint } from './devtool-mcp'
 import { AI_TAB_META, type AppConfig, type SshConfig } from '../shared/types'
 import type { PtyManager } from './pty-manager'
 import type { ScrollbackStorage } from './scrollback-storage'
@@ -63,6 +64,8 @@ export interface PtySessionsDeps {
   hookPort: () => number
   /** What the tab's agent is told about where it runs (`agent-context.ts`); Codex gets it at spawn. */
   agentContext?: (tabId: string) => string | null
+  /** Where the tab's agent reaches DevTool's MCP server (`devtool-mcp.ts`); null for nowhere. */
+  mcpEndpoint?: (tabId: string) => DevtoolMcpEndpoint | null
   hookToken: () => string
   getConfig: () => AppConfig
   /** Push the tab's current agent activity to every window. */
@@ -463,7 +466,11 @@ export class PtySessions {
       // TOML string; JSON's escapes are TOML's). Not on Windows, where the `.cmd`
       // shim runs under cmd.exe, which would reinterpret it.
       const codexContext = shell === AI_TAB_META.codex.command && process.platform !== 'win32' ? deps.agentContext?.(id) : null
-      if (codexContext) localArgs = ['-c', `developer_instructions=${JSON.stringify(codexContext)}`, ...(args ?? [])]
+      if (codexContext) localArgs = ['-c', `developer_instructions=${JSON.stringify(codexContext)}`, ...(localArgs ?? [])]
+      // DevTool's MCP server, ahead of the caller's args so a first prompt stays the last argument.
+      const mcp = extraEnv?.DEVTOOL_TAB_ID ? deps.mcpEndpoint?.(id) ?? null : null
+      if (mcp && isClaudeLocal) localArgs = [...claudeMcpArgs(mcp), ...(localArgs ?? [])]
+      if (mcp && shell === AI_TAB_META.codex.command && process.platform !== 'win32') localArgs = [...codexMcpArgs(mcp), ...(localArgs ?? [])]
       if (isPiLocal) {
         // Ahead of the caller's args, so a first prompt stays the last argument.
         localArgs = ['-e', deps.piExtensionPath(), ...(args ?? [])]

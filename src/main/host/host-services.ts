@@ -12,7 +12,7 @@ import { StreamRuns } from '../stream-runs'
 import { findStreamRunCommand, plainRunLog, streamRunCommands } from '../../shared/stream-run'
 import { isVisibleOnMobile } from '../mobile/inbox'
 import { resolveLocalTerminalSpawn } from '../resolve-local-terminal'
-import { HookServer } from '../hook-server'
+import { HookServer, MCP_PATH } from '../hook-server'
 import { HookInjector, hookEndpointFor } from '../hook-injector'
 import { agentContextForTab } from '../agent-context'
 import { ClaudeChatManager } from '../claude-chat/chat-manager'
@@ -93,7 +93,7 @@ import { AutopilotRunner } from '../autopilot'
 import { runCodexReview } from '../codex-review'
 import { findAgentCli } from '../agent-clis'
 import { featureUnavailableReason } from '../../shared/project-features'
-import { findMainStream, findTaskInProject, removeTaskFromProject, streamDirectory, taskTabs } from '../../shared/streams'
+import { canHaveMainTaskWorktrees, currentStreamId, findMainStream, findTaskInProject, mapTaskInProject, removeTaskFromProject, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskTabs, taskWorktreesSupported } from '../../shared/streams'
 import { projectRunCommands } from '../../shared/stream-run'
 import { chatTabConfig } from '../../shared/chat-tab-config'
 import { MobileService } from '../mobile/mobile-service'
@@ -106,7 +106,11 @@ import { createNoiseChannelFactory } from '../mobile/channel'
 import { ChatBridge } from '../mobile/chat-bridge'
 import { PushEmitter } from '../mobile/push-emitter'
 import { createStream, listProjectBranches, type StreamGit } from '../mobile/new-stream'
-import { addTaskWithChat } from '../mobile/new-task'
+import { addChatTaskToProject, addTaskWithChat, type NewTaskExtra } from '../mobile/new-task'
+import { delegatedMode, handleMcpMessage, lastReplyFromTranscript, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
+import { autopilotActive, autopilotSupported } from '../../shared/autopilot'
+import { statusTabs, taskStatus } from '../../shared/inbox-state'
+import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../../shared/hook-protocol'
 import { suggestTaskName } from '../task-namer'
 import { suggestRunCommands, type RunCommandSuggestResult, type SuggestedRunCommand } from '../run-command-suggester'
 import { renameTaskIfStill } from '../../shared/task-name'
@@ -486,6 +490,7 @@ export class HostServices {
       log: (message) => this.logDebug(message),
       piExtensionPath: () => env.resourcePath(PI_EXTENSION_RESOURCE),
       agentContext: (tabId) => this.agentContext(tabId),
+      mcpEndpoint: (tabId) => this.mcpEndpoint(tabId),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
       onKill: (tabId) => this.shutdownNotebookKernel(tabId),
       onExit: (tabId, exitCode) => this.streamRuns.handleExit(tabId, exitCode),
@@ -1183,6 +1188,7 @@ export class HostServices {
       this.hookServer.on(endpoint, (tabId: string, body: Record<string, unknown>) => this.handleHook(endpoint, tabId, body))
     }
     this.hookServer.setResponder((endpoint, tabId, body) => this.answerHook(endpoint, tabId, body))
+    this.hookServer.setMcpHandler((tabId, body, signal) => handleMcpMessage(body, { tabId }, this.mcpDeps(), signal))
 
     // The desktop adds its own listener for the browser tabs' SOCKS routing.
     this.sshManager.on('status-changed', (projectId: string, status: string) => {
@@ -1194,6 +1200,117 @@ export class HostServices {
       this.logDebug(`tunnelStatus projectId=${projectId} status=${status}${error ? ` error=${error}` : ''}`)
       this.clients.broadcast('ssh-tunnel-status-changed', projectId, status, error)
     })
+  }
+
+  /**
+   * Where the agent in `tabId` reaches DevTool's MCP server (`devtool-mcp.ts`),
+   * or null: outside a project task, and for SSH projects, whose agents run on
+   * another machine.
+   */
+  mcpEndpoint(tabId: string): DevtoolMcpEndpoint | null {
+    if (!this.hookServer.isReady()) return null
+    for (const project of this.projectsStore.peek().projects) {
+      if (!project.streams?.some(stream => stream.tasks.some(task => taskTabs(task).some(tab => tab.id === tabId)))) continue
+      if (project.ssh) return null
+      return {
+        url: `http://127.0.0.1:${this.hookServer.getPort()}${MCP_PATH}`,
+        headers: { [HOOK_TAB_ID_HEADER]: tabId, [HOOK_TOKEN_HEADER]: this.hookServer.tabToken(tabId) }
+      }
+    }
+    return null
+  }
+
+  private mcpDeps(): DevtoolMcpDeps {
+    return {
+      peek: () => this.projectsStore.peek(),
+      archive: (projectId) => this.archiveStorage.load(projectId),
+      statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+      activityOf: (tabId) => this.activityRegistry.getActivity(tabId),
+      subscribe: (listener) => {
+        const stops = [this.activityRegistry.subscribe(() => listener()), this.projectsStore.subscribe(() => listener())]
+        return () => { for (const stop of stops) stop() }
+      },
+      startTask: (input) => this.startTaskForAgent(input),
+      sendToTask: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
+      lastReply: async (tab, dir) => {
+        if (tab.type !== 'claude-chat' || !tab.sessionId) return null
+        return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, dir))
+      }
+    }
+  }
+
+  /**
+   * `start_task` (`devtool-mcp.ts`): a Claude chat task an agent starts, the way
+   * the phone's New task does (no window needed), on Autopilot unless asked not
+   * to. Two agents in one folder edit the same files, so a task that would start
+   * where another agent works gets a worktree of its own when it can, and
+   * otherwise waits its turn.
+   */
+  private async startTaskForAgent(input: StartTaskInput): Promise<StartTaskResult> {
+    const data = this.projectsStore.peek()
+    const project = data.projects.find(p => p.id === input.projectId)
+    if (!project) return { ok: false, error: 'No such project.' }
+    if (project.ssh || project.host) return { ok: false, error: 'That project runs on another machine; DevTool\'s tools start tasks only in projects on this one.' }
+    const blocked = this.chatTaskBlocker(project)
+    if (blocked) return { ok: false, error: blocked }
+    if (this.missingFolders.peek().has(project.id)) return { ok: false, error: 'That project\'s folder is gone.' }
+    const streamId = input.streamId ?? currentStreamId(project)
+    const stream = project.streams.find(s => s.id === streamId)
+
+    const now = Date.now()
+    let extra: NewTaskExtra | undefined
+    if (!(streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project))) {
+      const dir = streamDirectory(project, stream)
+      const busy = project.streams.flatMap(s => s.tasks).some(task => {
+        if (taskDirectory(project, task) !== dir) return false
+        if (autopilotActive(task)) return true
+        const statuses: Record<string, TabStatusValue> = {}
+        for (const tab of statusTabs(task)) statuses[tab.id] = this.activityRegistry.getStatus(tab.id)
+        const status = taskStatus(task, statuses)
+        return status === 'working' || status === 'attention'
+      })
+      if (busy) {
+        extra = (stream ?? findMainStream(project))?.isMain && canHaveMainTaskWorktrees(project)
+          ? { ownWorktree: true }
+          : { queued: { prompt: input.prompt, mode: delegatedMode(this.callerPermissionMode(input.callerTabId)), at: now } }
+      }
+    }
+    // Never looser than the agent asking: a task it starts can't do what it couldn't.
+    const mode = delegatedMode(this.callerPermissionMode(input.callerTabId))
+    const autopilot = input.autopilot && mode === 'auto' && autopilotSupported(project)
+    const added = addChatTaskToProject(data, project, input.prompt, streamId, undefined, now, extra)
+    this.commitProjects({
+      ...added.data,
+      projects: added.data.projects.map(p => (p.id !== project.id ? p : mapTaskInProject(p, added.taskId, task => ({
+        ...task,
+        ...(autopilot ? { autopilot: { phase: 'working' as const, ...(input.review ? { review: true } : {}) } } : {}),
+        delegatedFrom: input.from
+      }))))
+    })
+    this.nameTaskInBackground(project.id, added.taskId, input.prompt)
+    this.logDebug(`mcpStartTask project=${project.id} task=${added.taskId} from=${input.from.taskId} mode=${mode} autopilot=${autopilot} start=${extra?.queued ? 'queue' : extra?.ownWorktree ? 'worktree' : 'here'}`)
+    const result = { ok: true as const, taskId: added.taskId, queued: !!extra?.queued, ownWorktree: !!extra?.ownWorktree, autopilot, mode }
+    // Queued: the queue runner sends the prompt (and makes any worktree) once its folder is free.
+    if (extra?.queued) return result
+
+    const worktree = await this.taskWorktrees.ensureTaskWorktree(project.id, added.taskId)
+    if (worktree.status === 'failed') {
+      const after = this.projectsStore.peek()
+      this.commitProjects({ ...after, projects: after.projects.map(p => (p.id === project.id ? removeTaskFromProject(p, added.taskId) : p)) })
+      return { ok: false, error: `Couldn't create the task's worktree: ${worktree.error}` }
+    }
+    // The task exists from here on: a failed start shows in its chat, and a retry would make a second task.
+    try {
+      await this.sendFirstChatPrompt(project.id, added.taskId, added.tabId, input.prompt, mode)
+    } catch (err) {
+      this.logDebug(`mcpStartTask start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
+    }
+    return result
+  }
+
+  /** The permission mode a chat tab's agent runs in now; null for a terminal tab, whose mode main can't see. */
+  private callerPermissionMode(tabId: string): string | null {
+    return this.chatManager.snapshot(tabId)?.state.info.permissionMode ?? null
   }
 
   /** What DevTool tells the agent in `tabId` about where it runs (`agent-context.ts`); null outside a project task. */
@@ -1392,6 +1509,7 @@ export class HostServices {
     return new ClaudeChatManager({
       sendToClient: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       agentContext: (tabId) => this.agentContext(tabId),
+      mcpEndpoint: (tabId) => this.mcpEndpoint(tabId),
       resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
       resolveLocalAgent: (agent) => resolveAgentCommand(agentCommandOverride(agent, this.config).trim() || agent),
       wrapSpawn: (file, args) => conptySpawnArgv(file, args, { env: getShellEnv() }),

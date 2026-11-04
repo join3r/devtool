@@ -1,4 +1,5 @@
 import type { SshConfig } from '../../shared/types'
+import { codexMcpArgs, type DevtoolMcpEndpoint } from '../devtool-mcp'
 import { detectServerTasks } from './background-servers'
 import {
   artifactSources,
@@ -73,6 +74,8 @@ export interface ChatManagerDeps {
   log: (message: string) => void
   /** What the tab's agent is told about where it runs (`agent-context.ts`); null for none. */
   agentContext?: (tabId: string) => string | null
+  /** Where the tab's agent reaches DevTool's MCP server (`devtool-mcp.ts`); null for nowhere. */
+  mcpEndpoint?: (tabId: string) => DevtoolMcpEndpoint | null
   /**
    * Every chat here signs in from another machine: this host is a DevTool
    * server, whose windows are on a desktop. `/login` then asks for the pasted
@@ -581,6 +584,8 @@ export class ClaudeChatManager {
       permissionMode: runtime.permissionMode,
       effort: runtime.effort,
       appendSystemPrompt: this.deps.agentContext?.(tabId) ?? undefined,
+      // The agent runs on the project's host over SSH, which can't reach this one's MCP server.
+      mcp: remote ? null : this.deps.mcpEndpoint?.(tabId) ?? null,
       spawn,
       // A remote session's processes are on the other machine.
       ...(remote ? {} : { detectServers: () => detectServerTasks(config.sessionId) }),
@@ -625,7 +630,7 @@ export class ClaudeChatManager {
       sessionId: config.sessionId,
       executable: this.deps.resolveLocalAgent(agent),
       env: { ...this.deps.localEnv(), [TAB_OWNER_ENV]: tabId },
-      extraArgs: config.extraArgs,
+      extraArgs: codexExtraArgs(agent, this.deps.mcpEndpoint?.(tabId) ?? null, config.extraArgs),
       model: runtime.model,
       permissionMode: runtime.permissionMode,
       effort: runtime.effort,
@@ -685,4 +690,10 @@ export class ClaudeChatManager {
       }
     }
   }
+}
+
+/** A Codex chat's args with DevTool's MCP server ahead of the project's own. Pi takes no `-c`. */
+function codexExtraArgs(agent: 'codex' | 'pi', mcp: DevtoolMcpEndpoint | null, extraArgs: string[] | undefined): string[] | undefined {
+  if (agent !== 'codex' || !mcp) return extraArgs
+  return [...codexMcpArgs(mcp), ...(extraArgs ?? [])]
 }

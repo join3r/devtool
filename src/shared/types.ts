@@ -263,6 +263,8 @@ export interface Task {
    * (`main/queued-task-runner.ts`).
    */
   queued?: TaskQueuedStart
+  /** Started by another task's agent through DevTool's MCP tools (`main/devtool-mcp.ts`): that task, as it was named then. */
+  delegatedFrom?: { taskId: string; name: string }
 }
 
 /** A queued task's first prompt, held until its folder is free (see `Task.queued`). */
