@@ -59,6 +59,15 @@ function shortLabel(label: string | undefined): string | undefined {
   return label.length > ACTIVITY_LIMIT ? `${label.slice(0, ACTIVITY_LIMIT - 1)}…` : label
 }
 
+/**
+ * The activity line as the phone shows it. A secret is typed on the desktop
+ * only (the value never goes to the phone), so its line says where to answer.
+ */
+export function phoneActivityLabel(activity: AgentActivity | undefined, status: TabStatusValue): string | undefined {
+  if (status === 'attention' && activity?.waiting?.kind === 'secret') return `Needs secret ${activity.waiting.label}. Answer on desktop`
+  return describeActivity(activity, status)
+}
+
 function buildTab(tab: Tab, lookup: InboxTabLookup): MobileInboxTab {
   const status = lookup.statusOf(tab.id)
   const out: MobileInboxTab = {
@@ -70,7 +79,7 @@ function buildTab(tab: Tab, lookup: InboxTabLookup): MobileInboxTab {
   const since = lookup.sinceOf(tab.id)
   if (since !== null) out.since = since
   const activity = lookup.activityOf(tab.id)
-  const label = shortLabel(describeActivity(activity ?? undefined, status))
+  const label = shortLabel(phoneActivityLabel(activity ?? undefined, status))
   if (label) out.activity = label
   const topic = shortLabel(activity?.title ?? activity?.lastPrompt)
   if (topic) out.topic = topic
@@ -110,7 +119,7 @@ function taskStatusFields(task: Task, lookup: InboxTabLookup): Pick<MobileInboxT
   const sinces = inStatus.map((tab) => lookup.sinceOf(tab.id)).filter((since): since is number => since !== null)
   if (sinces.length > 0) out.since = Math.min(...sinces)
   for (const tab of inStatus) {
-    const label = shortLabel(describeActivity(lookup.activityOf(tab.id) ?? undefined, status))
+    const label = shortLabel(phoneActivityLabel(lookup.activityOf(tab.id) ?? undefined, status))
     if (label) {
       out.activity = label
       break

@@ -19,6 +19,7 @@ import { useServersState } from '../serversState'
 import { hostChoicesFor, listHosts, projectHostKey } from '../hosts'
 import ServerFolderList from './servers/ServerFolderList'
 import TagPicker from './TagPicker'
+import ProjectSecrets from './ProjectSecrets'
 import { Modal, SetBlock, Field, HelperText, LinkBtn, PrimaryButton, Switch } from './ui'
 import ThemedSelect from './ThemedSelect'
 import {
@@ -418,6 +419,8 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
           </div>
         </SetBlock>
       )}
+
+      {!isRemoteProject(project) && !project.host && <ProjectSecrets projectId={project.id} />}
 
       <SetBlock label="Hide from mobile" divider>
         <div className="flex items-center justify-between gap-3">

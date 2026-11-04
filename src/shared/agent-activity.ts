@@ -28,7 +28,8 @@ export interface AgentActivity {
   tool?: { id?: string; name: string; label: string; startedAt: number }
   /** Why the agent is blocked on you, when it is. */
   waiting?: {
-    kind: 'permission' | 'question' | 'plan' | 'error'
+    /** `secret`: a `request_secret` prompt; `label` is the secret's name. */
+    kind: 'permission' | 'question' | 'plan' | 'error' | 'secret'
     label: string
     toolUseId?: string
     since: number
@@ -329,8 +330,9 @@ export function reduceAgentActivity(
 
     case 'PermissionRequest': {
       const name = str(body.tool_name) ?? 'tool'
-      // Keep a question/plan wait: its PreToolUse label is the more useful one.
-      if (next.waiting?.kind === 'question' || next.waiting?.kind === 'plan') break
+      // Keep a question/plan wait: its PreToolUse label is the more useful one. A
+      // secret prompt stays the one shown until it is answered.
+      if (next.waiting?.kind === 'question' || next.waiting?.kind === 'plan' || next.waiting?.kind === 'secret') break
       next.waiting = {
         kind: 'permission',
         label: summarizeTool(name, body.tool_input),
@@ -370,6 +372,15 @@ export function reduceAgentActivity(
       if (waiting.toolUseId && id && waiting.toolUseId !== id) break
       next.waiting = undefined
       statusEvent = 'hook-input-resolved'
+      break
+    }
+
+    // DevTool's own event: the agent asked for a secret (`request_secret`). Lifted by
+    // DevtoolPromptResolved with the same id.
+    case 'DevtoolSecretRequested': {
+      const name = str(body.name) ?? 'secret'
+      next.waiting = { kind: 'secret', label: name, toolUseId: str(body.tool_use_id), since: now }
+      statusEvent = 'hook-needs-input'
       break
     }
 
@@ -484,6 +495,7 @@ export function describeActivity(
     const { kind, label } = activity.waiting
     if (kind === 'permission') return `Permission: ${label}`
     if (kind === 'plan') return 'Plan ready for review'
+    if (kind === 'secret') return `Needs secret ${label}`
     return label
   }
   if (status === 'working') {

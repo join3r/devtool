@@ -59,6 +59,7 @@ import type { TaskUsageSnapshot } from '../shared/task-usage'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
+import type { SecretAnswer, SecretRequest } from '../shared/secrets'
 
 const api = {
   // Projects
@@ -557,6 +558,22 @@ const api = {
   /** A short title for a task's first prompt, or null when none could be had (main's `task-namer.ts`). */
   taskNameSuggest: (prompt: string): Promise<string | null> =>
     ipcRenderer.invoke('task-name-suggest', prompt),
+
+  // Secrets agents ask for (`request_secret`). No channel ever returns a value to a window.
+  secretRequestsGet: (): Promise<SecretRequest[]> => ipcRenderer.invoke('secret-requests-get'),
+  onSecretRequestsChanged: (callback: (requests: SecretRequest[]) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, requests: SecretRequest[]) => callback(requests)
+    ipcRenderer.on('secret-requests-changed', handler)
+    return () => ipcRenderer.removeListener('secret-requests-changed', handler)
+  },
+  /** The user's answer: the typed value, the saved one, or no. An error keeps the prompt open. */
+  secretAnswer: (requestId: string, answer: SecretAnswer): Promise<{ ok: true; rememberFailed?: boolean } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('secret-answer', requestId, answer),
+  /** A project's remembered secrets, names only, and whether this machine can remember any. */
+  secretsList: (projectId: string): Promise<{ secrets: { name: string; savedAt: number }[]; canSave: boolean }> =>
+    ipcRenderer.invoke('secrets-list', projectId),
+  secretsDelete: (projectId: string, name: string): Promise<boolean> =>
+    ipcRenderer.invoke('secrets-delete', projectId, name),
 
   /** A project's tokens by day, agent and model, from its host's agent session files; null when they aren't readable there. */
   tokenUsageProject: (projectId: string): Promise<TokenUsageReport | null> =>

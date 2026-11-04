@@ -219,6 +219,11 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-usage-get': 'local',
   // a task's title from its first prompt (ipc/task-names.ts): this desktop's claude names it
   'task-name-suggest': 'local',
+  // an agent's request_secret prompts and remembered secrets (ipc/secrets.ts): asked only for projects on this desktop
+  'secret-requests-get': 'local',
+  'secret-answer': 'local',
+  'secrets-list': 'local',
+  'secrets-delete': 'local',
 
   // adding a server project (ipc/host-fs.ts): the first argument names the host
   'server-list-dirs': { by: [{ host: 0 }] },
@@ -316,5 +321,7 @@ export const SERVER_PRIVATE_EVENTS: readonly string[] = [
   // DesktopRouting folds it into this desktop's usage.
   'server-task-usage-changed',
   'ssh-status-changed',
-  'ssh-tunnel-status-changed'
+  'ssh-tunnel-status-changed',
+  // A server refuses request_secret; only a desktop's own prompts are shown.
+  'secret-requests-changed'
 ]

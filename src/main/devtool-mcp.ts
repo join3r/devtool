@@ -6,6 +6,8 @@ import { landingNeedsYou, statusTabs, taskStatus } from '../shared/inbox-state'
 import { taskDirectory, taskTabs } from '../shared/streams'
 import { AI_TAB_TYPES, type AiTabType, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
 import { hasMcpTools } from './agent-context'
+import { DEFAULT_SECRET_FILE, SECRET_REASON_MAX, isDotenvFile, safeSecretFile, validSecretName } from '../shared/secrets'
+import type { SecretOutcome } from './secrets/secret-requests'
 
 /**
  * DevTool's MCP server: tools an agent DevTool started uses to run DevTool
@@ -27,11 +29,12 @@ export interface DevtoolMcpEndpoint {
 }
 
 /**
- * The tools an agent may use without asking: the read-only ones. Starting a
- * task and messaging one go through the tab's own permission mode (in auto
- * mode Claude's classifier decides, so an Autopilot run isn't stopped by them).
+ * The tools an agent may use without asking: the read-only ones, and
+ * `request_secret`, whose prompt is itself the user's say. Starting a task and
+ * messaging one go through the tab's own permission mode (in auto mode Claude's
+ * classifier decides, so an Autopilot run isn't stopped by them).
  */
-export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
+export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
 
 /** The server as Claude's MCP config (`--mcp-config`, the Agent SDK's `mcpServers`) names it. */
 export function claudeMcpServers(endpoint: DevtoolMcpEndpoint): Record<string, { type: 'http'; url: string; headers: Record<string, string> }> {
@@ -52,7 +55,9 @@ export function codexMcpArgs(endpoint: DevtoolMcpEndpoint): string[] {
   const headers = Object.entries(endpoint.headers).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(', ')
   return [
     '-c', `mcp_servers.${MCP_SERVER_NAME}.url=${JSON.stringify(endpoint.url)}`,
-    '-c', `mcp_servers.${MCP_SERVER_NAME}.http_headers={ ${headers} }`
+    '-c', `mcp_servers.${MCP_SERVER_NAME}.http_headers={ ${headers} }`,
+    // Codex gives a tool call 60 s by default; waiting on tasks or on the user takes longer.
+    '-c', `mcp_servers.${MCP_SERVER_NAME}.tool_timeout_sec=${WAIT_MAX_S + 60}`
   ]
 }
 const SERVER_VERSION = '1.0.0'
@@ -100,7 +105,24 @@ export interface DevtoolMcpDeps {
   sendToTask(project: Project, task: Task, tab: Tab, text: string): Promise<void>
   /** The agent's last reply in `tab`, read from its transcript in `dir`; null when there is none. */
   lastReply(tab: Tab, dir: string): Promise<string | null>
+  /**
+   * Asks the user for a secret and waits (`request_secret`); an error string
+   * when it can't be asked here. Absent: the tool says it isn't available.
+   */
+  requestSecret?(input: RequestSecretInput, signal?: AbortSignal): Promise<SecretOutcome | { status: 'error'; error: string }>
+  /** Known secret values out of a reply an agent reads. */
+  redact?(text: string): string
   now?(): number
+}
+
+export interface RequestSecretInput {
+  project: Project
+  task: Task
+  tabId: string
+  name: string
+  reason: string
+  /** Relative to the task's folder, already made safe. */
+  file: string
 }
 
 /**
@@ -338,6 +360,7 @@ async function withReply(summary: TaskSummary, found: FoundTask, deps: DevtoolMc
   const dir = found.kind === 'live' ? taskDirectory(found.project, task) : found.entry.dir
   let reply = await deps.lastReply(tab, dir).catch(() => null)
   reply = reply ?? (found.kind === 'live' ? deps.activityOf(tab.id)?.lastAnswer ?? null : null)
+  if (reply && deps.redact) reply = deps.redact(reply)
   return reply ? { ...summary, lastReply: tail(reply) } : summary
 }
 
@@ -464,6 +487,25 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false
     },
     annotations: { readOnlyHint: true }
+  },
+  {
+    name: 'request_secret',
+    title: 'Ask the user for a secret',
+    description:
+      'Ask the user for a secret (API key, token, password) without it passing through this conversation. DevTool shows the user a masked field; ' +
+      'the value is written to `file` in your task\'s folder (default `.env`, as `NAME=value`; any other file holds the value alone), and DevTool makes git ignore that file. ' +
+      'You get back only where it is, never the value. Use it from there (dotenv, or `set -a; . ./.env; set +a; <command>` in one shell call). ' +
+      'Do not print, echo, cat or log the value, and do not commit the file. Ask instead of telling the user to paste a secret into the chat. Blocks until the user answers (up to 30 minutes).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The env var name, e.g. OPENAI_API_KEY.' },
+        reason: { type: 'string', description: 'One short line the user sees: what it is for.' },
+        file: { type: 'string', description: `Where to put it, relative to your task's folder. Default \`${DEFAULT_SECRET_FILE}\`. Must not be tracked by git.` }
+      },
+      required: ['name', 'reason'],
+      additionalProperties: false
+    }
   }
 ]
 
@@ -614,10 +656,41 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       return { timedOut, tasks }
     }
 
+    case 'request_secret': {
+      const secretName = str(args, 'name', true).trim()
+      if (!validSecretName(secretName)) throw new ToolError('`name` must be an env var name: letters, digits and _, not starting with a digit.')
+      const reason = str(args, 'reason', true).trim().slice(0, SECRET_REASON_MAX)
+      const file = safeSecretFile(str(args, 'file') ?? DEFAULT_SECRET_FILE)
+      if (!file) throw new ToolError('`file` must be a path inside your task\'s folder (not in .git).')
+      if (!deps.requestSecret) throw new ToolError('DevTool can\'t ask for secrets here. Ask the user to put it in place themselves.')
+      const outcome = await deps.requestSecret({ project, task: me.task, tabId: caller.tabId, name: secretName, reason, file }, signal)
+      switch (outcome.status) {
+        case 'error':
+          throw new ToolError(outcome.error)
+        case 'declined':
+          throw new ToolError(`The user declined to give ${secretName}. Don't ask again for it unless they say so.`)
+        case 'timeout':
+          throw new ToolError(`The user didn't answer within 30 minutes. ${secretName} was not given.`)
+        case 'cancelled':
+          throw new ToolError(`The request for ${secretName} was cancelled.`)
+        case 'provided': {
+          const notes = [
+            isDotenvFile(file)
+              ? `${secretName} is set in ${file}. Load it from there; don't print or read its value.`
+              : `${file} holds the value of ${secretName}. Read it from there in the command that needs it; don't print it.`,
+            outcome.excluded ? `DevTool added ${file} to .git/info/exclude so git ignores it.` : ''
+          ].filter(Boolean)
+          return { provided: true, name: secretName, file, note: notes.join(' ') }
+        }
+      }
+      throw new ToolError('DevTool failed to ask.')
+    }
+
     default:
       throw new ToolError(`Unknown tool: ${name}`)
   }
 }
+
 
 /**
  * Resolves true once `until` of the tasks have settled, false at the timeout or
@@ -716,7 +789,8 @@ async function handleOne(message: unknown, caller: Caller, deps: DevtoolMcpDeps,
         serverInfo: { name: MCP_SERVER_NAME, title: 'DevTool', version: SERVER_VERSION },
         instructions:
           'DevTool is the app that runs you. These tools start, follow and message other DevTool tasks (each one its own agent), ' +
-          'so you can hand off self-contained work or run several pieces in parallel and collect their results.'
+          'so you can hand off self-contained work or run several pieces in parallel and collect their results. ' +
+          'When you need a secret (API key, token, password), ask with request_secret instead of asking the user to paste it into the chat.'
       })
     }
     case 'ping':

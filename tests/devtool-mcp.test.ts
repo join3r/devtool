@@ -313,7 +313,7 @@ describe('agent wiring', () => {
     expect(args).toHaveLength(2)
     expect(args[0].startsWith('--mcp-config=')).toBe(true)
     expect(JSON.parse(args[0].slice('--mcp-config='.length))).toEqual({ mcpServers: { devtool: { type: 'http', ...endpoint } } })
-    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks')
+    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks,mcp__devtool__request_secret')
   })
 
   it('starts a delegated task no looser than its caller', () => {
@@ -346,7 +346,8 @@ describe('agent wiring', () => {
   it('codex gets the server as TOML config overrides', () => {
     expect(codexMcpArgs(endpoint)).toEqual([
       '-c', 'mcp_servers.devtool.url="http://127.0.0.1:5/mcp"',
-      '-c', 'mcp_servers.devtool.http_headers={ "X-Tab-Id" = "t1", "X-Devtool-Token" = "tok" }'
+      '-c', 'mcp_servers.devtool.http_headers={ "X-Tab-Id" = "t1", "X-Devtool-Token" = "tok" }',
+      '-c', 'mcp_servers.devtool.tool_timeout_sec=3660'
     ])
   })
 
@@ -424,5 +425,48 @@ describe('agentExtraArgs (Codex and Pi chats)', () => {
   it('leaves the note out on Windows', () => {
     expect(agentExtraArgs('pi', null, 'Note', undefined, 'win32')).toBeUndefined()
     expect(agentExtraArgs('codex', null, 'Note', ['a'], 'win32')).toEqual(['a'])
+  })
+})
+
+describe('request_secret', () => {
+  it('asks through DevTool and answers with where the value went, never the value', async () => {
+    const { deps } = fakeDeps(data())
+    const asked: unknown[] = []
+    deps.requestSecret = async (input) => {
+      asked.push({ project: input.project.id, task: input.task.id, tabId: input.tabId, name: input.name, reason: input.reason, file: input.file })
+      return { status: 'provided', file: input.file, excluded: true, remembered: false, rememberFailed: false, fromSaved: false }
+    }
+    const result = await call(deps, 'request_secret', { name: 'OPENAI_API_KEY', reason: 'Call the API in tests' })
+    expect(result.isError).toBe(false)
+    expect(asked).toEqual([{ project: 'p1', task: 'parent', tabId: 'parent-tab', name: 'OPENAI_API_KEY', reason: 'Call the API in tests', file: '.env' }])
+    expect(result.json).toMatchObject({ provided: true, name: 'OPENAI_API_KEY', file: '.env' })
+    expect(result.json.note).toContain('.git/info/exclude')
+  })
+
+  it('refuses a bad name or a file outside the task folder before asking', async () => {
+    const { deps } = fakeDeps(data())
+    let asked = 0
+    deps.requestSecret = async () => { asked++; return { status: 'declined' } }
+    expect((await call(deps, 'request_secret', { name: 'my key', reason: 'x' })).isError).toBe(true)
+    expect((await call(deps, 'request_secret', { name: 'KEY', reason: 'x', file: '../outside/.env' })).isError).toBe(true)
+    expect((await call(deps, 'request_secret', { name: 'KEY', reason: 'x', file: '.git/config' })).isError).toBe(true)
+    expect(asked).toBe(0)
+  })
+
+  it('reports a decline and a missing host as errors', async () => {
+    const { deps } = fakeDeps(data())
+    expect((await call(deps, 'request_secret', { name: 'KEY', reason: 'x' })).text).toContain("can't ask for secrets")
+    deps.requestSecret = async () => ({ status: 'declined' })
+    const declined = await call(deps, 'request_secret', { name: 'KEY', reason: 'x' })
+    expect(declined.isError).toBe(true)
+    expect(declined.text).toContain('declined')
+  })
+
+  it('takes known secrets out of a reply another agent reads', async () => {
+    const { deps } = fakeDeps(data())
+    deps.lastReply = async () => 'I used sk-live-123456789 to call it.'
+    deps.redact = (text) => text.split('sk-live-123456789').join('[secret KEY]')
+    const result = await call(deps, 'get_task', { taskId: 'other' })
+    expect(result.json.lastReply).toBe('I used [secret KEY] to call it.')
   })
 })

@@ -20,6 +20,8 @@ import type { TaskBackground } from './deskInbox'
 import { queuedLine } from '../../../shared/queued-tasks'
 import TaskUsagePills from './TaskUsagePills'
 import { taskWorkPlace, type TaskWorkPlace } from '../../../shared/streams'
+import { taskSecretRequest, useSecretRequests } from '../../secretRequests'
+import SecretPrompt from '../SecretPrompt'
 
 /** Which list a row sits in; it decides the preview line and the hover actions. */
 export type DeskRowKind = 'needsYou' | 'answered' | 'waiting' | 'working' | 'snoozed'
@@ -51,6 +53,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
     if (waiting?.kind === 'permission') return { lead: 'Wants to:', text: waiting.label.replace(/^Permission:\s*/, '') }
     if (waiting?.kind === 'question' || waiting?.kind === 'plan') return { lead: 'Asks:', text: activity?.lastAnswer ?? waiting.label }
     if (waiting?.kind === 'error') return { lead: 'Stopped:', text: waiting.label }
+    if (waiting?.kind === 'secret') return { lead: 'Needs secret:', text: waiting.label }
     if (autopilotNeedsYou(entry.task)) return { lead: 'Autopilot stopped:', text: entry.task.autopilot?.reason ?? null }
     return { lead: 'Needs you:', text: agent.line ?? activity?.lastAnswer ?? null }
   }
@@ -122,7 +125,11 @@ export default function DeskRow({
   const { task, project, stream } = entry
   // A landing being fixed reads as the landing, not as the work around it.
   const inBackground = kind === 'working' && background !== null && !entry.task.landing
-  const { lead, text } = preview(kind, entry, agent, activity, now)
+  // An agent's request_secret: answered right here, whatever list the row is in.
+  const secret = taskSecretRequest(useSecretRequests(), task.id)
+  const { lead, text } = secret
+    ? { lead: 'Needs secret:', text: secret.reason ? `${secret.name} · ${secret.reason}` : secret.name }
+    : preview(kind, entry, agent, activity, now)
   const unread = entry.unread && kind !== 'working'
   return (
     <div
@@ -243,6 +250,7 @@ export default function DeskRow({
             {text}
           </span>
         )}
+        {secret && !rename && <SecretPrompt key={secret.id} request={secret} compact />}
       </div>
       <div
         className={`absolute right-2.5 top-2 hidden ${checking ? '' : 'group-hover:flex'} gap-1 pl-2 bg-row-sel`}

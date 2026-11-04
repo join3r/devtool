@@ -12,6 +12,7 @@ import { DeskDoneButton, DeskTaskTools } from './desk/DeskTaskHeader'
 import { getBench, openBench } from './desk/benchState'
 import { benchTabClosable, conversationTabId } from './desk/benchLayout'
 import TaskLandingBanner from './TaskLandingBanner'
+import TaskSecretBanner from './TaskSecretBanner'
 import { canLandTask } from '../taskLanding'
 import TaskHeader from './TaskHeader'
 import { ArchivedView } from './ArchivedView'
@@ -492,6 +493,7 @@ export default function ContentArea(): React.ReactElement {
               {canLandTask(project, task) && (
                 <TaskLandingBanner project={project} stream={findStreamOfTask(project, task.id)!} task={task} />
               )}
+              <TaskSecretBanner taskId={task.id} />
               <DeskTaskBody project={project} task={task} visible={isVisible} projectDir={effectiveDir} />
             </div>
           )

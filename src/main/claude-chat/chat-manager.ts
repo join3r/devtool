@@ -77,6 +77,11 @@ export interface ChatManagerDeps {
   /** Where the tab's agent reaches DevTool's MCP server (`devtool-mcp.ts`); null for nowhere. */
   mcpEndpoint?: (tabId: string) => DevtoolMcpEndpoint | null
   /**
+   * An event with known secret values taken out (`shared/secrets.ts`), before
+   * the state, the windows and the phone see it.
+   */
+  redact?: (event: ChatEvent) => ChatEvent
+  /**
    * Every chat here signs in from another machine: this host is a DevTool
    * server, whose windows are on a desktop. `/login` then asks for the pasted
    * code, as for an SSH project (the CLI's browser would open on the server).
@@ -669,7 +674,8 @@ export class ClaudeChatManager {
     }
   }
 
-  private emit(runtime: ChatRuntime, event: ChatEvent): void {
+  private emit(runtime: ChatRuntime, raw: ChatEvent): void {
+    const event = this.deps.redact ? this.deps.redact(raw) : raw
     runtime.state = reduceChat(runtime.state, event)
     runtime.seq += 1
     for (const clientId of runtime.attached) {

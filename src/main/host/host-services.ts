@@ -107,7 +107,12 @@ import { ChatBridge } from '../mobile/chat-bridge'
 import { PushEmitter } from '../mobile/push-emitter'
 import { createStream, listProjectBranches, type StreamGit } from '../mobile/new-stream'
 import { addChatTaskToProject, addTaskWithChat, type NewTaskExtra } from '../mobile/new-task'
-import { agentModeFor, callerClaudeMode, handleMcpMessage, unrestrictedCaller, lastReplyFromTranscript, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
+import { SecretStore } from '../secrets/secret-store'
+import { SecretRequests, type SecretOutcome } from '../secrets/secret-requests'
+import { checkSecretFile, writeSecretFile } from '../secrets/secret-file'
+import { registerSecretHandlers } from '../ipc/secrets'
+import { redactDeep, redactSecrets } from '../../shared/secrets'
+import { agentModeFor, callerClaudeMode, handleMcpMessage, unrestrictedCaller, lastReplyFromTranscript, type RequestSecretInput, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
 import { autopilotActive, autopilotSupported } from '../../shared/autopilot'
 import { statusTabs, taskStatus } from '../../shared/inbox-state'
 import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../../shared/hook-protocol'
@@ -297,6 +302,10 @@ export class HostServices {
   /** Tasks' worktrees landing back into their streams. */
   private readonly taskLanding: TaskLandingManager
   private readonly gitRunner = new LocalGitRunner()
+  /** Secrets the user chose to remember, encrypted per project (`<configDir>/secrets.json`). */
+  private readonly secretStore: SecretStore
+  /** Open `request_secret` prompts, and the values given this run (for redaction). */
+  private readonly secretRequests: SecretRequests
   /** Local projects whose folder is gone, for the phone's inbox (SPEC.md §4.4). */
   private readonly missingFolders = new MissingFolderWatch(() => this.projectsStore.peek().projects)
   private missingFoldersUnsub: (() => void) | null = null
@@ -338,6 +347,16 @@ export class HostServices {
     const configDir = env.configDir
     const identity = new IdentityStore(path.join(configDir, 'mobile'), env.secrets, (message) => this.logDebug(message))
     this.identity = identity
+    this.secretStore = new SecretStore(configDir, env.secrets, (message) => this.logDebug(message))
+    this.secretRequests = new SecretRequests({
+      store: this.secretStore,
+      write: (dir, file, name, value) => writeSecretFile(dir, file, name, value, this.gitRunner),
+      onChange: (list) => this.clients.broadcast('secret-requests-changed', list),
+      // The tab waits on you: its status and the Inbox say so, as for a permission prompt.
+      onOpen: (request) => this.handleHook('activity', request.tabId, { hook_event_name: 'DevtoolSecretRequested', tool_use_id: `secret:${request.id}`, name: request.name }),
+      onClose: (request) => this.handleHook('activity', request.tabId, { hook_event_name: 'DevtoolPromptResolved', tool_use_id: `secret:${request.id}` }),
+      log: (message) => this.logDebug(message)
+    })
     this.relayClient = new RelayClient({
       role: relayRole ?? 'desktop',
       // Servers need binary frames; phones keep getting JSON from the relay.
@@ -574,6 +593,14 @@ export class HostServices {
     this.missingFoldersUnsub = this.projectsStore.subscribe(() => { void this.missingFolders.refresh() })
     this.streamRunsUnsub = this.projectsStore.subscribe(() => this.streamRuns.reconcile())
     this.mobileService.start()
+    // Only when something was remembered: reading it can raise a Keychain prompt.
+    if (this.secretStore.hasAny()) {
+      try {
+        this.secretRequests.learnSaved()
+      } catch (err) {
+        this.logDebug(`secretsLearn error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
   }
 
   private createMobileService(): MobileService {
@@ -929,6 +956,12 @@ export class HostServices {
         } catch (err) {
           this.logDebug(`archiveForget projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
         }
+        try {
+          // Its remembered secrets go with it.
+          this.secretStore.deleteProject(projectId)
+        } catch (err) {
+          this.logDebug(`secretsForget projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
+        }
       }
     })
   }
@@ -1034,6 +1067,7 @@ export class HostServices {
         this.statusReporters.delete(tabId)
         this.keyInterrupts.forget(tabId)
         this.activityRegistry.remove(tabId)
+        this.secretRequests.cancelTab(tabId)
         this.broadcastAgentActivity(tabId)
       },
       releaseHooks: (owner, dir, tabId) => owner.ssh
@@ -1238,8 +1272,34 @@ export class HostServices {
       lastReply: async (tab, dir) => {
         if (tab.type !== 'claude-chat' || !tab.sessionId) return null
         return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, dir))
-      }
+      },
+      requestSecret: (input, signal) => this.requestSecretForAgent(input, signal),
+      redact: (text) => redactSecrets(text, this.secretRequests.redactionList())
     }
+  }
+
+  /**
+   * `request_secret` (`devtool-mcp.ts`): a masked prompt in the windows (the
+   * task's view and the Inbox), answered into a file in the task's folder.
+   * Only on a desktop, for projects on this machine: a server has no window of
+   * its own, and the value must not travel further than it has to.
+   */
+  private async requestSecretForAgent(input: RequestSecretInput, signal?: AbortSignal): Promise<SecretOutcome | { status: 'error'; error: string }> {
+    const { project, task } = input
+    if (this.isServer) return { status: 'error', error: 'This task runs on a DevTool server, where DevTool can\'t ask for secrets yet. Ask the user to put it in place on that machine.' }
+    if (project.ssh || project.host) return { status: 'error', error: 'DevTool asks for secrets only for projects on this machine.' }
+    const dir = taskDirectory(project, task)
+    const problem = await checkSecretFile(dir, input.file, this.gitRunner)
+    if (problem) return { status: 'error', error: problem }
+    return this.secretRequests.request({
+      projectId: project.id,
+      taskId: task.id,
+      tabId: input.tabId,
+      name: input.name,
+      reason: input.reason,
+      file: input.file,
+      dir
+    }, signal)
   }
 
   /**
@@ -1395,7 +1455,9 @@ export class HostServices {
    * status dot for the tabs they mount, and the activity registry, which is what
    * the phone's inbox and the sidebar's activity line read.
    */
-  private handleHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
+  private handleHook(endpoint: string, tabId: string, raw: Record<string, unknown>): void {
+    // A secret the agent repeats in its reply must not reach the Inbox or the phone.
+    const body = redactDeep(raw, this.secretRequests.redactionList())
     const event = typeof body.hook_event_name === 'string' ? body.hook_event_name : ''
     const before = this.activityRegistry.getStatus(tabId)
     const prior = this.activityRegistry.getActivity(tabId)
@@ -1530,6 +1592,7 @@ export class HostServices {
       sendToClient: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       agentContext: (tabId) => this.agentContext(tabId),
       mcpEndpoint: (tabId) => this.mcpEndpoint(tabId),
+      redact: (event) => redactDeep(event, this.secretRequests.redactionList()),
       resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
       resolveLocalAgent: (agent) => resolveAgentCommand(agentCommandOverride(agent, this.config).trim() || agent),
       wrapSpawn: (file, args) => conptySpawnArgv(file, args, { env: getShellEnv() }),
@@ -1636,6 +1699,7 @@ export class HostServices {
         this.statusReporters.delete(tabId)
         this.keyInterrupts.forget(tabId)
         this.activityRegistry.remove(tabId)
+        this.secretRequests.cancelTab(tabId)
         this.broadcastAgentActivity(tabId)
       },
       reapTab: (tabId) => { void reapTabProcesses(tabId, log) },
@@ -1706,6 +1770,12 @@ export class HostServices {
     })
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
     registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })
+    registerSecretHandlers(ipc, {
+      requests: this.secretRequests,
+      store: this.secretStore,
+      // A saved value is offered again by name; keep it out of the chat too once it is read.
+      projectExists: (projectId) => this.projectsStore.peek().projects.some(p => p.id === projectId)
+    })
     registerTokenUsageHandlers(ipc, { projectUsage: (projectId) => this.projectTokenUsage(projectId) })
     // A server answers its own logins (its desktop merges them); a desktop every one it knows.
     registerPlanLimitsHandlers(ipc, { accounts: () => this.isServer ? this.planLimits.own() : this.planLimits.accounts() })
