@@ -13,6 +13,7 @@ import {
   type TaskLanding
 } from '../../shared/types'
 import { findStreamOfTask, taskTabs } from '../../shared/streams'
+import { childProgress, delegationTree, waitingOnChildren, type DelegationTree } from '../../shared/delegation'
 import { promptQueue, promptQueueWatchedTask, queuedPromptStream } from '../../shared/prompt-queue'
 import { projectSchedules, scheduleStreamId } from '../../shared/schedules'
 import type { PlanAccount } from '../../shared/plan-limits'
@@ -150,7 +151,7 @@ export function wireLanding(landing: TaskLanding): WireLanding {
 /** Each task's lines added and removed (§4.4 `diff`), by task id. */
 export type TaskDiffLookup = (taskId: string) => GitDiffSummary | undefined
 
-function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: number, diffs: TaskDiffLookup): MobileInboxTask {
+function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: number, diffs: TaskDiffLookup, tree: DelegationTree): MobileInboxTask {
   const out: Omit<MobileInboxTask, 'tabs'> = {
     id: task.id,
     name: task.name,
@@ -167,6 +168,12 @@ function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: numb
   const diff = diffs(task.id)
   if (diff && (diff.added > 0 || diff.deleted > 0)) out.diff = { added: diff.added, deleted: diff.deleted }
   if (task.scheduledFrom) out.scheduled = task.scheduledFrom.name
+  // Tasks started by another task (§8.26): nested under it while it is open.
+  const parentTaskId = tree.parentOf.get(task.id)
+  if (parentTaskId) out.parentTaskId = parentTaskId
+  const children = childProgress(tree, task, lookup.statusOf)
+  if (children) out.children = children
+  if (waitingOnChildren(tree, task, lookup.statusOf) > 0) out.waiting = true
   const tabs = taskTabs(task)
     .filter(isMobileTab)
     .map((tab) => buildTab(tab, lookup))
@@ -257,6 +264,7 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number, mis
   const lastStream = project.streams.find((stream) => stream.id === project.lastStreamId)
   const queue = buildQueue(project)
   const schedules = buildSchedules(project)
+  const tree = delegationTree([project])
   return {
     id: project.id,
     name: project.name,
@@ -264,7 +272,7 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number, mis
     remote: !!project.ssh,
     streams: project.streams.map((stream) => buildStream(project, stream, runs)),
     ...(lastStream ? { lastStreamId: lastStream.id } : {}),
-    tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now, diffs))),
+    tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now, diffs, tree))),
     ...(queue.length > 0 ? { queue } : {}),
     ...(schedules.length > 0 ? { schedules } : {}),
     ...(missingFolder ? { missingFolder: true as const } : {})

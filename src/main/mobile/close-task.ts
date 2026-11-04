@@ -50,6 +50,8 @@ export interface CloseTaskDeps {
   landing?: Pick<TaskLandingManager, 'landTask' | 'closeWorktree' | 'preview'>
   /** Ends the task's processes, keeping their scrollback: `stopWorking` before a landing. */
   stopTabs?(project: Project, task: Task): Promise<void>
+  /** The tasks it started (§8.26): stop them all, or leave them running (`HostServices.closeChildTasks`). */
+  closeChildren?(projectId: string, taskId: string, action: 'stop' | 'keep'): Promise<number>
 }
 
 interface Found {
@@ -134,6 +136,10 @@ export async function closeTask(deps: CloseTaskDeps, params: TaskCloseParams, ph
     if (taskTabs(task).some((tab) => dirty.has(tab.id))) {
       return { ok: true, result: { closed: false, blocker: 'unsaved' } }
     }
+  }
+  // Every blocker is past: what it started stops with it, or runs on (§8.26).
+  if (deps.closeChildren && project.streams.some(s => s.tasks.some(t => t.delegatedFrom?.taskId === task.id))) {
+    await deps.closeChildren(project.id, task.id, params.children ?? 'keep')
   }
   if (!landing) {
     await deps.removeTask(project, task)

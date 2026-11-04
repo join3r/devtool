@@ -1,4 +1,6 @@
 import os from 'os'
+import { DelegationDelivery } from '../delegation-delivery'
+import { delegationTree, openDescendants, waitingOnChildren } from '../../shared/delegation'
 import { randomUUID } from 'crypto'
 import path from 'path'
 import { execFile } from 'child_process'
@@ -96,7 +98,7 @@ import { AutopilotRunner } from '../autopilot'
 import { runCodexReview } from '../codex-review'
 import { findAgentCli } from '../agent-clis'
 import { featureUnavailableReason } from '../../shared/project-features'
-import { canHaveMainTaskWorktrees, currentStreamId, findMainStream, findTaskInProject, mapTaskInProject, removeTaskFromProject, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskTabs, taskWorktreesSupported } from '../../shared/streams'
+import { canHaveMainTaskWorktrees, currentStreamId, findMainStream, findStreamOfTask, findTaskInProject, streamTakesLandings, mapTaskInProject, removeTaskFromProject, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskTabs, taskWorktreesSupported } from '../../shared/streams'
 import { projectRunCommands } from '../../shared/stream-run'
 import { chatTabConfig } from '../../shared/chat-tab-config'
 import { MobileService } from '../mobile/mobile-service'
@@ -116,7 +118,7 @@ import { checkSecretFile, writeSecretFile } from '../secrets/secret-file'
 import { registerSecretHandlers } from '../ipc/secrets'
 import { redactDeep, redactSecrets } from '../../shared/secrets'
 import { agentModeFor, callerClaudeMode, handleMcpMessage, liveTaskState, unrestrictedCaller, lastReplyFromTranscript, type RequestSecretInput, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
-import { autopilotActive, autopilotSupported } from '../../shared/autopilot'
+import { autopilotActive, autopilotSupported, stoppedAutopilot } from '../../shared/autopilot'
 import { statusTabs, taskStatus } from '../../shared/inbox-state'
 import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../../shared/hook-protocol'
 import { suggestTaskName } from '../task-namer'
@@ -163,6 +165,7 @@ import {
   QUEUE_FEATURE,
   SCHEDULES_FEATURE,
   TOKENS_USAGE_FEATURE,
+  TASK_CHILDREN_FEATURE,
   SERVER_APP_NAME
 } from '../../../protocol/ts/index.ts'
 import { normalizeMobileConfig, normalizeRelayUrl, type MobileConfig } from '../../shared/mobile'
@@ -330,6 +333,7 @@ export class HostServices {
   private readonly schedules: ScheduleRunner
   /** Autopilot tasks, from their first turn to Done (desk redesign decision 7). */
   private readonly autopilot: AutopilotRunner
+  private readonly delegation: DelegationDelivery
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private readonly env: HostEnv
@@ -462,6 +466,31 @@ export class HostServices {
       sendToAgent: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
       landing: this.taskLanding,
       archiveTask: (project, task) => this.archiveTaskFromMain(project, task),
+      // A parent waiting for tasks it started lands after they finish: their message wakes it.
+      waitingOnChildren: (taskId) => {
+        for (const project of this.projectsStore.peek().projects) {
+          const task = findTaskInProject(project, taskId)
+          if (task) return waitingOnChildren(delegationTree([project]), task, (tabId) => this.activityRegistry.getStatus(tabId)) > 0
+        }
+        return false
+      },
+      log: (message) => this.logDebug(message)
+    })
+    this.delegation = new DelegationDelivery({
+      peek: () => this.projectsStore.peek(),
+      archive: (projectId) => this.archiveStorage.load(projectId),
+      statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+      activityOf: (tabId) => this.activityRegistry.getActivity(tabId),
+      subscribe: (listener) => {
+        const stops = [this.activityRegistry.subscribe(() => listener()), this.projectsStore.subscribe(() => listener())]
+        return () => { for (const stop of stops) stop() }
+      },
+      send: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
+      lastReply: async (tab, dir) => {
+        if (tab.type !== 'claude-chat' || !tab.sessionId) return null
+        return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, dir))
+      },
+      isLanding: (taskId) => this.taskLanding.isBusy(taskId),
       log: (message) => this.logDebug(message)
     })
     this.promptQueue = new PromptQueueRunner({
@@ -615,6 +644,7 @@ export class HostServices {
     this.schedules.start()
     this.taskUsage.start()
     this.autopilot.start()
+    this.delegation.start()
     this.missingFolders.start()
     this.taskDiffs.start()
     this.missingFoldersUnsub = this.projectsStore.subscribe(() => { void this.missingFolders.refresh() })
@@ -690,7 +720,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -742,7 +772,8 @@ export class HostServices {
         removeTask: (project, task) => this.archiveTaskFromMain(project, task),
         // A task with its own worktree lands, as the sidebar's Close does.
         landing: this.taskLanding,
-        stopTabs: (project, task) => this.stopTaskTabs(project, task)
+        stopTabs: (project, task) => this.stopTaskTabs(project, task),
+        closeChildren: (projectId, taskId, action) => this.closeChildTasks(projectId, taskId, action)
       }, params, phone),
       landTask: (params) => landTask({ peek: () => this.projectsStore.peek(), landing: this.taskLanding }, params),
       closeTab: async (tabId) => {
@@ -1236,6 +1267,7 @@ export class HostServices {
     this.queuedTasks.dispose()
     this.schedules.dispose()
     this.autopilot.dispose()
+    this.delegation.stop()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
@@ -1317,7 +1349,8 @@ export class HostServices {
         return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, dir))
       },
       requestSecret: (input, signal) => this.requestSecretForAgent(input, signal),
-      redact: (text) => redactSecrets(text, this.secretRequests.redactionList())
+      redact: (text) => redactSecrets(text, this.secretRequests.redactionList()),
+      reported: (taskIds) => this.delegation.reported(taskIds)
     }
   }
 
@@ -1379,6 +1412,8 @@ export class HostServices {
         ...(autopilot ? { autopilot: { phase: 'working' as const, ...(input.review ? { review: true } : {}) } } : {}),
         delegatedFrom: input.from
       }),
+      // The parent keeps count of what it started, closed ones too ("2 of 3 done").
+      decorateProject: (p, taskId) => mapTaskInProject(p, input.from.taskId, parent => ({ ...parent, startedTaskIds: [...(parent.startedTaskIds ?? []), taskId] })),
       log: `mcpStartTask from=${input.from.taskId} agent=${input.agent} model=${input.model ?? '-'} mode=${mode ?? '-'} autopilot=${autopilot}`
     })
     if (!started.ok) return started
@@ -1401,6 +1436,8 @@ export class HostServices {
     /** The task's name; absent: one made from the prompt in the background. */
     name?: string
     decorate?: (task: Task) => Task
+    /** The project as committed with the new task (`taskId`): what else changes with it. */
+    decorateProject?: (project: Project, taskId: string) => Project
     log: string
   }): Promise<{ ok: true; taskId: string; queued: boolean; ownWorktree: boolean } | { ok: false; error: string }> {
     const data = this.projectsStore.peek()
@@ -1434,10 +1471,14 @@ export class HostServices {
     const added = addChatTaskToProject(data, project, opts.prompt, streamId, undefined, now, extra, opts.agent)
     this.commitProjects({
       ...added.data,
-      projects: added.data.projects.map(p => (p.id !== project.id ? p : mapTaskInProject(p, added.taskId, task => {
-        const named = opts.name ? { ...task, name: opts.name } : task
-        return opts.decorate ? opts.decorate(named) : named
-      })))
+      projects: added.data.projects.map(p => {
+        if (p.id !== project.id) return p
+        const withTask = mapTaskInProject(p, added.taskId, task => {
+          const named = opts.name ? { ...task, name: opts.name } : task
+          return opts.decorate ? opts.decorate(named) : named
+        })
+        return opts.decorateProject ? opts.decorateProject(withTask, added.taskId) : withTask
+      })
     })
     if (!opts.name) this.nameTaskInBackground(project.id, added.taskId, opts.prompt)
     this.logDebug(`${opts.log} project=${project.id} task=${added.taskId} start=${extra?.queued ? 'queue' : extra?.ownWorktree ? 'worktree' : 'here'}`)
@@ -1516,6 +1557,55 @@ export class HostServices {
 
   runScheduleNow(projectId: string, scheduleId: string): Promise<ScheduleRunResult> {
     return this.schedules.runNow(projectId, scheduleId)
+  }
+
+  /**
+   * Closing a task that started others (the close question's answer): `keep`
+   * leaves them running (they become top-level tasks once it is gone);
+   * `stop` stops and closes every open task under it, grandchildren first,
+   * without landing: a task with a worktree of its own keeps its branch with
+   * its work committed. Either way the closing task gets no more wake-up
+   * messages. Resolves how many tasks were stopped.
+   */
+  async closeChildTasks(projectId: string, taskId: string, action: 'stop' | 'keep'): Promise<number> {
+    this.delegation.suppress(taskId)
+    if (action === 'keep') return 0
+    const start = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    if (!start) return 0
+    let stopped = 0
+    for (const id of openDescendants(delegationTree([start]), taskId)) {
+      this.delegation.suppress(id)
+      const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+      const task = findTaskInProject(project, id)
+      if (!project || !task) continue
+      // Off Autopilot first, so a stopped turn isn't landed.
+      if (task.autopilot && task.autopilot.phase !== 'stopped') {
+        const data = this.projectsStore.peek()
+        this.commitProjects({
+          ...data,
+          projects: data.projects.map(p => (p.id === projectId ? mapTaskInProject(p, id, t => ({ ...t, autopilot: stoppedAutopilot(t.autopilot!, 'Stopped with the task that started it', Date.now()) })) : p))
+        })
+      }
+      try {
+        const latest = findTaskInProject(this.projectsStore.peek().projects.find(p => p.id === projectId), id)
+        if (!latest) continue
+        if (taskWorktreesSupported(project) && latest.workspace && streamTakesLandings(findStreamOfTask(project, id))) {
+          await this.stopTaskTabs(project, latest)
+          const result = await this.taskLanding.closeWorktree(projectId, id, 'keep')
+          if (result.status !== 'removed') {
+            const again = findTaskInProject(this.projectsStore.peek().projects.find(p => p.id === projectId), id)
+            if (again) await this.archiveTaskFromMain(project, again)
+          }
+        } else {
+          await this.archiveTaskFromMain(project, latest)
+        }
+        stopped++
+      } catch (err) {
+        this.logDebug(`closeChildTasks task=${id} error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    this.logDebug(`closeChildTasks parent=${taskId} stopped=${stopped}`)
+    return stopped
   }
 
   /** The permission mode a chat tab's agent runs in now; null for a terminal tab, whose mode main can't see. */
@@ -1885,6 +1975,7 @@ export class HostServices {
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
     registerTaskLandingHandlers(ipc, {
       taskLanding: this.taskLanding,
+      closeChildTasks: (projectId, taskId, action) => this.closeChildTasks(projectId, taskId, action),
       mergeStream: (projectId, streamId) => mergeStream({
         projects: this.projectsStore,
         runner: this.gitRunner,

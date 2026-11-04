@@ -181,6 +181,19 @@
             "deleted": { "type": "integer", "minimum": 0 }
           }
         },
+        "parentTaskId": { "type": "string", "description": "task.children: the open task of this project that started this one (SPEC.md §8.26)." },
+        "children": {
+          "description": "task.children: the tasks this one started, closed ones included (SPEC.md §8.26).",
+          "type": "object",
+          "required": ["total", "done", "working", "needsYou"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "done": { "type": "integer", "minimum": 0 },
+            "working": { "type": "integer", "minimum": 0 },
+            "needsYou": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "waiting": { "const": true, "description": "task.children: its own agent is quiet but tasks it started still work (SPEC.md §8.26)." },
         "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
       }
     },

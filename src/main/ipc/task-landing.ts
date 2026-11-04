@@ -6,6 +6,8 @@ import { v } from './validate'
 
 export interface TaskLandingIpcDeps {
   taskLanding: TaskLandingManager
+  /** Closing a task that started others: stop them all, or let them run on (`HostServices.closeChildTasks`). */
+  closeChildTasks(projectId: string, taskId: string, action: 'stop' | 'keep'): Promise<number>
   /** A closing stream's branch into its base branch (`stream-merge.ts`). */
   mergeStream(projectId: string, streamId: string): Promise<StreamMergeResult>
   /** A Claude task in the stream's worktree that merges the base branch in and resolves the conflicts (`stream-merge-fix.ts`). */
@@ -49,6 +51,9 @@ export function registerTaskLandingHandlers(ipc: IpcRegistrar, deps: TaskLanding
 
   ipc.handle('task-worktree-close', [safeId, safeId, v.literal('keep', 'discard'), v.optional(closeOptions)], (_event, projectId, taskId, mode, options) =>
     deps.taskLanding.closeWorktree(projectId, taskId, mode, options ?? {}))
+
+  ipc.handle('task-close-children', [safeId, safeId, v.literal('stop', 'keep')], (_event, projectId, taskId, action) =>
+    deps.closeChildTasks(projectId, taskId, action))
 
   ipc.handle('stream-merge', [safeId, safeId], (_event, projectId, streamId) =>
     deps.mergeStream(projectId, streamId))

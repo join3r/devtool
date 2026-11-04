@@ -13,6 +13,8 @@ import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { useDeskDone } from './useDeskDone'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
 import { ScheduleModal } from './DeskSchedules'
+import { useAllTabStatuses } from '../../context/TabStatusContext'
+import { childProgress, childProgressLine, delegationTree, statusFrom, waitingLine, waitingOnChildren } from '../../../shared/delegation'
 
 const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border-strong bg-transparent text-sm text-text cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
@@ -21,11 +23,19 @@ const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border-st
  * Snooze (Wake while snoozed). Lines changed live on the sidebar row only.
  */
 export function DeskTaskTools({ project, task }: { project: Project; task: Task }): React.ReactElement {
-  const { snoozeTask, unsnoozeTask, endAutopilot } = useApp()
+  const { snoozeTask, unsnoozeTask, endAutopilot, switchToTask } = useApp()
   const [snoozeAt, setSnoozeAt] = useState<DeskSnoozeRequest | null>(null)
   const [editSchedule, setEditSchedule] = useState(false)
   const snoozed = isSnoozed(task, Date.now())
   const schedule = task.scheduledFrom ? project.schedules?.find(s => s.id === task.scheduledFrom!.scheduleId) : undefined
+  const statuses = useAllTabStatuses()
+  // Tasks this one started, and the open task that started it.
+  const tree = delegationTree([project])
+  const statusOf = statusFrom(statuses)
+  const waitingOn = waitingOnChildren(tree, task, statusOf)
+  const progress = childProgress(tree, task, statusOf)
+  const parentId = tree.parentOf.get(task.id)
+  const parent = parentId ? tree.tasks.get(parentId) : undefined
 
   return (
     <>
@@ -42,6 +52,22 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
         </button>
       )}
       {editSchedule && schedule && <ScheduleModal project={project} schedule={schedule} onClose={() => setEditSchedule(false)} />}
+      {parent && (
+        <button
+          type="button"
+          className="shrink-0 mr-1.5 max-w-[180px] truncate h-[22px] px-2 rounded-full border border-border bg-transparent text-xs text-text-muted cursor-pointer hover:text-text [-webkit-app-region:no-drag]"
+          title={`Started by “${parent.name}”. Open it`}
+          onClick={() => switchToTask(project.id, parent.id)}
+          data-testid="desk-task-parent"
+        >↑ {parent.name}</button>
+      )}
+      {progress && (
+        <span
+          className="shrink-0 mr-1.5 flex items-center h-[22px] px-2 rounded-full border border-border text-xs text-text-muted"
+          title="Tasks its agent started"
+          data-testid="desk-task-children"
+        >{waitingOn > 0 ? `${waitingLine(waitingOn)} · ${childProgressLine(progress)}` : childProgressLine(progress)}</span>
+      )}
       {autopilotActive(task) && (
         <span
           className="shrink-0 mr-1.5 flex items-center gap-1 h-[22px] pl-2 pr-1 rounded-full border border-border text-xs text-text-muted"

@@ -5,14 +5,26 @@ public struct InboxEntry: Sendable, Equatable, Identifiable {
     public var desktopId: String
     public var project: InboxProject
     public var task: InboxTask
+    /// The tasks it started that are still open (§8.26), each with its own;
+    /// they are listed under this row, not on their own.
+    public var children: [InboxEntry]
+    /// In Needs you only because a task under it needs you: that task.
+    public var bubbledFrom: InboxTask?
 
-    public init(desktopId: String, project: InboxProject, task: InboxTask) {
+    public init(desktopId: String, project: InboxProject, task: InboxTask, children: [InboxEntry] = [], bubbledFrom: InboxTask? = nil) {
         self.desktopId = desktopId
         self.project = project
         self.task = task
+        self.children = children
+        self.bubbledFrom = bubbledFrom
     }
 
     public var id: String { "\(desktopId):\(task.id)" }
+
+    /// Every task under this row, depth first.
+    public var descendants: [InboxEntry] {
+        children.flatMap { [$0] + $0.descendants }
+    }
 }
 
 /// Which of the desktop inbox's groups a task is in (its `partitionInbox`).
@@ -49,6 +61,8 @@ extension InboxTask {
         // As the desktop's `partitionInbox`: ahead of working and snooze.
         if landing?.needsYou == true { return .yourTurn }
         if status == .working { return .working }
+        // Waiting for tasks it started (§8.26) is not idle, a snooze notwithstanding.
+        if waiting { return .working }
         if isSnoozed(now: now) { return .snoozed }
         return isYourTurn ? .yourTurn : .quiet
     }
@@ -73,9 +87,16 @@ public struct InboxPartition: Sendable, Equatable {
         var index = 0
         for (desktopId, inbox) in inboxes {
             for project in inbox.projects {
-                for task in project.tasks {
-                    groups[task.inboxGroup(now: now), default: []]
-                        .append((InboxEntry(desktopId: desktopId, project: project, task: task), index))
+                // Started tasks go under the task that started them (§8.26); a
+                // parent with a task under it that needs you moves to Needs you.
+                for entry in Self.nest(desktopId: desktopId, project: project) {
+                    var root = entry
+                    var group = root.task.inboxGroup(now: now)
+                    if group != .needsYou, let asking = root.descendants.first(where: { $0.task.inboxGroup(now: now) == .needsYou }) {
+                        group = .needsYou
+                        root.bubbledFrom = asking.task
+                    }
+                    groups[group, default: []].append((root, index))
                     index += 1
                 }
             }
@@ -100,9 +121,41 @@ public struct InboxPartition: Sendable, Equatable {
         needsYou.isEmpty && ready.isEmpty && working.isEmpty && snoozed.isEmpty
     }
 
+    /// The project's tasks as rows: those another open task started sit in
+    /// its `children`, in the project's order. A `parentTaskId` that isn't
+    /// among the tasks (closed, or from a confused desktop) leaves the task a
+    /// row of its own; so does a loop.
+    public static func nest(desktopId: String, project: InboxProject) -> [InboxEntry] {
+        let ids = Set(project.tasks.map(\.id))
+        var parentOf: [String: String] = [:]
+        for task in project.tasks {
+            if let parent = task.parentTaskId, parent != task.id, ids.contains(parent) { parentOf[task.id] = parent }
+        }
+        // Cut loops where they close.
+        for id in Array(parentOf.keys) {
+            var seen: Set<String> = [id]
+            var at = parentOf[id]
+            while let current = at {
+                if seen.contains(current) { parentOf[id] = nil; break }
+                seen.insert(current)
+                at = parentOf[current]
+            }
+        }
+        var childrenOf: [String: [InboxTask]] = [:]
+        for task in project.tasks {
+            if let parent = parentOf[task.id] { childrenOf[parent, default: []].append(task) }
+        }
+        func build(_ task: InboxTask, _ seen: Set<String>) -> InboxEntry {
+            let kids = (childrenOf[task.id] ?? []).filter { !seen.contains($0.id) }
+            return InboxEntry(desktopId: desktopId, project: project, task: task,
+                              children: kids.map { build($0, seen.union([$0.id])) })
+        }
+        return project.tasks.filter { parentOf[$0.id] == nil }.map { build($0, [$0.id]) }
+    }
+
     /// The Inbox badge, as the desktop's: unread tasks that aren't snoozed.
     public var unreadCount: Int {
-        (needsYou + ready + working).filter(\.task.unread).count
+        (needsYou + ready + working).flatMap { [$0] + $0.descendants }.filter(\.task.unread).count
     }
 
     /// The open, unfolded groups gathered by project for the grouped layout

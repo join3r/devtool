@@ -19,6 +19,7 @@ import {
 import { hasMcpTools } from './agent-context'
 import { DEFAULT_SECRET_FILE, SECRET_REASON_MAX, isDotenvFile, safeSecretFile, validSecretName } from '../shared/secrets'
 import type { SecretOutcome } from './secrets/secret-requests'
+import { childProgress, childProgressLine, delegationTree, waitingOnChildren } from '../shared/delegation'
 
 /**
  * DevTool's MCP server: tools an agent DevTool started uses to run DevTool
@@ -128,6 +129,11 @@ export interface DevtoolMcpDeps {
   /** The permission mode the agent in `tabId` runs in; null when main can't see it (a terminal tab). */
   callerMode(tabId: string): string | null
   newId(): string
+  /**
+   * A get_task or wait_for_tasks answer told the caller these tasks settled:
+   * the wake-up message (`delegation-delivery.ts`) needn't tell it again.
+   */
+  reported?(taskIds: readonly string[]): void
   now?(): number
 }
 
@@ -277,7 +283,11 @@ export function settled(state: McpTaskState): boolean {
   return state !== 'starting' && state !== 'queued' && state !== 'working'
 }
 
-export function liveTaskState(task: Task, deps: Pick<DevtoolMcpDeps, 'statusOf' | 'activityOf'>, now: number): { state: McpTaskState; detail?: string } {
+/**
+ * `waitingOn`: tasks it started that still work (`waitingOnChildren`). A task
+ * waiting for them is `working`, not idle: it isn't done until they are.
+ */
+export function liveTaskState(task: Task, deps: Pick<DevtoolMcpDeps, 'statusOf' | 'activityOf'>, now: number, waitingOn = 0): { state: McpTaskState; detail?: string } {
   if (task.queued) {
     return { state: 'queued', detail: task.queued.error ? `Its start failed: ${task.queued.error}` : 'Waits until no other agent works in its folder' }
   }
@@ -292,6 +302,7 @@ export function liveTaskState(task: Task, deps: Pick<DevtoolMcpDeps, 'statusOf' 
   if (landingNeedsYou(task)) return { state: 'needs_you', detail: `Its landing stopped (${task.landing?.state})` }
   if (status === 'attention') return { state: 'needs_you', detail: said ?? 'Its agent waits on an answer' }
   if (status === 'working') return { state: 'working', ...(autopilotLine(task.autopilot) ?? said ? { detail: autopilotLine(task.autopilot) ?? said } : {}) }
+  if (waitingOn > 0) return { state: 'working', detail: `Waiting for ${waitingOn} ${waitingOn === 1 ? 'task' : 'tasks'} it started` }
   if (autopilotBusy(task)) return { state: 'working', detail: autopilotLine(task.autopilot) ?? 'Autopilot is at work' }
   const shells = shellLine(tabs.map(tab => deps.activityOf(tab.id)))
   // Between a turn and Autopilot's next step (review, landing): it moves on by itself.
@@ -330,7 +341,14 @@ interface TaskSummary {
   folder?: string
   autopilot?: string
   startedBy?: string
+  /** "2 of 3 done": the tasks it started. */
+  startedTasks?: string
   you?: true
+}
+
+/** How many tasks it started `task` waits for, by its project's tree. */
+export function waitingOf(project: Project, task: Task, deps: Pick<DevtoolMcpDeps, 'statusOf'>): number {
+  return waitingOnChildren(delegationTree([project]), task, deps.statusOf)
 }
 
 function summarize(found: FoundTask, deps: DevtoolMcpDeps, now: number, callerTaskId?: string): TaskSummary {
@@ -349,7 +367,9 @@ function summarize(found: FoundTask, deps: DevtoolMcpDeps, now: number, callerTa
     }
   }
   const { project, stream, task } = found
-  const { state, detail } = liveTaskState(task, deps, now)
+  const tree = delegationTree([project])
+  const { state, detail } = liveTaskState(task, deps, now, waitingOnChildren(tree, task, deps.statusOf))
+  const progress = childProgress(tree, task, deps.statusOf)
   const branch = task.workspace?.branchName ?? (stream.isMain ? undefined : stream.workspace?.branchName)
   return {
     taskId: task.id,
@@ -364,13 +384,14 @@ function summarize(found: FoundTask, deps: DevtoolMcpDeps, now: number, callerTa
     ...(project.ssh ? {} : { folder: taskDirectory(project, task) }),
     ...(task.autopilot ? { autopilot: task.autopilot.phase === 'stopped' ? `stopped: ${task.autopilot.reason ?? ''}` : task.autopilot.phase } : {}),
     ...(task.delegatedFrom ? { startedBy: `${task.delegatedFrom.name} (${task.delegatedFrom.taskId})` } : {}),
+    ...(progress ? { startedTasks: childProgressLine(progress) } : {}),
     ...(task.id === callerTaskId ? { you: true as const } : {})
   }
 }
 
 function stateOf(found: FoundTask | null, deps: DevtoolMcpDeps, now: number): McpTaskState | null {
   if (!found) return null
-  return found.kind === 'closed' ? 'done' : liveTaskState(found.task, deps, now).state
+  return found.kind === 'closed' ? 'done' : liveTaskState(found.task, deps, now, waitingOf(found.project, found.task, deps)).state
 }
 
 /** The end of `text`, at most `limit` characters. */
@@ -457,7 +478,8 @@ export const TOOLS: ToolDef[] = [
       'It starts in your permission mode, or a stricter one. By default it runs on Autopilot when your mode allows (auto or bypass): it works without asking, and when it finishes DevTool checks files changed and lands its work into its stream as one commit, then closes the task (state `done`). ' +
       'It gets a git worktree of its own when the stream or project allows; if it would share a folder with an agent already working there, it gets its own worktree or waits its turn (state `queued`). ' +
       'Pi asks no permissions, so only an agent that runs with none either (Claude bypassing permissions, Codex full access) can start one. ' +
-      'Returns its taskId; follow it with wait_for_tasks or get_task. Each task costs the user agent usage, so start one only for work worth a separate agent.',
+      'When it finishes (lands, goes idle, stops on a question, or fails) DevTool sends you a short message saying so, which starts your next turn: you can end your turn instead of waiting. wait_for_tasks and get_task still work. ' +
+      'The user sees it under your task. Returns its taskId. Each task costs the user agent usage, so start one only for work worth a separate agent.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -718,7 +740,9 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const taskId = str(args, 'taskId', true)
       const found = find(data, taskId)
       if (!found) throw new ToolError('No such task in your project. list_tasks names the open ones.')
-      return withReply(summarize(found, deps, now, me.task.id), found, deps)
+      const summary = summarize(found, deps, now, me.task.id)
+      if (settled(summary.state)) deps.reported?.([taskId])
+      return withReply(summary, found, deps)
     }
 
     case 'send_to_task': {
@@ -758,6 +782,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
         const summary = summarize(found, deps, deps.now?.() ?? Date.now(), me.task.id)
         return settled(summary.state) ? withReply(summary, found, deps) : summary
       }))
+      deps.reported?.(tasks.filter(task => task.state === 'gone' || settled(task.state as McpTaskState)).map(task => task.taskId))
       return { timedOut, tasks }
     }
 

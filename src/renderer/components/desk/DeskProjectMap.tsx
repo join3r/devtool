@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { childProgress, childProgressLine, delegationTree, statusFrom, waitingOnChildren, type DelegationTree } from '../../../shared/delegation'
 import { Cog, MoreHorizontal, Plus } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince } from '../../context/TabStatusContext'
@@ -60,16 +61,51 @@ function useScrolledToEnd(dep: unknown): React.RefObject<HTMLDivElement | null> 
   return ref
 }
 
-function TaskTip({ project, task, statuses, statusSince, now, diff }: {
+/**
+ * A task's tip on its lane. A task that started others (`Task.delegatedFrom`)
+ * says how they stand ("2 of 3 done"), and those in its lane sit under it,
+ * small, instead of on the lane of their own.
+ */
+function TaskTip({ project, task, statuses, statusSince, now, diffs, tree, nested }: {
+  project: Project
+  task: Task
+  statuses: Record<string, TabStatusValue>
+  statusSince: Record<string, number>
+  now: number
+  diffs: ReadonlyMap<string, GitDiffSummary>
+  tree: DelegationTree
+  /** Its children in the same lane, drawn under it. */
+  nested: readonly Task[]
+}): React.ReactElement {
+  const statusOf = statusFrom(statuses)
+  const progress = childProgress(tree, task, statusOf)
+  const tip = <TipCard project={project} task={task} statuses={statuses} statusSince={statusSince} now={now} diff={diffs.get(task.id)} waitingOn={waitingOnChildren(tree, task, statusOf)} progress={progress ? childProgressLine(progress) : null} />
+  if (nested.length === 0) return tip
+  return (
+    <div className="relative z-[1] flex-[0_1_180px] min-w-[128px] flex flex-col gap-1">
+      {tip}
+      {nested.map(child => (
+        <div key={child.id} className="ml-3 flex flex-col" data-testid={`map-child-${child.id}`}>
+          <TipCard project={project} task={child} statuses={statuses} statusSince={statusSince} now={now} diff={diffs.get(child.id)} waitingOn={waitingOnChildren(tree, child, statusOf)} progress={null} small />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TipCard({ project, task, statuses, statusSince, now, diff, waitingOn, progress, small = false }: {
   project: Project
   task: Task
   statuses: Record<string, TabStatusValue>
   statusSince: Record<string, number>
   now: number
   diff: GitDiffSummary | undefined
+  waitingOn: number
+  progress: string | null
+  small?: boolean
 }): React.ReactElement {
   const { switchToTask } = useApp()
-  const chip = taskStatusChip(task, statuses, statusSince, now)
+  const chip = taskStatusChip(task, statuses, statusSince, now, waitingOn)
   const tone = chip?.tone ?? 'quiet'
   const agent = taskAgentLabel(task)
   const label = chip
@@ -78,7 +114,7 @@ function TaskTip({ project, task, statuses, statusSince, now, diff }: {
   return (
     <button
       type="button"
-      className={`relative z-[1] flex-[0_1_180px] min-w-[128px] flex flex-col gap-[3px] px-2.5 py-2 rounded-[9px] border text-left cursor-pointer hover:brightness-110 ${TIP[tone].card}`}
+      className={`relative z-[1] ${small ? 'px-2 py-1' : 'flex-[0_1_180px] min-w-[128px] px-2.5 py-2'} flex flex-col gap-[3px] rounded-[9px] border text-left cursor-pointer hover:brightness-110 ${TIP[tone].card}`}
       title={`${task.name} · ${label}`}
       onClick={() => switchToTask(project.id, task.id)}
       data-testid={`map-task-${task.id}`}
@@ -88,6 +124,7 @@ function TaskTip({ project, task, statuses, statusSince, now, diff }: {
         <span className={`text-2xs ${TIP[tone].text} truncate`}>{label}</span>
       </span>
       <span className="text-xs font-medium text-text truncate">{task.name}</span>
+      {progress && <span className="text-2xs text-text-muted truncate" data-testid="map-task-children">{progress}</span>}
       {diff && (diff.added > 0 || diff.deleted > 0) && (
         <span className="font-mono text-2xs text-text-subtle">
           <span className="text-running">+{formatLineCount(diff.added)}</span> <span className="text-crashed">−{formatLineCount(diff.deleted)}</span>
@@ -195,6 +232,21 @@ function StreamLane({ project, stream, graph, track, local, folderPosture, statu
   const swatch = projectSwatch(projectTile(project), 'dark')
   const rail = stream.isMain ? swatch.bg : stream.workspace ? 'var(--color-text-subtle)' : 'var(--color-border-strong)'
   const quiet = stream.tasks.length === 0
+  // Started tasks sit under the task that started them when both are in this lane.
+  const tree = useMemo(() => delegationTree([project]), [project])
+  const laneIds = new Set(stream.tasks.map(task => task.id))
+  const nestedInLane = new Set(stream.tasks.filter(task => laneIds.has(tree.parentOf.get(task.id) ?? '')).map(task => task.id))
+  const laneChildren = (taskId: string): Task[] => {
+    const out: Task[] = []
+    const walk = (id: string): void => {
+      for (const childId of tree.childrenOf.get(id) ?? []) {
+        const child = nestedInLane.has(childId) ? tree.tasks.get(childId) : undefined
+        if (child && !out.includes(child)) { out.push(child); walk(childId) }
+      }
+    }
+    walk(taskId)
+    return out
+  }
 
   // The state line: the project folder's dirty files and origin; a worktree's base and its own dirty files.
   const state: string[] = []
@@ -259,7 +311,9 @@ function StreamLane({ project, stream, graph, track, local, folderPosture, statu
                     title={`${item.commit.subject}\n${item.commit.hash.slice(0, 7)} · ${item.commit.author} · ${formatRelativeTime(new Date(item.commit.isoDate).getTime(), now)}`}
                   />
                 )
-              : <TaskTip key={item.task.id} project={project} task={item.task} statuses={statuses} statusSince={statusSince} now={now} diff={diffs.get(item.task.id)} />)}
+              : nestedInLane.has(item.task.id)
+                ? null
+                : <TaskTip key={item.task.id} project={project} task={item.task} statuses={statuses} statusSince={statusSince} now={now} diffs={diffs} tree={tree} nested={laneChildren(item.task.id)} />)}
             {quietLine && (
               <span className="relative z-[1] shrink-0 px-2 bg-bg text-xs text-text-muted">
                 {quietLine}{doneCount > 0 ? ` · Done ${doneCount}` : ''}

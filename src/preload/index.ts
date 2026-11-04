@@ -617,6 +617,13 @@ const api = {
    */
   taskWorktreeClose: (projectId: string, taskId: string, mode: 'keep' | 'discard', options?: { archive?: boolean }): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-worktree-close', projectId, taskId, mode, options),
+  /**
+   * Closing a task that started others: `stop` stops and closes every open
+   * task under it (branches kept, nothing landed), `keep` lets them run on as
+   * top-level tasks. Resolves how many were stopped.
+   */
+  taskCloseChildren: (projectId: string, taskId: string, action: 'stop' | 'keep'): Promise<number> =>
+    ipcRenderer.invoke('task-close-children', projectId, taskId, action),
   /** Merge a closing stream's branch into its base branch (a merge commit); nothing changes on a conflict. */
   streamMerge: (projectId: string, streamId: string): Promise<StreamMergeResult> =>
     ipcRenderer.invoke('stream-merge', projectId, streamId),

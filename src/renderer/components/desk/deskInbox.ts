@@ -20,6 +20,8 @@ import type { ArchivedTask, ProjectArchive } from '../../../shared/archive'
 import { autopilotNeedsYou } from '../../../shared/autopilot'
 import { lastUsedStream } from '../../../shared/streams'
 import { groupInboxByProject, landingNeedsYou, type InboxEntry, type InboxPartition, type InboxSource } from '../inbox'
+import type { DelegationTree } from '../../../shared/delegation'
+import type { DeskRowKind } from './DeskRow'
 
 /** A row's name being edited in place (the row menu's Rename): the value typed so far and what Enter, blur and Escape do. */
 export interface InboxRename {
@@ -262,4 +264,144 @@ export function checkRows(
 /** The checked rows still listed, in drawn order: a row that moved tab or went away drops out. */
 export function checkedRows(rows: readonly InboxEntry[], checked: ReadonlySet<string>): InboxEntry[] {
   return checked.size === 0 ? [] : rows.filter(entry => checked.has(entry.task.id))
+}
+
+// ---- tasks started by other tasks --------------------------------------------------
+
+/** A task listed under the task that started it, with the list it would sit in on its own. */
+export interface NestedChild {
+  entry: InboxEntry
+  kind: DeskRowKind
+}
+
+export interface DeskNesting {
+  /** The lists with only top-level rows left: a started task goes under its parent when that is listed. */
+  lists: DeskLists
+  /** Each listed parent's children, in the order they were started. */
+  children: ReadonlyMap<string, readonly NestedChild[]>
+  /** A row in Needs you only because a task under it needs you: that task. */
+  bubbled: ReadonlyMap<string, InboxEntry>
+}
+
+const LIST_KINDS: ReadonlyArray<[keyof DeskLists, DeskRowKind]> = [
+  ['needsYou', 'needsYou'], ['answered', 'answered'], ['waiting', 'waiting'], ['working', 'working'], ['snoozed', 'snoozed']
+]
+
+/**
+ * Started tasks (`Task.delegatedFrom`) leave the lists and go under the task
+ * that started them, as t3code's child threads live in their parent's row.
+ * A task whose parent isn't listed (closed, or outside the scope) stays a row
+ * of its own, so nothing is lost. A row whose task needs nothing but has a
+ * task under it that does moves to Needs you, so that question is never
+ * buried under a quiet parent.
+ */
+export function nestDeskLists(lists: DeskLists, tree: DelegationTree): DeskNesting {
+  const kindOf = new Map<string, DeskRowKind>()
+  const byId = new Map<string, InboxEntry>()
+  for (const [list, kind] of LIST_KINDS) {
+    for (const entry of lists[list]) {
+      kindOf.set(entry.task.id, kind)
+      byId.set(entry.task.id, entry)
+    }
+  }
+  const children = new Map<string, NestedChild[]>()
+  const nested = new Set<string>()
+  for (const [parentId, childIds] of tree.childrenOf) {
+    if (!byId.has(parentId)) continue
+    const rows: NestedChild[] = []
+    for (const childId of childIds) {
+      const entry = byId.get(childId)
+      if (!entry) continue
+      rows.push({ entry, kind: kindOf.get(childId)! })
+      nested.add(childId)
+    }
+    if (rows.length > 0) children.set(parentId, rows)
+  }
+
+  const bubbled = new Map<string, InboxEntry>()
+  const needing = (taskId: string, seen: Set<string>): InboxEntry | null => {
+    for (const child of children.get(taskId) ?? []) {
+      if (seen.has(child.entry.task.id)) continue
+      seen.add(child.entry.task.id)
+      if (child.kind === 'needsYou') return child.entry
+      const deeper = needing(child.entry.task.id, seen)
+      if (deeper) return deeper
+    }
+    return null
+  }
+  const roots = (list: readonly InboxEntry[]): InboxEntry[] => list.filter(entry => !nested.has(entry.task.id))
+  const out: DeskLists = {
+    needsYou: roots(lists.needsYou),
+    answered: [],
+    waiting: [],
+    working: [],
+    snoozed: []
+  }
+  for (const [list] of LIST_KINDS.slice(1)) {
+    for (const entry of roots(lists[list])) {
+      const child = needing(entry.task.id, new Set([entry.task.id]))
+      if (child) {
+        bubbled.set(entry.task.id, child)
+        out.needsYou.push(entry)
+      } else out[list].push(entry)
+    }
+  }
+  return { lists: out, children, bubbled }
+}
+
+/** Every task under `taskId` in the nesting, depth first. */
+export function nestedUnder(nesting: Pick<DeskNesting, 'children'>, taskId: string): NestedChild[] {
+  const out: NestedChild[] = []
+  const seen = new Set<string>([taskId])
+  const walk = (id: string): void => {
+    for (const child of nesting.children.get(id) ?? []) {
+      if (seen.has(child.entry.task.id)) continue
+      seen.add(child.entry.task.id)
+      out.push(child)
+      walk(child.entry.task.id)
+    }
+  }
+  walk(taskId)
+  return out
+}
+
+/** A row as the column draws it: a top-level row (no `kind`: its list says) or a child, `depth` levels in. */
+export interface DrawnRow {
+  entry: InboxEntry
+  depth: number
+  kind?: DeskRowKind
+}
+
+/** The rows with each expanded parent's children after it, in drawn order (for the row keys and ⌘1–9). */
+export function withChildren(
+  rows: readonly InboxEntry[],
+  nesting: Pick<DeskNesting, 'children'>,
+  expanded: (taskId: string) => boolean
+): DrawnRow[] {
+  const out: DrawnRow[] = []
+  const seen = new Set<string>()
+  const add = (entry: InboxEntry, depth: number, kind?: DeskRowKind): void => {
+    if (seen.has(entry.task.id)) return
+    seen.add(entry.task.id)
+    out.push(kind ? { entry, depth, kind } : { entry, depth })
+    if (!expanded(entry.task.id)) return
+    for (const child of nesting.children.get(entry.task.id) ?? []) add(child.entry, depth + 1, child.kind)
+  }
+  for (const entry of rows) add(entry, 0)
+  return out
+}
+
+/**
+ * Whether a parent's children show: as toggled, else open while one of them
+ * needs you or is the open task, so opening a child never hides it.
+ */
+export function childrenExpanded(
+  taskId: string,
+  nesting: Pick<DeskNesting, 'children'>,
+  toggled: ReadonlyMap<string, boolean>,
+  selectedTaskId: string | null
+): boolean {
+  const choice = toggled.get(taskId)
+  if (choice !== undefined) return choice
+  return nestedUnder(nesting, taskId).some(child => child.kind === 'needsYou' || child.entry.task.id === selectedTaskId)
 }

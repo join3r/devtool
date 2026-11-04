@@ -108,7 +108,21 @@ export interface InboxTask {
   diff?: InboxTaskDiff
   /** A run of one of the project's schedules (§4.4 `schedules`): that schedule's name. */
   scheduled?: string
+  /** A desktop that lists `task.children` (§8.26): the open task of this project that started this one. */
+  parentTaskId?: string
+  /** `task.children`: the tasks this one started, closed ones included. */
+  children?: InboxTaskChildren
+  /** `task.children`: its own agent is quiet but tasks it started still work. */
+  waiting?: true
   tabs: InboxTab[]
+}
+
+/** How the tasks a task started stand (§8.26): `done` closed or finished, `working` still at it, `needsYou` waiting on the user. */
+export interface InboxTaskChildren {
+  total: number
+  done: number
+  working: number
+  needsYou: number
 }
 
 /** A task's lines added and removed, as the desktop Inbox shows them (§4.4 `diff`). */
@@ -518,6 +532,13 @@ function parseTask(value: unknown): InboxTask {
   if (o.landing !== undefined && o.landing !== null) task.landing = parseTaskLanding(o.landing)
   const scheduled = optStr(o, 'scheduled')
   if (scheduled !== undefined) task.scheduled = scheduled
+  const parentTaskId = optStr(o, 'parentTaskId')
+  if (parentTaskId !== undefined) task.parentTaskId = parentTaskId
+  if (o.children !== undefined && o.children !== null) {
+    const c = obj(o.children, 'children')
+    task.children = { total: int(c, 'total'), done: int(c, 'done'), working: int(c, 'working'), needsYou: int(c, 'needsYou') }
+  }
+  if (o.waiting === true) task.waiting = true
   return task
 }
 

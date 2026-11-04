@@ -9,6 +9,7 @@ import ServerIdeConsentModal from './components/servers/ServerIdeConsentModal'
 import Toasts from './components/Toasts'
 import StreamRunHost from './components/StreamRunHost'
 import EntityActionsHost from './components/EntityActionsHost'
+import ChildTasksCloseHost from './components/sidebar/childTasksClose'
 import { paletteEvents } from './palette/paletteEvents'
 import { useTaskPreviewSync } from './components/desk/useTaskPreviewSync'
 import { toggleBench, toggleBenchView } from './components/desk/benchState'
@@ -128,6 +129,7 @@ function AppInner(): React.ReactElement {
       <ServerIdeConsentModal />
       <StreamRunHost />
       <EntityActionsHost />
+      <ChildTasksCloseHost />
       {tokenUsageOpen && <TokenUsageModal onClose={() => setTokenUsageOpen(false)} />}
       <Toasts />
     </div>

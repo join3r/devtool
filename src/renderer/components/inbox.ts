@@ -94,6 +94,8 @@ export interface InboxEntry extends InboxSource {
   unread: boolean
   /** Waiting on you rather than the agent — see isYourTurn. Never set on quiet snoozed rows. */
   yourTurn: boolean
+  /** How many tasks it started still work while its own agent is quiet (`waitingOnChildren`): it sits in Working. */
+  waitingOn?: number
 }
 
 export interface InboxPartition {
@@ -120,7 +122,12 @@ export function partitionInbox(
   entries: readonly InboxSource[],
   allStatuses: Record<string, TabStatusValue>,
   statusSince: Record<string, number>,
-  now: number
+  now: number,
+  /**
+   * How many of a task's children it waits for (`waitingOnChildren`). Such a
+   * task is not idle: it sits in Working, as a live agent would, snoozed or not.
+   */
+  waitingOn: (task: Task) => number = () => 0
 ): InboxPartition {
   const partition: InboxPartition = { needsYou: [], ready: [], working: [], snoozed: [] }
   const yourTurn: InboxEntry[] = []
@@ -146,7 +153,10 @@ export function partitionInbox(
       entry.yourTurn = true
       yourTurn.push(entry)
     } else if (status === 'working' || autopilotBusy(task)) partition.working.push(entry)
-    else if (isSnoozed(task, now)) partition.snoozed.push(entry)
+    else if (waitingOn(task) > 0) {
+      entry.waitingOn = waitingOn(task)
+      partition.working.push(entry)
+    } else if (isSnoozed(task, now)) partition.snoozed.push(entry)
     else {
       entry.yourTurn = isYourTurn(task, status)
       if (entry.yourTurn) yourTurn.push(entry)

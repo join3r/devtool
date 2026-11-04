@@ -11,6 +11,7 @@ import { isTaskWorking } from '../sidebar/closeRules'
 import { useAllAgentActivity } from '../../agentActivity'
 import type { AgentActivity } from '../../../shared/agent-activity'
 import { taskBackground, type TaskBackground } from './deskInbox'
+import { settleChildTasks } from '../sidebar/childTasksClose'
 
 const STOP_WAIT_MS = 15_000
 /** After stopping background work: how long to let the agent settle before landing anyway. */
@@ -100,6 +101,8 @@ export function useDeskDone(fallback: (projectId: string, taskId: string) => Pro
     if (!stream) return
 
     if (task.landing?.state === 'landing' || task.landing?.state === 'fixing' || getLandingOp(task.id)) return
+    // Tasks it started that still work: stop them too, or let them run on.
+    if (!await settleChildTasks(projects, projectId, taskId, (tabId) => tabStatusStore.getStatus(tabId))) return
     const verb = how === 'land' ? 'land' : how === 'keep' ? 'close' : 'discard'
     if (isTaskWorking(task, (tabId) => tabStatusStore.getStatus(tabId))) {
       const background = taskBackground(task, activitiesRef.current)

@@ -215,6 +215,7 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'schedule-update': project0,
   'schedule-run': project0,
   'task-worktree-close': project0,
+  'task-close-children': project0,
   // token usage per project (ipc/token-usage.ts): the host it lives on read its agents' sessions
   'token-usage-project': project0,
   // This desktop's tracker already holds its servers' logins.

@@ -179,6 +179,10 @@ enum TaskText {
         switch task.inboxGroup(now: now) {
         case .snoozed:
             parts.append("Snoozed")
+        case .working where task.waiting && task.status != .working:
+            // Quiet itself, waiting for tasks it started (§8.26).
+            let count = task.children?.working ?? 0
+            parts.append(count > 0 ? "Waiting on \(count) \(count == 1 ? "task" : "tasks")" : "Waiting on its tasks")
         case .needsYou, .yourTurn, .working, .quiet:
             if let activity = InboxClock.activity(task) {
                 parts.append(activity)

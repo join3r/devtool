@@ -23,6 +23,8 @@ struct InboxView: View {
     @State private var showTokens = false
     /// The project a Token usage row asked for, opened once the sheet is gone.
     @State private var openAfterTokens: ProjectRef?
+    /// Parents whose started tasks were shown or hidden by hand (§8.26).
+    @State private var expandedChoice: [String: Bool] = [:]
 
     var body: some View {
         // Wait times and snooze expiry are worked out against the clock; the
@@ -118,14 +120,14 @@ struct InboxView: View {
     private func flat(_ partition: InboxPartition, now: Date) -> some View {
         if !partition.needsYou.isEmpty {
             Section {
-                ForEach(partition.needsYou) { row($0, group: .needsYou, now: now) }
+                ForEach(nested(partition.needsYou, now: now)) { row($0.entry, group: $0.depth == 0 ? .needsYou : $0.entry.task.inboxGroup(now: now), now: now, depth: $0.depth) }
             } header: {
                 GroupHeader(title: "Needs you", count: partition.needsYou.count, tint: .orange)
             }
         }
         if !partition.ready.isEmpty {
             Section {
-                ForEach(partition.ready) { row($0, group: $0.task.inboxGroup(now: now), now: now) }
+                ForEach(nested(partition.ready, now: now)) { row($0.entry, group: $0.entry.task.inboxGroup(now: now), now: now, depth: $0.depth) }
             } header: {
                 GroupHeader(title: "Ready", count: partition.ready.count, tint: .primary)
             }
@@ -144,8 +146,8 @@ struct InboxView: View {
                     isServer: model.isServer(group.desktopId),
                     now: now
                 )
-                ForEach(group.entries) { entry in
-                    row(entry, group: entry.task.inboxGroup(now: now), now: now, inProject: true)
+                ForEach(nested(group.entries, now: now)) { item in
+                    row(item.entry, group: item.depth == 0 && item.entry.bubbledFrom != nil ? .needsYou : item.entry.task.inboxGroup(now: now), now: now, inProject: true, depth: item.depth)
                 }
             } header: {
                 if index == 0 {
@@ -253,13 +255,13 @@ struct InboxView: View {
                 if !partition.working.isEmpty {
                     FoldedGroupRow(kind: .working, entries: partition.working, expanded: $showWorking)
                     if showWorking {
-                        ForEach(partition.working) { row($0, group: .working, now: now) }
+                        ForEach(nested(partition.working, now: now)) { row($0.entry, group: $0.depth == 0 ? .working : $0.entry.task.inboxGroup(now: now), now: now, depth: $0.depth) }
                     }
                 }
                 if !partition.snoozed.isEmpty {
                     FoldedGroupRow(kind: .snoozed, entries: partition.snoozed, expanded: $showSnoozed)
                     if showSnoozed {
-                        ForEach(partition.snoozed) { row($0, group: .snoozed, now: now) }
+                        ForEach(nested(partition.snoozed, now: now)) { row($0.entry, group: $0.depth == 0 ? .snoozed : $0.entry.task.inboxGroup(now: now), now: now, depth: $0.depth) }
                     }
                 }
             }
@@ -283,7 +285,28 @@ struct InboxView: View {
     /// A task row: selects the task. Swipe right to mark it read or unread,
     /// left to close, snooze or remove it (the desktop Inbox row's ✓, Snooze
     /// and ✕); long-press for the rest.
-    private func row(_ entry: InboxEntry, group: InboxGroup, now: Date, inProject: Bool = false) -> some View {
+    /// The rows with each open parent's started tasks after it (§8.26).
+    private func nested(_ entries: [InboxEntry], now: Date) -> [NestedInboxRow] {
+        var out: [NestedInboxRow] = []
+        func add(_ entry: InboxEntry, _ depth: Int) {
+            out.append(NestedInboxRow(entry: entry, depth: depth))
+            guard isExpanded(entry, now: now) else { return }
+            for child in entry.children { add(child, depth + 1) }
+        }
+        for entry in entries { add(entry, 0) }
+        return out
+    }
+
+    /// As toggled, else open while a task under it needs you or is the open one.
+    private func isExpanded(_ entry: InboxEntry, now: Date) -> Bool {
+        guard !entry.children.isEmpty else { return false }
+        if let choice = expandedChoice[entry.id] { return choice }
+        return entry.descendants.contains {
+            $0.task.inboxGroup(now: now) == .needsYou || selection == TaskRef(desktopId: $0.desktopId, taskId: $0.task.id)
+        }
+    }
+
+    private func row(_ entry: InboxEntry, group: InboxGroup, now: Date, inProject: Bool = false, depth: Int = 0) -> some View {
         let ref = TaskRef(desktopId: entry.desktopId, taskId: entry.task.id)
         let offline = model.isOffline(entry.desktopId)
         let canTriage = model.supports(DesktopFeature.taskTriage, on: entry.desktopId) && !offline
@@ -291,10 +314,16 @@ struct InboxView: View {
         // Remove asks the desktop to discard a worktree, which an older one can't.
         let canRemove = model.supports(DesktopFeature.taskCloseChoice, on: entry.desktopId) && !offline
         let unread = entry.task.unread
+        let expanded = isExpanded(entry, now: now)
         return InboxRow(
             entry: entry,
             group: group,
-            inProject: inProject,
+            inProject: inProject || depth > 0,
+            depth: depth,
+            expanded: expanded,
+            onToggleChildren: entry.children.isEmpty ? nil : {
+                withAnimation { expandedChoice[entry.id] = !expanded }
+            },
             desktopName: !inProject && model.desktops.count > 1 ? model.desktop(entry.desktopId)?.name : nil,
             isServer: model.isServer(entry.desktopId),
             now: now
@@ -442,10 +471,23 @@ struct TriageMenuItems: View {
 /// An Inbox task, project first (Design › Rules): tile, **project** stream
 /// (left out on `main`), age; the task's name; what it needs. In a project's
 /// card (`inProject`) the tile and project go and the stream is a label.
+/// A row of the Inbox list: a task, `depth` levels under the task that started it.
+struct NestedInboxRow: Identifiable {
+    let entry: InboxEntry
+    let depth: Int
+    var id: String { entry.id }
+}
+
 struct InboxRow: View {
     let entry: InboxEntry
     let group: InboxGroup
     var inProject = false
+    /// Under the task that started it (§8.26): how many levels in.
+    var depth = 0
+    /// Its started tasks show under it.
+    var expanded = false
+    /// Shows or hides its started tasks; nil when none is open.
+    var onToggleChildren: (() -> Void)? = nil
     /// Set when more than one desktop is paired.
     let desktopName: String?
     /// The desktop is a DevTool server: its rack goes by `desktopName`.
@@ -461,7 +503,32 @@ struct InboxRow: View {
             }
         }
         .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
+        .padding(.leading, CGFloat(depth) * 18)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// "2 of 3 done" under a task that started others; a tap shows or hides them.
+    @ViewBuilder
+    private var childrenLine: some View {
+        if let children = entry.task.children {
+            if let onToggleChildren {
+                Button(action: onToggleChildren) {
+                    HStack(spacing: 4) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                        Text(children.line)
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(expanded ? "Hide started tasks, \(children.line)" : "Show started tasks, \(children.line)")
+            } else {
+                Text(children.line)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var flatRow: some View {
@@ -491,6 +558,7 @@ struct InboxRow: View {
                 .font(.subheadline)
                 .lineLimit(1)
                 needLine
+                childrenLine
             }
         }
         .alignmentGuide(.listRowSeparatorLeading) { d in d[.leading] + 48 }
@@ -517,6 +585,7 @@ struct InboxRow: View {
             .lineLimit(1)
             if streamName != nil { taskName }
             needLine
+            childrenLine
         }
     }
 
@@ -588,7 +657,8 @@ struct InboxRow: View {
     }
 
     private var need: String {
-        group == .snoozed ? InboxClock.snoozed(entry.task, now: now) : TaskText.line(entry.task, now: now)
+        if depth == 0, let asking = entry.bubbledFrom { return "Needs you: its task “\(asking.name)”" }
+        return group == .snoozed ? InboxClock.snoozed(entry.task, now: now) : TaskText.line(entry.task, now: now)
     }
 
     /// The stream, unless it is `main`.

@@ -57,6 +57,12 @@ export interface AutopilotDeps {
   landing: Pick<TaskLandingManager, 'landTask' | 'fixWithAgent' | 'isBusy'>
   /** Ends a task's tabs and archives it: Done for a task with no worktree of its own. */
   archiveTask(project: Project, task: Task): Promise<void>
+  /**
+   * Tasks it started (MCP `start_task`) still work. Its turn's end then waits:
+   * their finishing wakes it with a message (`delegation-delivery.ts`), and
+   * Autopilot moves on when that turn ends with none left working.
+   */
+  waitingOnChildren?(taskId: string): boolean
   log(message: string): void
   now?(): number
   settleMs?: number
@@ -227,6 +233,10 @@ export class AutopilotRunner {
     if (phase !== 'working' && phase !== 'fixing') return
     // A turn that resumed meanwhile, or a landing someone else started (✓ Done).
     if (this.statusOf(tabId) !== null || found.task.landing || this.deps.landing.isBusy(taskId) || this.acting.has(taskId)) return
+    if (this.deps.waitingOnChildren?.(taskId)) {
+      this.deps.log(`autopilot task=${taskId} waits for the tasks it started`)
+      return
+    }
     this.acting.add(taskId)
     try {
       await this.advance(found)

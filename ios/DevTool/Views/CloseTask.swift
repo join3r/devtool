@@ -13,6 +13,8 @@ struct CloseTaskRequest: Identifiable, Equatable {
     /// Remove task (the desktop Inbox's ✕): a task with a worktree of its own
     /// closes without landing, its branch and uncommitted work deleted.
     let remove: Bool
+    /// Tasks it started that still work (§8.26): closing asks whether to stop them too.
+    let workingChildren: Int
 
     var id: String { "\(desktopId)/\(taskId)" }
 
@@ -23,6 +25,7 @@ struct CloseTaskRequest: Identifiable, Equatable {
         self.streamName = task.streamName
         self.branch = task.branch
         self.remove = remove
+        self.workingChildren = task.children?.working ?? 0
     }
 }
 
@@ -59,6 +62,10 @@ private struct CloseTaskFlow: ViewModifier {
     @State private var question: TaskCloseQuestion?
     @State private var notice: Notice?
     @State private var running = false
+    /// Asking what happens to the tasks it started (§8.26).
+    @State private var childrenAsk: CloseTaskRequest?
+    /// The answer, for the request it was given for.
+    @State private var childrenChoice: (id: String, choice: TaskCloseParams.Children)?
 
     struct Notice: Identifiable {
         let id = UUID()
@@ -67,10 +74,40 @@ private struct CloseTaskFlow: ViewModifier {
     }
 
     func body(content: Content) -> some View {
+        childrenQuestion(flow(content))
+    }
+
+    /// Closing a task that started tasks still working (§8.26): stop them too, or leave them running.
+    private func childrenQuestion(_ view: some View) -> some View {
+        view
+            .confirmationDialog(
+                childrenAsk.map { "Close “\($0.name)”?" } ?? "",
+                isPresented: Binding(get: { childrenAsk != nil }, set: { if !$0 { childrenAsk = nil } }),
+                titleVisibility: .visible,
+                presenting: childrenAsk
+            ) { target in
+                let them = target.workingChildren == 1 ? "it" : "them"
+                Button("Stop \(them)", role: .destructive) { answerChildren(target, .stop) }
+                Button("Leave \(them) running") { answerChildren(target, .keep) }
+                Button("Cancel", role: .cancel) { childrenAsk = nil }
+            } message: { target in
+                let tasks = target.workingChildren == 1 ? "a task that is" : "\(target.workingChildren) tasks that are"
+                Text("It started \(tasks) still working. Stopped tasks close without landing; a branch of their own stays. Tasks left running show on their own in the Inbox.")
+            }
+    }
+
+    private func flow(_ content: Content) -> some View {
         content
             .onChange(of: request) { _, target in
+                guard let target else { return }
+                // Tasks it started still work: stop them too, or leave them running? Asked first.
+                if target.workingChildren > 0, model.supports(DesktopFeature.taskChildren, on: target.desktopId), childrenChoice?.id != target.id {
+                    request = nil
+                    childrenAsk = target
+                    return
+                }
                 // What the desktop closes without a word goes straight out.
-                guard let target, !needsConfirmation(target) else { return }
+                guard !needsConfirmation(target) else { return }
                 request = nil
                 start(target, TaskCloseParams(taskId: target.taskId, ask: true))
             }
@@ -146,9 +183,20 @@ private struct CloseTaskFlow: ViewModifier {
         return !model.supports(DesktopFeature.taskCloseChoice, on: target.desktopId)
     }
 
+    /// Goes on with the close, the answer kept for its `task.close`.
+    private func answerChildren(_ target: CloseTaskRequest, _ choice: TaskCloseParams.Children) {
+        childrenAsk = nil
+        childrenChoice = (target.id, choice)
+        Task { @MainActor in request = target }
+    }
+
     private func start(_ target: CloseTaskRequest, _ first: TaskCloseParams) {
         active = target
         params = first
+        if let answer = childrenChoice, answer.id == target.id {
+            params.children = answer.choice
+            childrenChoice = nil
+        }
         send()
     }
 

@@ -272,6 +272,11 @@ export interface Task {
    * main closes the task once its turn ends (`main/schedule-runner.ts`).
    */
   quietRun?: { note?: string }
+  /**
+   * The tasks this task's agent started (`delegatedFrom` names this task on
+   * each), oldest first, closed ones included: what "2 of 3 done" counts.
+   */
+  startedTaskIds?: string[]
 }
 
 /** A queued task's first prompt, held until its folder is free (see `Task.queued`). */

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Check, Folder, GitBranch, MoreHorizontal, Pin } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Folder, GitBranch, MoreHorizontal, Pin } from 'lucide-react'
 import type { GitDiffSummary, Project } from '../../../shared/types'
 import { formatLineCount } from '../../hooks/useTaskDiffSummaries'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
@@ -22,6 +22,7 @@ import TaskUsagePills from './TaskUsagePills'
 import { taskWorkPlace, type TaskWorkPlace } from '../../../shared/streams'
 import { taskSecretRequest, useSecretRequests } from '../../secretRequests'
 import SecretPrompt from '../SecretPrompt'
+import { waitingLine } from '../../../shared/delegation'
 
 /** Which list a row sits in; it decides the preview line and the hover actions. */
 export type DeskRowKind = 'needsYou' | 'answered' | 'waiting' | 'working' | 'snoozed'
@@ -42,11 +43,17 @@ export function bestActivity(entry: InboxEntry, activities: Record<string, Agent
  * The two preview lines: what the agent asks (amber lead-in), what it is doing
  * and for how long, when a snooze wakes, or the start of its last answer.
  */
-function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummary, activity: AgentActivity | undefined, now: number): {
+function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummary, activity: AgentActivity | undefined, now: number, bubbled?: InboxEntry): {
   lead?: string
   text: string | null
 } {
   const landing = landingStatusLabel(entry.task.landing, entry.stream.name)
+  // In Needs you only for a task it started: name that task.
+  if (kind === 'needsYou' && bubbled) return { lead: 'Needs you:', text: `its task “${bubbled.task.name}”` }
+  if (kind === 'working' && entry.waitingOn) {
+    const elapsed = entry.since !== null ? ` · ${formatWaitTime(now - entry.since)}` : ''
+    return { text: `${waitingLine(entry.waitingOn)}${elapsed}` }
+  }
   if (kind === 'needsYou') {
     if (landing) return { lead: 'Couldn’t land:', text: landing }
     const waiting = activity?.waiting
@@ -82,7 +89,8 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
 const actionCls = 'px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong whitespace-nowrap'
 
 export default function DeskRow({
-  entry, kind, agent, activity, background = null, diff, selected, jumpNumber, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
+  entry, kind, agent, activity, background = null, diff, selected, jumpNumber, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename,
+  depth = 0, childLine, bubbled
 }: {
   entry: InboxEntry
   kind: DeskRowKind
@@ -121,15 +129,22 @@ export default function DeskRow({
   onStopBackground?: () => void
   onHover: (taskId: string | null) => void
   rename?: InboxRename
+  /** A task started by the task above it: how many levels in. Nested rows drop the tile and the project. */
+  depth?: number
+  /** A task that started others: "2 of 3 done", and whether they show under it. */
+  childLine?: { text: string; expanded: boolean; onToggle: () => void }
+  /** In Needs you only because this task under it needs you. */
+  bubbled?: InboxEntry
 }): React.ReactElement {
   const { task, project, stream } = entry
+  const nested = depth > 0
   // A landing being fixed reads as the landing, not as the work around it.
   const inBackground = kind === 'working' && background !== null && !entry.task.landing
   // An agent's request_secret: answered right here, whatever list the row is in.
   const secret = taskSecretRequest(useSecretRequests(), task.id)
   const { lead, text } = secret
     ? { lead: 'Needs secret:', text: secret.reason ? `${secret.name} · ${secret.reason}` : secret.name }
-    : preview(kind, entry, agent, activity, now)
+    : preview(kind, entry, agent, activity, now, bubbled)
   const unread = entry.unread && kind !== 'working'
   return (
     <div
@@ -137,8 +152,10 @@ export default function DeskRow({
         'group relative flex gap-3 mx-2 px-3 py-2.5 rounded-[9px] items-start cursor-pointer',
         'transition-colors duration-(--motion-fast)',
         checked ? 'bg-sel' : selected ? 'bg-row-sel' : 'hover:bg-row-hover',
-        offline ? 'opacity-55' : ''
+        offline ? 'opacity-55' : '',
+        nested ? 'py-2' : ''
       ].join(' ')}
+      style={nested ? { marginLeft: 8 + depth * 22 } : undefined}
       onClick={rename ? undefined : onSelect}
       onContextMenu={onContextMenu}
       onMouseEnter={() => onHover(task.id)}
@@ -148,6 +165,7 @@ export default function DeskRow({
       data-task-id={task.id}
       data-kind={kind}
       data-checked={checked || undefined}
+      data-depth={nested ? depth : undefined}
     >
       {jumpNumber !== undefined && (
         <span
@@ -171,7 +189,7 @@ export default function DeskRow({
         >
           <Check size={14} strokeWidth={3} />
         </button>
-      ) : showTile && (
+      ) : showTile && !nested && (
         <button
           type="button"
           className="shrink-0 p-0 border-0 bg-transparent cursor-pointer rounded-md"
@@ -184,8 +202,12 @@ export default function DeskRow({
       <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
         <div className="flex justify-between gap-2 text-xs text-text-muted">
           <span className="overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
-            <strong className="font-semibold text-body">{project.name}</strong>
-            {!stream.isMain && <> › <span className="font-mono">{stream.name}</span></>}
+            {nested
+              ? !stream.isMain && <span className="font-mono">{stream.name}</span>
+              : <>
+                <strong className="font-semibold text-body">{project.name}</strong>
+                {!stream.isMain && <> › <span className="font-mono">{stream.name}</span></>}
+              </>}
           </span>
           <span className={`shrink-0 tabular-nums flex items-center gap-1.5 ${checking ? '' : 'group-hover:invisible'} ${jumpNumber !== undefined ? '[body.meta-held_&]:invisible' : ''}`}>
             {/* Background work: a steady dot, since the agent itself is idle. */}
@@ -251,6 +273,20 @@ export default function DeskRow({
           </span>
         )}
         {secret && !rename && <SecretPrompt key={secret.id} request={secret} compact />}
+        {childLine && (
+          <button
+            type="button"
+            className="self-start flex items-center gap-1 p-0 bg-transparent border-0 text-xs text-text-muted cursor-pointer hover:text-text"
+            title={childLine.expanded ? 'Hide the tasks it started' : 'Show the tasks it started'}
+            aria-expanded={childLine.expanded}
+            onClick={(e) => { e.stopPropagation(); childLine.onToggle() }}
+            onMouseDown={(e) => e.stopPropagation()}
+            data-testid="desk-row-children"
+          >
+            {childLine.expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {childLine.text}
+          </button>
+        )}
       </div>
       <div
         className={`absolute right-2.5 top-2 hidden ${checking ? '' : 'group-hover:flex'} gap-1 pl-2 bg-row-sel`}

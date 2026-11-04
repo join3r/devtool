@@ -1,6 +1,7 @@
 import { AI_TAB_META, CHAT_TAB_LABEL, isAgentTabType, isChatTabType } from '../../shared/types'
 import type { AiTabType, Tab, TabStatusValue, Task } from '../../shared/types'
 import { resolveMainTabId, taskTabs } from '../../shared/streams'
+import { waitingLine } from '../../shared/delegation'
 import { formatWaitTime, isSnoozed, isYourTurn, taskStatus, taskStatusSince } from './inbox'
 
 /** The task's agent tab: its main tab when that is an agent, else the first agent tab. */
@@ -36,7 +37,9 @@ export function taskStatusChip(
   task: Task,
   allStatuses: Record<string, TabStatusValue>,
   statusSince: Record<string, number>,
-  now: number
+  now: number,
+  /** Tasks it started that still work while its own agent is quiet (`waitingOnChildren`). */
+  waitingOn = 0
 ): TaskChip | null {
   const status = taskStatus(task, allStatuses)
   if (status === 'attention') {
@@ -49,6 +52,7 @@ export function taskStatusChip(
   if (landing === 'fixing') return { label: 'Fixing conflicts', tone: 'working' }
   if (status === 'working') return { label: 'Working', tone: 'working' }
   if (landing === 'landing') return { label: task.landing?.intent === 'update' ? 'Updating…' : 'Landing…', tone: 'working' }
+  if (waitingOn > 0) return { label: waitingLine(waitingOn), tone: 'working' }
   if (task.queued) return { label: 'Queued', tone: 'quiet' }
   if (isSnoozed(task, now)) return { label: 'Snoozed', tone: 'quiet' }
   if (isYourTurn(task, status)) return { label: 'Your turn', tone: 'turn' }

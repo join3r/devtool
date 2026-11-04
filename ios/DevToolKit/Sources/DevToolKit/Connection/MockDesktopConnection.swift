@@ -1379,7 +1379,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.taskBusy, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
-            DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules,
+            DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules, DesktopFeature.taskChildren,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -1591,6 +1591,29 @@ public enum MockInbox {
                     task("t-pi", "chart-colors", webMain, lastInteractedAt: ago(20), tabs: [
                         InboxTab(id: "tab-6", type: .pi, title: "Pi", status: .working, since: ago(2), activity: "Reading files"),
                     ]),
+                    // Started by another task (§8.26): theme-audit waits for its two tasks.
+                    {
+                        var parent = task("t-audit", "theme-audit", webMain, lastInteractedAt: ago(8), eventAt: ago(6), tabs: [
+                            InboxTab(id: "tab-14", type: .claudeChat, title: "Claude", status: .idle, since: ago(6), topic: "Audit the dashboard's colors"),
+                        ])
+                        parent.children = InboxTaskChildren(total: 3, done: 1, working: 2)
+                        parent.waiting = true
+                        return parent
+                    }(),
+                    {
+                        var child = task("t-audit-dark", "dark-mode-contrast", webMain, lastInteractedAt: ago(6), tabs: [
+                            InboxTab(id: "tab-15", type: .claudeChat, title: "Claude", status: .working, since: ago(5), activity: "Editing theme.css"),
+                        ])
+                        child.parentTaskId = "t-audit"
+                        return child
+                    }(),
+                    {
+                        var child = task("t-audit-icons", "icon-colors", webMain, lastInteractedAt: ago(6), tabs: [
+                            InboxTab(id: "tab-16", type: .claudeChat, title: "Claude", status: .working, since: ago(4), activity: "Running Bash"),
+                        ])
+                        child.parentTaskId = "t-audit"
+                        return child
+                    }(),
                     task("t-login", "login-redesign", webLogin, lastInteractedAt: ago(60 * 26), snoozedUntil: t + 3 * 3_600_000, tabs: [
                         InboxTab(id: "tab-8", type: .claudeChat, title: "Claude", status: .idle, since: ago(60 * 26)),
                     ]),

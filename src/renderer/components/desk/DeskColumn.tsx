@@ -22,8 +22,10 @@ import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
 import { deskEvents } from './deskEvents'
 import {
   DONE_WINDOW_MS, checkRows, checkedRows, deskLists, deskTabCounts, doneEntries, keyTarget, liveScope, rowChord, nextNeedsYou, pinnedFirst, scopeLabel, scopeSources, shownRows, stepRow, taskBackground,
+  childrenExpanded, nestDeskLists, nestedUnder, withChildren,
   type DeskLists, type DoneEntry, type InboxRename, type RowKey
 } from './deskInbox'
+import { childProgress, childProgressLine, delegationTree, rootOf, statusFrom, waitingOnChildren } from '../../../shared/delegation'
 import { stopBackground } from './useDeskDone'
 import { isTaskJumpKey, jumpDigit } from '../../hooks/useMetaHeld'
 
@@ -173,27 +175,73 @@ export default function DeskColumn({
   const tab: DeskTab = desk.tab ?? 'inbox'
   const scope: DeskScope | null = useMemo(() => liveScope(projects, desk.scope), [projects, desk.scope])
 
-  const lists = useMemo(() => {
-    const raw = deskLists(partitionInbox(scopeSources(inboxSources([...projects]), scope), allStatuses, statusSince, now))
+  // Who started whom, over every project: a parent waits for children in any stream.
+  const tree = useMemo(() => delegationTree(projects), [projects])
+  const { lists, nesting, allRows } = useMemo(() => {
+    const statusOf = statusFrom(allStatuses)
+    const raw = deskLists(partitionInbox(scopeSources(inboxSources([...projects]), scope), allStatuses, statusSince, now, task => waitingOnChildren(tree, task, statusOf)))
+    // Started tasks go under the task that started them (`nestDeskLists`).
+    const nest = nestDeskLists(raw, tree)
+    const top = nest.lists
     return {
-      needsYou: pinnedFirst(raw.needsYou, pinnedTaskIds),
-      answered: pinnedFirst(raw.answered, pinnedTaskIds),
-      waiting: pinnedFirst(raw.waiting, pinnedTaskIds),
-      working: pinnedFirst(raw.working, pinnedTaskIds),
-      snoozed: pinnedFirst(raw.snoozed, pinnedTaskIds)
+      lists: {
+        needsYou: pinnedFirst(top.needsYou, pinnedTaskIds),
+        answered: pinnedFirst(top.answered, pinnedTaskIds),
+        waiting: pinnedFirst(top.waiting, pinnedTaskIds),
+        working: pinnedFirst(top.working, pinnedTaskIds),
+        snoozed: pinnedFirst(top.snoozed, pinnedTaskIds)
+      },
+      nesting: nest,
+      allRows: [...raw.needsYou, ...raw.answered, ...raw.waiting, ...raw.working, ...raw.snoozed]
     }
-  }, [projects, scope, allStatuses, statusSince, now, pinnedTaskIds])
+  }, [projects, tree, scope, allStatuses, statusSince, now, pinnedTaskIds])
   // Lines added and removed on every row but the snoozed ones, as on the phone.
   const diffSources = useMemo(
-    () => [...lists.needsYou, ...lists.answered, ...lists.waiting, ...lists.working].map(({ project, task }) => ({ project, task })),
-    [lists]
+    () => allRows.filter(entry => !lists.snoozed.includes(entry)).map(({ project, task }) => ({ project, task })),
+    [allRows, lists]
   )
   const diffs = useTaskDiffSummaries(diffSources)
   const grouped = config?.inboxLayout === 'grouped'
   const showTiles = config?.showProjectIcons ?? false
   /** The run dock's height, so the list scrolls its last row clear of it. */
   const [dockHeight, setDockHeight] = useState(0)
-  const counts = deskTabCounts(lists)
+  // A tab's badge counts the tasks under its rows too: a child's question is still one.
+  const withNested = (rows: readonly InboxEntry[]): InboxEntry[] =>
+    rows.flatMap(entry => [entry, ...nestedUnder(nesting, entry.task.id).map(child => child.entry)])
+  const counts = deskTabCounts({
+    needsYou: withNested(lists.needsYou),
+    answered: withNested(lists.answered),
+    waiting: withNested(lists.waiting),
+    working: lists.working,
+    snoozed: lists.snoozed
+  })
+
+  // Which parents show their children: as toggled, else while one needs you or is open.
+  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(() => new Map())
+  const expanded = useCallback(
+    (taskId: string) => childrenExpanded(taskId, nesting, toggled, selectedTaskId),
+    [nesting, toggled, selectedTaskId]
+  )
+  // Opening a child (⌘K, a notification) opens its parents' lists again.
+  useEffect(() => {
+    if (!selectedTaskId || !tree.parentOf.has(selectedTaskId)) return
+    setToggled(prev => {
+      let next: Map<string, boolean> | null = null
+      for (let at = tree.parentOf.get(selectedTaskId); at !== undefined; at = tree.parentOf.get(at)) {
+        if (prev.get(at) === false) {
+          next = next ?? new Map(prev)
+          next.delete(at)
+        }
+        if (at === rootOf(tree, selectedTaskId)) break
+      }
+      return next ?? prev
+    })
+  }, [selectedTaskId, tree])
+  const toggle = (taskId: string): void => {
+    setToggled(prev => new Map(prev).set(taskId, !expanded(taskId)))
+  }
+  /** A list's rows with the open parents' children after them. */
+  const drawn = (rows: readonly InboxEntry[]) => withChildren(rows, nesting, expanded)
 
   const [showOlder, setShowOlder] = useState(false)
   const archiveIds = useMemo(
@@ -229,7 +277,7 @@ export default function DeskColumn({
   // Row keys: E done, S snooze, W wake, U unread, ⌫ remove — on the hovered row,
   // else the selected one. ⌘E / ⌘⇧S / ⌘⇧W / ⌘⇧U do the same on the open task from
   // anywhere, its composer included. ⌥↓ / ⌥↑ walk the tab's rows; ⌘J goes to the next that needs you.
-  const shown = shownRows(listed, grouped, [...pinnedIds])
+  const shown = withChildren(shownRows(listed, grouped, [...pinnedIds]), nesting, expanded).map(row => row.entry)
 
   // Ticked rows for a bulk action. A switch of tab or scope starts over; a row
   // that leaves the tab (snoozed, landed) drops out of `ticked` by itself.
@@ -275,7 +323,7 @@ export default function DeskColumn({
       entries.filter(({ task }) => !isSnoozed(task, Date.now())).map(({ project, task }) => ({ projectId: project.id, taskId: task.id }))
   }
 
-  const everyRow = [...lists.needsYou, ...lists.answered, ...lists.waiting, ...lists.working, ...lists.snoozed]
+  const everyRow = allRows
   const keyState = useRef({ listed: shown, everyRow, selectedTaskId, tab, needsYou: lists.needsYou, ticked, bulk, snoozeOpen: snooze !== null })
   keyState.current = { listed: shown, everyRow, selectedTaskId, tab, needsYou: lists.needsYou, ticked, bulk, snoozeOpen: snooze !== null }
   useEffect(() => {
@@ -391,13 +439,21 @@ export default function DeskColumn({
   }, [onDone, onRemove, onSelectTask, unsnoozeTask, markTaskUnread, markTaskVisited, clearChecked])
 
   const jumpIndex = new Map(shown.slice(0, 9).map((entry, i) => [entry.task.id, i + 1]))
-  const renderRow = (entry: InboxEntry, kind: DeskRowKind): React.ReactElement => {
+  const statusOf = statusFrom(allStatuses)
+  const renderRow = (entry: InboxEntry, kind: DeskRowKind, depth = 0): React.ReactElement => {
     const background = kind === 'working' ? taskBackground(entry.task, activities) : null
+    const progress = nesting.children.has(entry.task.id) || entry.task.startedTaskIds?.length ? childProgress(tree, entry.task, statusOf) : null
+    const hasNested = nesting.children.has(entry.task.id)
     return (
       <DeskRow
         key={entry.task.id}
         entry={entry}
         kind={kind}
+        depth={depth}
+        bubbled={depth === 0 ? nesting.bubbled.get(entry.task.id) : undefined}
+        childLine={progress
+          ? { text: childProgressLine(progress), expanded: hasNested && expanded(entry.task.id), onToggle: () => { if (hasNested) toggle(entry.task.id) } }
+          : undefined}
         agent={taskActivity(entry.task, allStatuses, activities)}
         activity={bestActivity(entry, activities)}
         background={background}
@@ -539,7 +595,7 @@ export default function DeskColumn({
           : groupInboxByProject(listed, [...pinnedIds]).map(group => (
             <React.Fragment key={group.project.id}>
               <ProjectGroupHead project={group.project} count={group.entries.length} theme={effectiveTheme} showTile={showTiles} onScope={() => pickScope({ projectId: group.project.id })} />
-              {group.entries.map(entry => renderRow(entry, tab === 'inbox' ? inboxKind(lists, entry) : tab === 'working' ? 'working' : 'snoozed'))}
+              {drawn(group.entries).map(row => renderRow(row.entry, row.kind ?? (tab === 'inbox' ? inboxKind(lists, row.entry) : tab === 'working' ? 'working' : 'snoozed'), row.depth))}
             </React.Fragment>
           )))}
         {!grouped && tab === 'inbox' && (
@@ -547,15 +603,15 @@ export default function DeskColumn({
             ? empty(scope ? 'Nothing here. Ask something above.' : 'Inbox zero. Ask something above.')
             : <>
               {lists.needsYou.length > 0 && <GroupHead label="Needs you" count={lists.needsYou.length} tone="needs" />}
-              {lists.needsYou.map(entry => renderRow(entry, 'needsYou'))}
+              {drawn(lists.needsYou).map(row => renderRow(row.entry, row.kind ?? 'needsYou', row.depth))}
               {lists.answered.length > 0 && <GroupHead label="Answered" count={lists.answered.length} tone="answered" hint={`${formatShortcutForApp('CmdOrCtrl+E')} done · ${formatShortcutForApp('CmdOrCtrl+Shift+S')} snooze`} />}
-              {lists.answered.map(entry => renderRow(entry, 'answered'))}
+              {drawn(lists.answered).map(row => renderRow(row.entry, row.kind ?? 'answered', row.depth))}
               {lists.waiting.length > 0 && <GroupHead label="Waiting on you" count={lists.waiting.length} />}
-              {lists.waiting.map(entry => renderRow(entry, 'waiting'))}
+              {drawn(lists.waiting).map(row => renderRow(row.entry, row.kind ?? 'waiting', row.depth))}
             </>
         )}
-        {!grouped && tab === 'working' && (lists.working.length === 0 ? empty('No agent is working.') : lists.working.map(entry => renderRow(entry, 'working')))}
-        {!grouped && tab === 'snoozed' && (lists.snoozed.length === 0 ? empty('Nothing snoozed.') : lists.snoozed.map(entry => renderRow(entry, 'snoozed')))}
+        {!grouped && tab === 'working' && (lists.working.length === 0 ? empty('No agent is working.') : drawn(lists.working).map(row => renderRow(row.entry, row.kind ?? 'working', row.depth)))}
+        {!grouped && tab === 'snoozed' && (lists.snoozed.length === 0 ? empty('Nothing snoozed.') : drawn(lists.snoozed).map(row => renderRow(row.entry, row.kind ?? 'snoozed', row.depth)))}
         {tab === 'done' && (
           <DoneList
             entries={done}

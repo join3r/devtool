@@ -3,6 +3,7 @@
  * or work, and agents. Task status comes from `taskStatusChip`, so the map,
  * the task header and the Inbox agree on what a task is doing.
  */
+import { delegationTree, statusFrom, waitingOnChildren } from '../../shared/delegation'
 import type { Project, TabStatusValue } from '../../shared/types'
 import { projectTasks } from '../../shared/streams'
 import { taskAgentLabel, taskStatusChip } from './taskHeaderState'
@@ -29,8 +30,10 @@ export function projectHomeSummary(
   let needsYou = 0
   let working = 0
   const byAgent = new Map<string, number>()
+  const tree = delegationTree([project])
+  const statusOf = statusFrom(allStatuses)
   for (const task of tasks) {
-    const tone = taskStatusChip(task, allStatuses, statusSince, now)?.tone
+    const tone = taskStatusChip(task, allStatuses, statusSince, now, waitingOnChildren(tree, task, statusOf))?.tone
     if (tone === 'attention') needsYou += 1
     else if (tone === 'working') working += 1
     const label = taskAgentLabel(task)

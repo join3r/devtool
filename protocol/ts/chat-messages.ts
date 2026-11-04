@@ -94,7 +94,20 @@ export interface TaskCloseParams {
   /** Answer with the desktop's close question instead of landing straight away. */
   ask?: boolean
   mode?: TaskCloseMode
+  /**
+   * `task.children` (§8.26): what happens to the tasks it started that still
+   * work. `stop` stops and closes them all (nothing lands); `keep`, or absent,
+   * leaves them running as top-level tasks.
+   */
+  children?: TaskCloseChildren
 }
+export const TASK_CLOSE_CHILDREN = ['stop', 'keep'] as const
+export type TaskCloseChildren = typeof TASK_CLOSE_CHILDREN[number]
+/**
+ * Tasks started by another task (SPEC.md §8.26): `parentTaskId`, `children` and
+ * `waiting` on inbox tasks, and `children` on `task.close`.
+ */
+export const TASK_CHILDREN_FEATURE = 'task.children'
 /**
  * The desktop's close question for a task with a worktree of its own (§8.7):
  * what landing would take, and why Land & close can't run now when it can't.
@@ -1285,6 +1298,11 @@ export function parseTaskCloseParams(params: unknown): TaskCloseParams {
   if (flag(o, 'stopWorking')) out.stopWorking = true
   if (flag(o, 'discardUnsaved')) out.discardUnsaved = true
   if (flag(o, 'ask')) out.ask = true
+  const children = optStr(o, 'children')
+  if (children !== undefined) {
+    if (!(TASK_CLOSE_CHILDREN as readonly string[]).includes(children)) fail(`unknown children ${children}`)
+    out.children = children as TaskCloseChildren
+  }
   const mode = optStr(o, 'mode')
   if (mode !== undefined) {
     if (!(TASK_CLOSE_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)

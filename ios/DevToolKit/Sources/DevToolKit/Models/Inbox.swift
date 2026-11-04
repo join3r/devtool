@@ -495,6 +495,14 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var diff: InboxTaskDiff?
     /// The schedule this task is a run of (§4.4 `scheduled`): its name.
     public var scheduled: String?
+    /// The open task of this project that started this one (§8.26): the
+    /// phone lists this task under it.
+    public var parentTaskId: String?
+    /// How the tasks this one started stand (§8.26).
+    public var children: InboxTaskChildren?
+    /// Its own agent is quiet but tasks it started still work (§8.26): it
+    /// counts as working, not idle.
+    public var waiting: Bool
     public var tabs: [InboxTab]
 
     public init(
@@ -506,8 +514,12 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         branch: String? = nil, landing: TaskLanding? = nil,
         diff: InboxTaskDiff? = nil,
         scheduled: String? = nil,
+        parentTaskId: String? = nil, children: InboxTaskChildren? = nil, waiting: Bool = false,
         tabs: [InboxTab]
     ) {
+        self.parentTaskId = parentTaskId
+        self.children = children
+        self.waiting = waiting
         self.id = id
         self.name = name
         self.streamId = streamId
@@ -548,6 +560,9 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         landing = (try? c.decodeIfPresent(TaskLanding.self, forKey: .landing)) ?? nil
         diff = (try? c.decodeIfPresent(InboxTaskDiff.self, forKey: .diff)) ?? nil
         scheduled = try? c.decodeIfPresent(String.self, forKey: .scheduled)
+        parentTaskId = (try? c.decodeIfPresent(String.self, forKey: .parentTaskId)) ?? nil
+        children = (try? c.decodeIfPresent(InboxTaskChildren.self, forKey: .children)) ?? nil
+        waiting = (try? c.decodeIfPresent(Bool.self, forKey: .waiting)) == true
         tabs = try c.decodeIfPresent([InboxTab].self, forKey: .tabs) ?? []
         status = try c.decodeIfPresent(TabStatus.self, forKey: .status)
             ?? tabs.map(\.status).max(by: { $0.priority < $1.priority }) ?? .idle
@@ -571,6 +586,29 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         return now.unixMilliseconds < snoozedUntil
     }
 
+}
+
+/// How the tasks a task started stand (§8.26): every one, closed ones
+/// included; those done (closed or finished), still working, and waiting on you.
+public struct InboxTaskChildren: Codable, Sendable, Equatable {
+    public var total: Int
+    public var done: Int
+    public var working: Int
+    public var needsYou: Int
+
+    public init(total: Int, done: Int, working: Int = 0, needsYou: Int = 0) {
+        self.total = total
+        self.done = done
+        self.working = working
+        self.needsYou = needsYou
+    }
+
+    /// "2 of 3 done", "2 of 3 done · 1 needs you".
+    public var line: String {
+        var text = "\(done) of \(total) done"
+        if needsYou > 0 { text += " · \(needsYou) \(needsYou == 1 ? "needs" : "need") you" }
+        return text
+    }
 }
 
 public struct InboxTab: Codable, Sendable, Equatable, Identifiable {

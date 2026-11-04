@@ -11,6 +11,7 @@ import { confirmWorktreeRemoval, forceRemoveWorktree } from './workspaceRemoval'
 import { isTaskWorking, taskCloseQuestion, taskLandingCloseQuestion, taskRemoveQuestion } from './closeRules'
 import { useWorktreeChoice } from './WorktreeChoiceDialog'
 import { useTaskCloseChoice, type TaskCloseChoice } from './TaskCloseDialog'
+import { settleChildTasks } from './childTasksClose'
 
 /**
  * Close a task: it is archived to its stream's `Done (N)`. Asks only when its
@@ -89,6 +90,8 @@ export function useCloseTask(): {
     const project = projects.find(p => p.id === projectId)
     const task = findTaskInProject(project, taskId)
     if (!project || !task) return
+    // Tasks it started that still work: stop them too, or let them run on.
+    if (!await settleChildTasks(projects, projectId, taskId, (tabId) => tabStatusStore.getStatus(tabId))) return
     const lands = canLandTask(project, task)
     if (lands && remove) {
       if (!confirmed && !window.confirm(taskRemoveQuestion(task))) return

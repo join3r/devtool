@@ -259,6 +259,9 @@ public enum DesktopFeature {
     public static let streamCommands = "stream.commands"
     /// The desktop answers `tokens.usage` (§8.22).
     public static let tokensUsage = "tokens.usage"
+    /// Tasks carry `parentTaskId`, `children` and `waiting`, and `task.close`
+    /// takes `children` (§8.26).
+    public static let taskChildren = "task.children"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

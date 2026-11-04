@@ -201,6 +201,20 @@ describe('AutopilotRunner', () => {
     expect(landCalls).toEqual([{ summary: 'Ported it.' }])
   })
 
+  it('waits while tasks it started still work, then lands after the turn their message starts', async () => {
+    let waiting = true
+    startWith({ phase: 'working' }, {}, { waitingOnChildren: () => waiting })
+    fs.writeFileSync(path.join(own.worktreePath, 'b.txt'), 'new\n')
+    activity.set('tab-1', 'working')
+    activity.set('tab-1', null, { lastAnswer: 'Started two tasks.' })
+    await tick(100)
+    expect(landCalls).toHaveLength(0)
+    expect(taskOf()?.autopilot?.phase).toBe('working')
+    waiting = false
+    await turn('Both tasks finished.')
+    expect(landCalls).toEqual([{ summary: 'Both tasks finished.' }])
+  })
+
   it('counts the task\'s commits too, not only what is uncommitted', async () => {
     startWith({ phase: 'working' })
     fs.writeFileSync(path.join(own.worktreePath, 'b.txt'), 'new\n')

@@ -502,8 +502,17 @@ public struct TaskCloseParams: Sendable, Equatable {
     public var ask: Bool
     /// The answer to that question.
     public var mode: Mode?
+    /// What happens to the tasks it started that still work (`task.children`, §8.26).
+    public var children: Children?
 
-    public init(taskId: String, stopWorking: Bool = false, discardUnsaved: Bool = false, ask: Bool = false, mode: Mode? = nil) {
+    /// `task.children` (§8.26): stop the tasks it started (down the tree), or leave them running.
+    public enum Children: String, Sendable, Equatable, CaseIterable {
+        case stop
+        case keep
+    }
+
+    public init(taskId: String, stopWorking: Bool = false, discardUnsaved: Bool = false, ask: Bool = false, mode: Mode? = nil, children: Children? = nil) {
+        self.children = children
         self.taskId = taskId
         self.stopWorking = stopWorking
         self.discardUnsaved = discardUnsaved
@@ -1353,8 +1362,13 @@ extension TaskCloseParams {
             guard let known = Mode(rawValue: raw) else { throw ProtocolError("unknown mode \(raw)") }
             mode = known
         }
+        var children: Children?
+        if let raw = try o.optStr("children") {
+            guard let known = Children(rawValue: raw) else { throw ProtocolError("unknown children \(raw)") }
+            children = known
+        }
         return TaskCloseParams(taskId: try o.str("taskId"), stopWorking: o.flag("stopWorking"), discardUnsaved: o.flag("discardUnsaved"),
-                               ask: o.flag("ask"), mode: mode)
+                               ask: o.flag("ask"), mode: mode, children: children)
     }
 
     public var json: JSONValue {
@@ -1363,6 +1377,7 @@ extension TaskCloseParams {
         if discardUnsaved { fields["discardUnsaved"] = .bool(true) }
         if ask { fields["ask"] = .bool(true) }
         if let mode { fields["mode"] = .string(mode.rawValue) }
+        if let children { fields["children"] = .string(children.rawValue) }
         return .object(fields)
     }
 }
