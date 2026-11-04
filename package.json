@@ -11,6 +11,7 @@
     "dev:cdp": "DEVTOOL_CDP_PORT=9222 electron-vite dev",
     "build": "npm run typecheck && electron-vite build && npm run build:server",
     "build:mac": "npm run build && electron-builder --mac --dir",
+    "build:mac:dev": "npm run build && electron-builder --mac --dir -c.mac.identity=-",
     "build:linux": "npm run build && electron-builder --linux --dir",
     "build:win": "npm run build && electron-builder --win --dir",
     "build:win:setup": "npm run build && electron-builder --win nsis zip --publish never",

@@ -3,6 +3,8 @@ set -e
 
 APP_NAME="DevTool"
 OS="$(uname -s)"
+# scripts/install-dev.sh sets this to build:mac:dev (ad-hoc signed, much faster).
+MAC_BUILD="${DEVTOOL_MAC_BUILD:-build:mac}"
 
 # Ensure caches are in a writable location if ~/.cache is read-only
 if ! touch "$HOME/.cache/.writetest" 2>/dev/null; then
@@ -35,7 +37,7 @@ if [ "$OS" = "Darwin" ]; then
   INSTALL_PATH="/Applications/${APP_NAME}.app"
 
   echo "Building for macOS..."
-  npm run build:mac
+  npm run "$MAC_BUILD"
 
   echo "Installing to ${INSTALL_PATH}..."
   rm -rf "$INSTALL_PATH"

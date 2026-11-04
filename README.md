@@ -144,13 +144,14 @@ Starts the app in development mode with hot reload. On Windows this still needs 
 npm run build          # Typecheck, then production JS/CSS bundle
 npm run build:win      # Portable Windows folder (dist/win-unpacked)
 npm run build:win:setup # Per-user Setup.exe + portable zip (dist/)
-npm run build:mac      # Package macOS app
+npm run build:mac      # Package macOS app, signed with your Developer ID (slow)
+npm run build:mac:dev  # Same, ad-hoc signed: ~25s instead of ~4.5 min, for local use only
 npm run build:linux    # Package Linux app
 npm run build:server   # DevTool server bundle (out/server/)
 npm run build:installer # Regenerate site/install and site/server/bootstrap.mjs
 ```
 
-`npm run build`, `npm run dev` and `npm run dev:cdp` also run `build:server`, so the app always carries a server bundle that matches it. Packaged builds ship it in `resources/server`. `build:server` fails if anything in the server's import graph reaches `electron`. Run `build:installer` after changing `scripts/server-install.sh` or `src/server/bootstrap.ts` and commit both generated files, since `install` pins the bootstrap's sha256.
+`npm run build`, `npm run dev` and `npm run dev:cdp` also run `build:server`, so the app always carries a server bundle that matches it. Packaged builds ship it in `resources/server`. `build:server` fails if anything in the server's import graph reaches `electron`. `build:mac:dev` skips the Developer ID signature, which spends most of its time on Apple's timestamp server. An ad-hoc signature changes with every build, so macOS asks again for Keychain access (safeStorage) and the microphone after each one, and the app won't open on another Mac. Release builds use `build:mac`. Run `build:installer` after changing `scripts/server-install.sh` or `src/server/bootstrap.ts` and commit both generated files, since `install` pins the bootstrap's sha256.
 
 ### Install (build + system install)
 
@@ -159,6 +160,8 @@ npm run build:installer # Regenerate site/install and site/server/bootstrap.mjs
 ```
 
 Builds and installs the app system-wide. Supports macOS (arm64) and Linux (x86_64, arm64). On macOS it copies to `/Applications`, on Linux it installs to `/opt/DevTool` with a desktop entry and `/usr/local/bin/devtool` symlink. Windows uses `npm run build:win` and copying `dist/win-unpacked` instead.
+
+`./scripts/install-dev.sh` does the same with `build:mac:dev`: no Developer ID signature, so it installs in well under a minute, but macOS asks again for Keychain and microphone access after each install. On Linux it is identical to `install.sh`.
 
 ### Test
 
