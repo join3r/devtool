@@ -162,7 +162,7 @@ function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, 
   onRun: () => void
   onCloseRun: () => void
 }): React.ReactElement {
-  const shortcut = formatShortcutForApp('CmdOrCtrl+`')
+  const shortcut = formatShortcutForApp('Ctrl+`')
   const counts = { terminal: 0, browser: 0 }
   for (const pane of panes) {
     for (const tab of pane.tabs) if (tab.type === 'terminal' || tab.type === 'browser') counts[tab.type]++

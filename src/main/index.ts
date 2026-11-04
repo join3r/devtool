@@ -258,9 +258,10 @@ function buildAppMenu(): void {
           click: () => sendToRenderer('menu-toggle-file-browser')
         },
         {
-          // The drawer under a task's conversation.
+          // The drawer under a task's conversation. Ctrl, not Cmd, on macOS too:
+          // the system keeps Cmd+` for cycling an app's windows.
           label: 'Toggle Bench',
-          accelerator: 'CmdOrCtrl+`',
+          accelerator: 'Ctrl+`',
           click: () => sendToRenderer('menu-toggle-bench')
         },
         { type: 'separator' },
@@ -356,6 +357,18 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
   mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error(`[preload-error] path=${preloadPath}`, error)
   })
+
+  // Ctrl+` (Toggle Bench) is caught before the page sees it: a focused xterm
+  // would otherwise take it as a key for the shell and the menu never fires.
+  // Linux handles it in the fallback below.
+  if (process.platform !== 'linux') {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !input.control || input.meta || input.alt || input.shift) return
+      if (input.code !== 'Backquote' && input.key !== '`') return
+      event.preventDefault()
+      mainWindow.webContents.send('menu-toggle-bench')
+    })
+  }
 
   // On Linux, menu accelerators may not fire when titleBarStyle hides the menu bar.
   // Manually dispatch shortcuts via before-input-event as a reliable fallback.

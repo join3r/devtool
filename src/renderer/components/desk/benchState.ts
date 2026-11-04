@@ -55,7 +55,7 @@ export function closeBenchRun(taskId: string): void {
   setBench(taskId, { run: null, view: current.view === 'run' ? 'panes' : current.view })
 }
 
-/** ⌘` and the strip's chevron. */
+/** ⌃` and the strip's chevron. */
 export function toggleBench(taskId: string): void {
   setBench(taskId, { open: !getBench(taskId).open })
 }

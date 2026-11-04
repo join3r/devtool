@@ -513,7 +513,7 @@ const api = {
     return () => ipcRenderer.removeListener('menu-toggle-file-browser', handler)
   },
 
-  // Menu: the desk's Bench drawer (⌘`)
+  // Menu: the desk's Bench drawer (⌃`)
   onMenuToggleBench: (callback: () => void): (() => void) => {
     const handler = () => callback()
     ipcRenderer.on('menu-toggle-bench', handler)
