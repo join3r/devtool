@@ -177,7 +177,7 @@ describe('mobile end to end (real relay)', () => {
     registry.working('tab-chat')
     registry.applyHook('tab-chat', { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' } })
     await waitFor(() => inboxEvents(phone.phone.messages).some(e => e.inbox.projects[0].tasks[0].tabs[0].status === 'working'
-      && e.inbox.projects[0].tasks[0].tabs[0].activity === 'Bash · npm test'), 'working inbox event', 4000)
+      && e.inbox.projects[0].tasks[0].tabs[0].activity === 'Running tests · npm test'), 'working inbox event', 4000)
     const seqs = inboxEvents(phone.phone.messages).map(e => e.seq)
     expect(seqs).toEqual(seqs.map((_, i) => i + 1))
 

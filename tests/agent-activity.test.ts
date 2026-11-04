@@ -58,7 +58,7 @@ describe('reduceAgentActivity', () => {
     ])
     expect(activity?.title).toBe('Inbox fix')
     expect(activity?.lastPrompt).toBe('Fix the inbox')
-    expect(describeActivity(activity, 'working')).toBe('Bash · npm test')
+    expect(describeActivity(activity, 'working')).toBe('Running tests · npm test')
 
     const done = fold([
       { hook_event_name: 'UserPromptSubmit', prompt: 'Fix it' },

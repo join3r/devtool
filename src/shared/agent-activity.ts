@@ -1,4 +1,5 @@
 import type { AiStatusEvent } from './ai-status'
+import { classifyCommand } from './command-kind'
 
 /**
  * What a Claude tab is doing right now, in words — the sidebar's "Bash · npm test"
@@ -186,6 +187,21 @@ export function summarizeTool(name: string, input: unknown): string {
   return name
 }
 
+/**
+ * The label a tool call in flight gets on the sidebar row: a shell command that
+ * runs tests, a build, a type-check… reads as what it is for ("Running tests ·
+ * npm test"); anything else as {@link summarizeTool}. Permission prompts keep
+ * summarizeTool's raw command — there you need to see exactly what would run.
+ */
+export function activityToolLabel(name: string, input: unknown): string {
+  if (name === 'Bash' || name === 'PowerShell') {
+    const command = (input && typeof input === 'object' ? (input as Record<string, unknown>).command : undefined)
+    const found = classifyCommand(typeof command === 'string' ? command : undefined)
+    if (found) return `${found.label} · ${firstLine(found.detail, 60) ?? ''}`.replace(/ · $/, '')
+  }
+  return summarizeTool(name, input)
+}
+
 /** Tools whose call *is* a question to you — PreToolUse fires as the dialog opens. */
 const BLOCKING_TOOLS: Record<string, 'question' | 'plan'> = {
   AskUserQuestion: 'question',
@@ -301,7 +317,7 @@ export function reduceAgentActivity(
       if (fromSubagent) break
       const name = str(body.tool_name) ?? 'tool'
       const id = str(body.tool_use_id)
-      const label = summarizeTool(name, body.tool_input)
+      const label = activityToolLabel(name, body.tool_input)
       next.tool = { id, name, label, startedAt: now }
       const blocking = BLOCKING_TOOLS[name]
       if (blocking) {
