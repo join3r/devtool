@@ -146,6 +146,23 @@ export function needsTaskWorktree(project: Project, stream: Stream, task: Task):
 }
 
 /**
+ * Where a task works, for the git-worktree mark on its row: a worktree of its
+ * own (made, or still to be made before its first tab spawns), its stream's
+ * worktree, or the project folder itself.
+ */
+export type TaskWorkPlace =
+  | { kind: 'own'; branch?: string }
+  | { kind: 'stream'; branch: string }
+  | { kind: 'folder' }
+
+export function taskWorkPlace(project: Project, stream: Stream, task: Task): TaskWorkPlace {
+  if (task.workspace) return { kind: 'own', branch: task.workspace.branchName }
+  if (needsTaskWorktree(project, stream, task)) return { kind: 'own' }
+  if (stream.workspace) return { kind: 'stream', branch: stream.workspace.branchName }
+  return { kind: 'folder' }
+}
+
+/**
  * Whether a task reopening into `stream` works in a worktree of its own: the
  * one it recorded (`Task.workspace`, restored from its branch) or a fresh one
  * off the stream's tip. That is every reopened task of a task-worktree stream

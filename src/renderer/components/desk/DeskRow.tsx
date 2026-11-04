@@ -1,5 +1,5 @@
 import React from 'react'
-import { Check, MoreHorizontal, Pin } from 'lucide-react'
+import { Check, Folder, GitBranch, MoreHorizontal, Pin } from 'lucide-react'
 import type { GitDiffSummary, Project } from '../../../shared/types'
 import { formatLineCount } from '../../hooks/useTaskDiffSummaries'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
@@ -19,6 +19,7 @@ import { wakeHint } from './deskSnooze'
 import type { TaskBackground } from './deskInbox'
 import { queuedLine } from '../../../shared/queued-tasks'
 import TaskUsagePills from './TaskUsagePills'
+import { taskWorkPlace, type TaskWorkPlace } from '../../../shared/streams'
 
 /** Which list a row sits in; it decides the preview line and the hover actions. */
 export type DeskRowKind = 'needsYou' | 'answered' | 'waiting' | 'working' | 'snoozed'
@@ -213,6 +214,7 @@ export default function DeskRow({
             <span className={`text-base text-text overflow-hidden text-ellipsis whitespace-nowrap ${unread || kind === 'needsYou' ? 'font-semibold' : 'font-medium'}`} data-testid="desk-row-title">
               {task.name}
             </span>
+            <WorkPlaceMark place={taskWorkPlace(project, stream, task)} />
             {pinned && <Pin size={11} className="shrink-0 self-center text-text-subtle" aria-label="pinned" />}
             {autopilotActive(task) && <AutopilotMark />}
             {/* Under the hover actions, which cover the line above: the chart stays reachable. */}
@@ -256,6 +258,18 @@ export default function DeskRow({
         <button type="button" className={actionCls} aria-label="More" onClick={(e) => onContextMenu(e)}><MoreHorizontal size={13} /></button>
       </div>
     </div>
+  )
+}
+
+/** Whether the task works in a git worktree (its own or its stream's) or right in the project folder. */
+function WorkPlaceMark({ place }: { place: TaskWorkPlace }): React.ReactElement {
+  const label = place.kind === 'own'
+    ? place.branch ? `Own git worktree · ${place.branch}` : 'Own git worktree, made when it starts'
+    : place.kind === 'stream' ? `Stream's git worktree · ${place.branch}` : 'Project folder, no worktree'
+  return (
+    <span className="shrink-0 self-center flex text-text-subtle" title={label} aria-label={label} data-testid="desk-row-workplace" data-place={place.kind}>
+      {place.kind === 'folder' ? <Folder size={11} /> : <GitBranch size={11} />}
+    </span>
   )
 }
 

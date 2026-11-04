@@ -20,7 +20,8 @@ import {
   findTaskInProject,
   taskMoveBlocker,
   waitsForTaskWorktree,
-  reopensInOwnWorktree
+  reopensInOwnWorktree,
+  taskWorkPlace
 } from '../src/shared/streams'
 import { retargetPath } from '../src/shared/workspace-path'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
@@ -123,6 +124,15 @@ describe('task worktrees', () => {
     expect(taskDirectory(p, fixtureTask({ id: 'archived' }))).toBe('/repo/app')
     const ssh = { ...p, ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } }
     expect(taskDirectory(ssh, findTaskInProject(ssh, 'plain')!)).toBe('/srv')
+  })
+
+  it('tells where a task works, for the worktree mark on its row', () => {
+    const place = (p: ReturnType<typeof project>, taskId: string) =>
+      taskWorkPlace(p, findStreamOfTask(p, taskId)!, findTaskInProject(p, taskId)!)
+    expect(place(project(), 'own')).toEqual({ kind: 'own', branch: 'x--fix' })
+    expect(place(project(), 'ws')).toEqual({ kind: 'own' })
+    expect(place(project({ sharesStreamWorktree: true }), 'ws')).toEqual({ kind: 'stream', branch: 'x' })
+    expect(place(project(), 'plain')).toEqual({ kind: 'folder' })
   })
 
   it('needs a worktree only for a new task of a migrated worktree stream in a local project', () => {
