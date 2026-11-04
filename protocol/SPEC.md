@@ -470,7 +470,7 @@ Only chat tabs (`claude-chat`, and Codex/Pi chats flagged `chat`, §4.4) in proj
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"` (and `"chat.image.user"` when it serves user items' images), §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"`, §8.19 `"stream.run"` (and `"stream.run.task"` when it takes `taskId`, `"stream.run.commands"` when streams have named commands) §8.20 `"chat.tasks"`, §8.21 `"stream.commands"` and §8.22 `"tokens.usage"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4), and `"task.busy"` one whose `task.new` takes `start` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"` (and `"chat.image.user"` when it serves user items' images), §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"`, §8.19 `"stream.run"` (and `"stream.run.task"` when it takes `taskId`, `"stream.run.commands"` when streams have named commands) §8.20 `"chat.tasks"`, §8.21 `"stream.commands"`, §8.22 `"tokens.usage"` and §8.23 `"chat.search"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4), and `"task.busy"` one whose `task.new` takes `start` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -816,6 +816,20 @@ TokensUsageRow = {
 - The desktop keeps its tallies after an agent deletes old session files, so history goes back to when the desktop first read them, or as far as the agents kept it before that.
 - A desktop that implements this op lists `"tokens.usage"` in its features (§8.1). A phone shows token usage only for such a desktop. There is no event for it: a phone asks again to refresh.
 - Errors: a `projectId` that is unknown or names a project hidden from mobile → `not-found`. An empty or non-string `projectId` → `bad-request`. Reading the session files failing → `internal`.
+
+### 8.23 `chat.search` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `chat.search` | `{ tabId, query }` | `{ matches: [{ itemId, count }], total }` |
+
+Find in a chat thread, as the desktop's Cmd+F in a chat tab: the desktop searches every item of the chat, including the ones before the phone's window (§6.5) and what an item shows only in its `chat.detail` (a tool call's input and output, a `!command`'s output). `query` is matched literally and case-insensitively; it is not blank and at most 200 characters. `matches` lists the items that contain it, oldest first, each with how many times (`count` ≥ 1); `total` is the sum. An item's text is a user item's text, a text or thinking item's full text (not the capped `preview`), a notice's text, and a tool item's `summary`, then its input and result as the desktop's tool row shows them when opened.
+
+- At most the newest **5000** matching items are listed; `total` still counts every match.
+- A phone loads the items it doesn't have with `chat.earlier` to go to an older match.
+- The chat need not be open on this phone. When it has no runtime yet, the desktop attaches one first, as for `chat.detail`.
+- A desktop that implements this op lists `"chat.search"` in its features (§8.1). A phone offers search in a chat only for such a desktop.
+- Errors: unknown tab, as §6.3 → `not-found`. Missing or malformed params, or a blank or too-long `query` → `bad-request`.
 
 ## 9. Version 2: streams
 

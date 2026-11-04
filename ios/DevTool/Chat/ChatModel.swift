@@ -41,6 +41,17 @@ final class ChatModel {
     private(set) var cachedAt: Date?
     /// The `/` menu (`chat.commands`, §8.14); nil until first fetched.
     private(set) var commands: [ChatCommand]?
+    /// Find in the thread (`chat.search`, §8.23): the matches, and the one on screen.
+    private(set) var searchMatches = ChatSearchMatches.empty
+    private(set) var searchIndex = -1
+    /// A search, or the earlier pages a match needs, on its way.
+    private(set) var searching = false
+    /// The query the matches are for; nil before the first answer.
+    private(set) var searchedQuery: String?
+    /// The item holding the current match; `searchJump` changes each time the screen should go to it.
+    private(set) var searchFocus: String?
+    private(set) var searchJump = 0
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     /// Where the model gets its connection, cached transcript and answer authorization.
     struct Dependencies {
@@ -234,18 +245,93 @@ final class ChatModel {
     // MARK: Actions
 
     func loadEarlier() async {
+        _ = await loadEarlierPage(limit: 50)
+    }
+
+    /// One `chat.earlier` page; false when there was none to load or it failed.
+    private func loadEarlierPage(limit: Int) async -> Bool {
         guard let connection = connection(), let state, state.view.hasEarlier, !loadingEarlier,
               let first = state.view.items.first
-        else { return }
+        else { return false }
         loadingEarlier = true
         defer { loadingEarlier = false }
         do {
-            let page = try await connection.earlierChatItems(tabId: route.tabId, before: first.id, limit: 50)
+            let page = try await connection.earlierChatItems(tabId: route.tabId, before: first.id, limit: limit)
             self.state?.prepend(page)
             scheduleSave()
+            return !page.items.isEmpty
         } catch {
             show(error)
+            return false
         }
+    }
+
+    // MARK: Find in the thread (§8.23)
+
+    /// Searches the whole chat on the desktop as you type, then goes to the newest match.
+    func search(_ query: String) {
+        searchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            clearSearch()
+            return
+        }
+        searchTask = Task { [weak self] in
+            guard (try? await Task.sleep(for: .milliseconds(250))) != nil, let self else { return }
+            guard let connection = self.connection() else { return }
+            self.searching = true
+            do {
+                let result = try await connection.searchChat(tabId: self.route.tabId, query: query)
+                guard !Task.isCancelled else { return }
+                self.searchMatches = ChatSearchMatches(result)
+                self.searchedQuery = query
+                await self.goToMatch(self.searchMatches.count - 1)
+            } catch {
+                if !Task.isCancelled { self.show(error) }
+            }
+            if !Task.isCancelled { self.searching = false }
+        }
+    }
+
+    /// The next (`1`, newer) or previous (`-1`, older) match, wrapping around.
+    func stepSearch(_ direction: Int) {
+        guard searchMatches.count > 0 else { return }
+        let index = searchMatches.step(from: searchIndex, by: direction)
+        searchTask?.cancel()
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+            self.searching = true
+            await self.goToMatch(index)
+            if !Task.isCancelled { self.searching = false }
+        }
+    }
+
+    func endSearch() {
+        searchTask?.cancel()
+        clearSearch()
+    }
+
+    private func clearSearch() {
+        searchMatches = .empty
+        searchIndex = -1
+        searchFocus = nil
+        searchedQuery = nil
+        searching = false
+    }
+
+    /// Loads earlier pages until the match's item is in the transcript, then asks the screen to go there.
+    private func goToMatch(_ index: Int) async {
+        searchIndex = index
+        guard let id = searchMatches.itemId(at: index) else {
+            searchFocus = nil
+            return
+        }
+        while state?.view.items.contains(where: { $0.id == id }) == false, state?.view.hasEarlier == true, !Task.isCancelled {
+            guard await loadEarlierPage(limit: ChatOp.maxEarlierLimit) else { break }
+        }
+        guard !Task.isCancelled else { return }
+        searchFocus = id
+        searchJump += 1
     }
 
     /// Returns true when the desktop took the message.

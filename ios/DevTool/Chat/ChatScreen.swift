@@ -24,6 +24,10 @@ struct ChatScreen: View {
     @State private var composerFocused = false
     /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
     @State private var viewportHeight: CGFloat = 0
+    /// Find in the thread (§8.23): the bar is open, and what it searches for.
+    @State private var findOpen = false
+    @State private var findQuery = ""
+    @FocusState private var findFocused: Bool
 
     /// Opens the task info sheet (the header and ⓘ).
     private let onInfo: (() -> Void)?
@@ -36,8 +40,9 @@ struct ChatScreen: View {
         if #available(iOS 18, *) { true } else { false }
     }
 
-    /// Keep the newest content in view: the user hasn't scrolled away from it.
-    private var pinned: Bool { atBottom || !scrolledAway }
+    /// Keep the newest content in view: the user hasn't scrolled away from it,
+    /// and isn't looking at a match of the find bar.
+    private var pinned: Bool { (atBottom || !scrolledAway) && !(findOpen && model.searchFocus != nil) }
 
     init(route: ChatRoute, app: AppModel, onInfo: (() -> Void)? = nil, onProject: (() -> Void)? = nil) {
         self.onInfo = onInfo
@@ -77,6 +82,18 @@ struct ChatScreen: View {
                     TaskNavigationHeader(project: context.project, task: context.task, detail: modeLabel, onInfo: onInfo, onProject: onProject)
                 } else {
                     ToolbarItem(placement: .principal) { titleView }
+                }
+            }
+            .toolbar {
+                if supportsSearch && !model.showingCache {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            if findOpen { closeFind() } else { openFind() }
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .accessibilityLabel(findOpen ? "Close search" : "Search this conversation")
+                    }
                 }
             }
             .sheet(item: $detailItem) { item in
@@ -129,6 +146,11 @@ struct ChatScreen: View {
                         tasksWorkflow = workflow
                         showingTasks = true
                     }
+                }, find: { query in
+                    findQuery = query
+                    openFind()
+                    // Keyboard down, so a screenshot shows the match.
+                    findFocused = false
                 })
             }
             #endif
@@ -213,6 +235,7 @@ struct ChatScreen: View {
                     }
                     ForEach(model.view?.items ?? []) { item in
                         ChatItemRow(item: item, images: imageActions, userImages: userImageActions) { detailItem = $0 }
+                            .background { findMark(item.id) }
                             .id(item.id)
                     }
                     // A saved transcript's status is stale: don't show it as running.
@@ -251,6 +274,22 @@ struct ChatScreen: View {
             .onChange(of: model.view?.items.last) { _, _ in follow(proxy) }
             .onChange(of: model.view?.items.count) { _, _ in follow(proxy) }
             .onChange(of: model.view?.busy) { _, _ in follow(proxy) }
+            .onChange(of: model.searchJump) { _, jump in
+                guard let id = model.searchFocus else { return }
+                // Looking back up the conversation: stop following the bottom.
+                scrolledAway = true
+                // After the rows an earlier page just added are laid out; again once
+                // the lazy rows on the way have measured, so the match ends up centred.
+                Task { @MainActor in
+                    for delay in [50, 350] {
+                        guard (try? await Task.sleep(for: .milliseconds(delay))) != nil, model.searchJump == jump else { return }
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
+                    }
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if findOpen { findBar }
+            }
             .onChange(of: model.view?.prompts.first?.id) { _, id in
                 // A card needs the room the keyboard takes, and its buttons, not the composer.
                 if id != nil { composerFocused = false }
@@ -261,7 +300,8 @@ struct ChatScreen: View {
             }
             // Top right, as on the desktop: floating, so the bottom bar keeps its height.
             .overlay(alignment: .topTrailing) {
-                if !model.showingCache, supportsTasks, let tasks = model.view?.status.tasks, !tasks.isEmpty {
+                // The find bar takes the top while it is open.
+                if !model.showingCache, !findOpen, supportsTasks, let tasks = model.view?.status.tasks, !tasks.isEmpty {
                     ChatTasksPill(tasks: tasks) { showingTasks = true }
                         .padding(.top, 8)
                         .padding(.trailing, 12)
@@ -672,6 +712,84 @@ private struct PastEndGuard: ViewModifier {
                 }
         } else {
             content
+        }
+    }
+}
+
+// MARK: - Find in the thread (§8.23)
+
+extension ChatScreen {
+    /// The desktop searches whole chats (`chat.search`).
+    private var supportsSearch: Bool {
+        app.supports(DesktopFeature.chatSearch, on: route.desktopId)
+    }
+
+    private func openFind() {
+        findOpen = true
+        findFocused = true
+        if !findQuery.isEmpty { model.search(findQuery) }
+    }
+
+    private func closeFind() {
+        findOpen = false
+        findFocused = false
+        model.endSearch()
+    }
+
+    /// Under the navigation bar: the field, where you are, up (older) and down (newer).
+    private var findBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Find in conversation", text: $findQuery)
+                .focused($findFocused)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                // Return goes to the next match up, as you came from the newest.
+                .onSubmit {
+                    findFocused = true
+                    model.stepSearch(-1)
+                }
+                .onChange(of: findQuery) { _, query in model.search(query) }
+            if model.searching {
+                ProgressView().controlSize(.small)
+            } else if model.searchedQuery != nil, !findQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                Text(model.searchMatches.label(at: model.searchIndex))
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(model.searchMatches.total == 0 ? .red : .secondary)
+                    .lineLimit(1)
+            }
+            Button { model.stepSearch(-1) } label: { Image(systemName: "chevron.up") }
+                .disabled(model.searchMatches.count == 0)
+                .accessibilityLabel("Previous match")
+            Button { model.stepSearch(1) } label: { Image(systemName: "chevron.down") }
+                .disabled(model.searchMatches.count == 0)
+                .accessibilityLabel("Next match")
+            Button("Done") { closeFind() }
+                .fontWeight(.semibold)
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    /// Behind a matching row: a tint, stronger on the one you are on.
+    @ViewBuilder
+    private func findMark(_ itemId: String) -> some View {
+        if findOpen, model.searchMatches.count > 0, model.searchMatches.itemIds.contains(itemId) {
+            let current = model.searchFocus == itemId
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.yellow.opacity(current ? 0.28 : 0.1))
+                .overlay {
+                    if current {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.yellow.opacity(0.8), lineWidth: 1.5)
+                    }
+                }
+                .padding(-6)
+                .allowsHitTesting(false)
         }
     }
 }

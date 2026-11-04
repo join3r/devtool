@@ -63,6 +63,44 @@ struct MockChatTranscript: Sendable {
         return ChatEarlierResult(items: Array(items[start..<index]), hasEarlier: start > 0)
     }
 
+    /// `chat.search` (§8.23): every item, its details included, case-insensitive.
+    func search(_ query: String) -> ChatSearchResult {
+        var hits: [ChatSearchHit] = []
+        for item in items {
+            let count = Self.occurrences(of: query, in: searchText(item))
+            if count > 0 { hits.append(ChatSearchHit(itemId: item.id, count: count)) }
+        }
+        return ChatSearchResult(matches: hits, total: hits.reduce(0) { $0 + $1.count })
+    }
+
+    private func searchText(_ item: ChatItem) -> String {
+        var parts: [String]
+        switch item.content {
+        case .user(let text, _, _, _): parts = [text]
+        case .text(let markdown, _): parts = [markdown]
+        case .thinking(let preview, _): parts = [preview]
+        case .tool(let tool): parts = [tool.summary]
+        case .notice(let text, _): parts = [text]
+        case .unknown: parts = []
+        }
+        switch details[item.id] {
+        case .tool(let input, let result)?: parts += [input, result ?? ""]
+        default: break
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    static func occurrences(of query: String, in text: String) -> Int {
+        guard !query.isEmpty else { return 0 }
+        var count = 0
+        var range = text.startIndex..<text.endIndex
+        while let found = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: range) {
+            count += 1
+            range = found.upperBound..<text.endIndex
+        }
+        return count
+    }
+
     mutating func upsert(_ item: ChatItem) {
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item

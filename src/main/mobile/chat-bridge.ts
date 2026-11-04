@@ -24,6 +24,7 @@ import {
 } from '../../shared/chat-prompts'
 import type { ChatImage } from '../../shared/claude-chat'
 import { chatTabConfig, type ChatTabConfigShape } from '../../shared/chat-tab-config'
+import { searchChatItems } from '../../shared/chat-search'
 import { chatTabAgent, isChatTabType, type Project, type ProjectsData, type Tab, type Task, type TaskWorktreeResult } from '../../shared/types'
 import { findStreamOfTask, needsTaskWorktree, projectTasks, taskTabs } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
@@ -46,6 +47,7 @@ import { fitImage, ImageTooLargeError, type ImageCodec } from './chat-image'
 import {
   AppErrorCode,
   CHAT_BASH_OP,
+  CHAT_SEARCH_OP,
   CHAT_TASK_STOP_OP,
   CHAT_BTW_OP,
   CHAT_COMMANDS_OP,
@@ -61,6 +63,8 @@ import type {
   ChatAnswer,
   ChatAnswerParams,
   ChatBashParams,
+  ChatSearchParams,
+  ChatSearchResult,
   ChatBtwParams,
   ChatBtwResult,
   ChatCommandEntry,
@@ -346,6 +350,8 @@ export class ChatBridge {
         })
         return {}
       }
+      case CHAT_SEARCH_OP:
+        return searchChat(await this.ensureRuntime(resolved), (params as ChatSearchParams).query)
       case CHAT_TASK_STOP_OP: {
         if (!this.deps.chats.stopTask) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot stop tasks')
         const { taskId } = params as ChatTaskStopParams
@@ -571,6 +577,16 @@ export class ChatBridge {
 
 /** Desktop-only: the phone has no sign-in card yet, so it keeps these terminal only. */
 const DESKTOP_AUTH_COMMANDS = new Set([LOGIN_COMMAND.name, LOGOUT_COMMAND.name])
+
+/**
+ * `chat.search` (§8.23): which items match, in the whole chat (not only the
+ * phone's window), counted as the desktop's find bar counts them.
+ */
+export function searchChat(chat: ChatState, query: string): ChatSearchResult {
+  const hits = searchChatItems(chat.items, query)
+  const total = hits.reduce((sum, hit) => sum + hit.count, 0)
+  return { matches: hits.slice(Math.max(0, hits.length - ChatLimits.searchItems)), total }
+}
 
 /**
  * `chat.commands` (§8.14): the composer's `/` menu, as ClaudeChatTab builds it,

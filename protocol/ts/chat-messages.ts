@@ -395,6 +395,23 @@ export const CHAT_BASH_FEATURE = 'chat.bash'
 export interface ChatBashParams { tabId: string; command: string }
 
 /**
+ * Find in a chat thread (SPEC.md §8.23): the desktop searches every item of the
+ * chat, not only the phone's window, and says which items match and how often.
+ */
+export const CHAT_SEARCH_OP = 'chat.search'
+/** The handshake feature (§8.1) a desktop lists when it answers `chat.search`. */
+export const CHAT_SEARCH_FEATURE = 'chat.search'
+
+export interface ChatSearchParams { tabId: string; query: string }
+export interface ChatSearchHit { itemId: string; count: number }
+export interface ChatSearchResult {
+  /** Matching items, oldest first; the newest {@link ChatLimits.searchItems} when more match. */
+  matches: ChatSearchHit[]
+  /** Every match in the chat, also those in items left out of `matches`. */
+  total: number
+}
+
+/**
  * Work Claude runs beside the turn (SPEC.md §8.20): the view's `tasks`, and
  * `chat.task.stop` to stop one, as the desktop's task pill does.
  */
@@ -473,6 +490,10 @@ export const ChatLimits = {
   projectName: 255,
   /** `chat.bash` command (§8.17), as `chat.send`'s text. */
   bashCommand: 32000,
+  /** `chat.search` query (§8.23). */
+  searchQuery: 200,
+  /** `chat.search` result: the most matching items listed. */
+  searchItems: 5000,
   /** `chat.permissions.update` rule (§8.14). */
   permissionRule: 2000,
   /** A queued prompt's text (§8.16), as `chat.send`'s. */
@@ -696,6 +717,7 @@ export type ChatParams =
   | ChatImageParams
   | ChatBtwParams
   | ChatBashParams
+  | ChatSearchParams
   | ChatTaskStopParams
   | ChatPermissionsUpdateParams
 
@@ -1379,6 +1401,31 @@ export function parseChatBashParams(params: unknown): ChatBashParams {
   if (command.length > ChatLimits.bashCommand) fail(`command over ${ChatLimits.bashCommand} characters`)
   if (!command.trim()) fail('command is empty')
   return { tabId, command }
+}
+
+/**
+ * `chat.search` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `tabId`, or a blank query or one over {@link ChatLimits.searchQuery} characters.
+ */
+export function parseChatSearchParams(params: unknown): ChatSearchParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const query = str(o, 'query')
+  if (query.length > ChatLimits.searchQuery) fail(`query over ${ChatLimits.searchQuery} characters`)
+  if (!query.trim()) fail('query is empty')
+  return { tabId, query }
+}
+
+/** `chat.search` result (the phone's side). A hit's `count` is at least 1. */
+export function parseChatSearchResult(value: unknown): ChatSearchResult {
+  const o = obj(value, 'result')
+  const matches = arr(o, 'matches').map((raw) => {
+    const hit = obj(raw, 'match')
+    const count = int(hit, 'count')
+    if (count < 1) fail('count must be at least 1')
+    return { itemId: str(hit, 'itemId'), count }
+  })
+  return { matches, total: int(o, 'total') }
 }
 
 /** `chat.task.stop` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing field. */

@@ -2928,6 +2928,84 @@
       ]
     }
   },
+  "search": {
+    "params": [
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"query\":\"login\"}",
+        "expected": {
+          "tabId": "tab-chat",
+          "query": "login"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"query\":\" Fix the Bug \",\"extra\":true}",
+        "expected": {
+          "tabId": "tab-chat",
+          "query": " Fix the Bug "
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"query\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "expected": {
+          "tabId": "tab-chat",
+          "query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"matches\":[{\"itemId\":\"u1\",\"count\":1},{\"itemId\":\"t3\",\"count\":4,\"extra\":1}],\"total\":5}",
+        "expected": {
+          "matches": [
+            {
+              "itemId": "u1",
+              "count": 1
+            },
+            {
+              "itemId": "t3",
+              "count": 4
+            }
+          ],
+          "total": 5
+        }
+      },
+      {
+        "json": "{\"matches\":[],\"total\":0}",
+        "expected": {
+          "matches": [],
+          "total": 0
+        }
+      },
+      {
+        "json": "{\"matches\":[{\"itemId\":\"a9\",\"count\":2}],\"total\":7}",
+        "expected": {
+          "matches": [
+            {
+              "itemId": "a9",
+              "count": 2
+            }
+          ],
+          "total": 7
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"query\":\"login\"}",
+        "{\"tabId\":\"tab-chat\"}",
+        "{\"tabId\":\"tab-chat\",\"query\":\"  \"}",
+        "{\"tabId\":\"tab-chat\",\"query\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "null"
+      ],
+      "results": [
+        "{\"matches\":[{\"itemId\":\"u1\",\"count\":0}],\"total\":0}",
+        "{\"matches\":[{\"count\":1}],\"total\":1}",
+        "{\"matches\":[]}",
+        "{\"total\":0}",
+        "null"
+      ]
+    }
+  },
   "taskStop": {
     "params": [
       {

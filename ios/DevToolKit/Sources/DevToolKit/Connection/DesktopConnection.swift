@@ -432,6 +432,12 @@ extension DesktopConnection {
         _ = try await request(ChatOp.stopTask, params: ChatTaskStopParams(tabId: tabId, taskId: taskId).json)
     }
 
+    /// `chat.search` (§8.23): which items of the whole chat match `query`, and how often.
+    public func searchChat(tabId: String, query: String) async throws -> ChatSearchResult {
+        let result = try await request(ChatOp.search, params: ChatSearchParams(tabId: tabId, query: String(query.prefix(ChatOp.maxSearchLength))).json)
+        return try decode(result, ChatSearchResult.parse)
+    }
+
     /// `chat.permissions` (§8.14): the allow, ask and deny rules of the chat's
     /// settings files. A remote project answers `.remote(code: "unsupported")`.
     public func chatPermissions(tabId: String) async throws -> [ChatPermissionSource] {

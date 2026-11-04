@@ -7,6 +7,7 @@ import { buildConversation, foldedLine, latestTodos, progressSteps, type Turn } 
 import { renderChatMarkdown } from './markdown'
 import { diffLines, diffStats, editPairs } from './diff'
 import DiffView from './DiffView'
+import type { TimelineReveal } from './useChatFind'
 
 interface Props {
   items: ChatItem[]
@@ -26,6 +27,8 @@ interface Props {
   /** Desk layout: background tasks still running; the last turn's card stays open for them. */
   backgroundTasks?: readonly ChatTask[]
   onStopTask?: (taskId: string) => void
+  /** Find in the thread: open whatever hides this item. */
+  reveal?: TimelineReveal | null
 }
 
 export interface TimelineFocus {
@@ -38,17 +41,18 @@ interface TimelineContextValue {
   focus: TimelineFocus | null
   /** True the first time a row claims a focus request; rows remounting later don't re-scroll. */
   claim: (focus: TimelineFocus) => boolean
+  reveal: TimelineReveal | null
 }
 
 const NO_TOOLS: ReadonlySet<string> = new Set()
 const NO_TASKS: readonly ChatTask[] = []
-const TimelineContext = createContext<TimelineContextValue>({ taskTools: NO_TOOLS, focus: null, claim: () => false })
+const TimelineContext = createContext<TimelineContextValue>({ taskTools: NO_TOOLS, focus: null, claim: () => false, reveal: null })
 
 const FLASH_MS = 1400
 
 export default function Timeline({
   items, busy, compacting, waiting, turnStartedAt, onOpenLink, taskTools = NO_TOOLS, focus = null, folded = false,
-  backgroundTasks = NO_TASKS, onStopTask
+  backgroundTasks = NO_TASKS, onStopTask, reveal = null
 }: Props): React.ReactElement {
   const rows = useMemo(() => folded ? [] : buildTimeline(items, busy), [items, busy, folded])
   const inBackground = backgroundTasks.length > 0
@@ -61,8 +65,9 @@ export default function Timeline({
       if (claimed.current >= request.seq) return false
       claimed.current = request.seq
       return true
-    }
-  }), [taskTools, focus])
+    },
+    reveal
+  }), [taskTools, focus, reveal])
   const activeTool = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i]
@@ -87,7 +92,7 @@ export default function Timeline({
         {folded
           ? blocks.map((block) => block.type === 'bash'
             ? <BashRow key={block.key} item={block.item} />
-            : <TurnBlock key={block.key} turn={block.turn} compacting={compacting} waiting={waiting} since={turnStartedAt} backgroundTasks={backgroundTasks} onStopTask={onStopTask} />)
+            : <TurnBlock key={block.key} turnKey={block.key} turn={block.turn} compacting={compacting} waiting={waiting} since={turnStartedAt} backgroundTasks={backgroundTasks} onStopTask={onStopTask} />)
           : rows.map((row) => <Row key={row.key} row={row} />)}
         {busy && !folded && <WorkingLine compacting={compacting} waiting={waiting} since={turnStartedAt} tool={activeTool} />}
       </div>
@@ -102,21 +107,38 @@ const Row = memo(function Row({ row }: { row: TimelineRow }): React.ReactElement
     case 'user':
       return <UserMessage item={item} />
     case 'text':
-      return <AssistantText text={item.text} streaming={item.streaming} />
+      return <AssistantText id={item.id} text={item.text} streaming={item.streaming} />
     case 'thinking':
-      return <Thinking text={item.text} streaming={item.streaming} />
+      return <Thinking id={item.id} text={item.text} streaming={item.streaming} />
     case 'tool':
       return <ToolRow tool={item} />
     case 'notice':
-      return <Notice text={item.text} tone={item.tone} />
+      return <Notice id={item.id} text={item.text} tone={item.tone} />
     case 'bash':
       return <BashRow item={item} />
   }
 })
 
+/**
+ * Opens a fold when find in the thread lands on something inside it: once per
+ * request, so you can close it again.
+ */
+function useReveal(contains: (reveal: TimelineReveal) => boolean, open: () => void): void {
+  const { reveal } = useContext(TimelineContext)
+  const handled = useRef(-1)
+  const latest = useRef({ contains, open })
+  latest.current = { contains, open }
+  useEffect(() => {
+    if (!reveal || handled.current >= reveal.seq || !latest.current.contains(reveal)) return
+    handled.current = reveal.seq
+    latest.current.open()
+  }, [reveal])
+}
+
 /** A `!command` you ran: output open by default, since you asked to see it. */
 function BashRow({ item }: { item: ChatBashItem }): React.ReactElement {
   const [open, setOpen] = useState(true)
+  useReveal((reveal) => reveal.item === item.id && reveal.detail, () => setOpen(true))
   const failed = !item.running && item.exitCode !== undefined && item.exitCode !== 0
   const status: ChatToolItem['status'] = item.running ? 'running' : failed ? 'error' : 'done'
   const meta = [
@@ -125,11 +147,11 @@ function BashRow({ item }: { item: ChatBashItem }): React.ReactElement {
   ].filter(Boolean).join(' · ')
   const hasOutput = Boolean(item.stdout || item.stderr)
   return (
-    <div className="text-sm">
+    <div className="text-sm" data-chat-item={item.id}>
       <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
         <StatusIcon status={status} />
         <span className="truncate font-mono text-text"><span className="text-accent">!</span> {firstLine(item.command, 200) ?? ''}</span>
-        {meta && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle">{meta}</span>}
+        {meta && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle" data-find-skip>{meta}</span>}
       </button>
       {open && (item.command.includes('\n') || hasOutput) && (
         <div className="ml-5 mt-1 mb-1.5 flex flex-col gap-1">
@@ -138,28 +160,28 @@ function BashRow({ item }: { item: ChatBashItem }): React.ReactElement {
           {item.stderr && <Pre tone={failed ? 'error' : undefined}>{item.stderr}</Pre>}
         </div>
       )}
-      {open && !item.running && !hasOutput && <div className="ml-5 text-xs text-text-subtle">No output</div>}
+      {open && !item.running && !hasOutput && <div className="ml-5 text-xs text-text-subtle" data-find-skip>No output</div>}
     </div>
   )
 }
 
 function UserMessage({ item }: { item: Extract<ChatItem, { kind: 'user' }> }): React.ReactElement {
   return (
-    <div className={`mt-3 first:mt-0 flex gap-2 ${item.queued ? 'opacity-60' : ''}`}>
+    <div className={`mt-3 first:mt-0 flex gap-2 ${item.queued ? 'opacity-60' : ''}`} data-chat-item={item.id}>
       <div className="flex-1 min-w-0 rounded-lg bg-surface-2 border-[0.5px] border-border px-3 py-2 text-base text-text whitespace-pre-wrap break-words">
         {item.text || (item.images > 0 ? '' : ' ')}
         {item.pictures && item.pictures.length > 0 && (
           <ToolImages images={item.pictures} className={item.text ? 'mt-2' : ''} />
         )}
         {item.images > (item.pictures?.length ?? 0) && (
-          <span className="inline-block mt-0.5 mr-1 text-xs text-text-muted">
+          <span className="inline-block mt-0.5 mr-1 text-xs text-text-muted" data-find-skip>
             {item.pictures?.length
               ? `+${item.images - item.pictures.length} more`
               : item.images === 1 ? '1 image' : `${item.images} images`}
           </span>
         )}
         {(item.queued || item.failed) && (
-          <div className={`mt-1 text-xs ${item.failed ? 'text-danger' : 'text-text-muted'}`}>
+          <div className={`mt-1 text-xs ${item.failed ? 'text-danger' : 'text-text-muted'}`} data-find-skip>
             {item.failed ? 'Not delivered — Claude stopped before reading it' : 'Queued — Claude reads it at its next step'}
           </div>
         )}
@@ -168,10 +190,11 @@ function UserMessage({ item }: { item: Extract<ChatItem, { kind: 'user' }> }): R
   )
 }
 
-const AssistantText = memo(function AssistantText({ text, streaming }: { text: string; streaming?: boolean }): React.ReactElement {
+const AssistantText = memo(function AssistantText({ id, text, streaming }: { id: string; text: string; streaming?: boolean }): React.ReactElement {
   const html = useMemo(() => renderChatMarkdown(text), [text])
   return (
     <div className={`note-preview chat-md text-base text-text break-words${streaming ? ' chat-streaming' : ''}`}
+      data-chat-item={id}
       // Sanitized by DOMPurify in renderChatMarkdown.
       dangerouslySetInnerHTML={{ __html: html }}
     />
@@ -182,12 +205,14 @@ const AssistantText = memo(function AssistantText({ text, streaming }: { text: s
 const LONG_THINKING = 280
 
 /** Thinking with text: usually a one-line progress update between calls, shown as is. */
-const Thinking = memo(function Thinking({ text, streaming }: { text: string; streaming?: boolean }): React.ReactElement {
+const Thinking = memo(function Thinking({ id, text, streaming }: { id: string; text: string; streaming?: boolean }): React.ReactElement {
   const [open, setOpen] = useState(false)
+  useReveal((reveal) => reveal.item === id, () => setOpen(true))
   const html = useMemo(() => renderChatMarkdown(text), [text])
   const long = text.length > LONG_THINKING
   return (
     <div
+      data-chat-item={id}
       className={`note-preview chat-md text-sm text-text-muted break-words${streaming ? ' chat-streaming' : ''}${long && !open ? ' line-clamp-3 cursor-pointer' : ''}`}
       title={long && !open ? 'Show all' : undefined}
       onClick={long && !open ? () => setOpen(true) : undefined}
@@ -197,14 +222,14 @@ const Thinking = memo(function Thinking({ text, streaming }: { text: string; str
   )
 })
 
-function Notice({ text, tone }: { text: string; tone: 'muted' | 'warning' | 'error' }): React.ReactElement {
+function Notice({ id, text, tone }: { id: string; text: string; tone: 'muted' | 'warning' | 'error' }): React.ReactElement {
   const color = tone === 'error'
     ? 'text-danger border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-danger)_8%,transparent)]'
     : tone === 'warning'
       ? 'text-warn border-[color-mix(in_srgb,var(--color-warn)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-warn)_8%,transparent)]'
       : 'text-text-muted border-transparent'
   return (
-    <div className={`text-sm whitespace-pre-wrap break-words rounded-md border px-2 py-1 ${color}`}>{text}</div>
+    <div className={`text-sm whitespace-pre-wrap break-words rounded-md border px-2 py-1 ${color}`} data-chat-item={id}>{text}</div>
   )
 }
 
@@ -270,20 +295,22 @@ const ToolRow = memo(function ToolRow({ tool, inGroup }: { tool: ChatToolItem; i
   const [open, setOpen] = useState(false)
   const { taskTools } = useContext(TimelineContext)
   const { ref, flash } = useFocusFlash(tool.id)
+  useReveal((reveal) => reveal.item === tool.id && reveal.detail, () => setOpen(true))
   const background = inBackground(tool, taskTools)
   const meta = useMemo(() => toolMeta(tool), [tool])
-  if (isTodo) return <TodoList tool={tool} />
+  if (isTodo) return <TodoList tool={tool} anchor={tool.id} />
   return (
     <div
       ref={ref}
       data-tool-id={tool.id}
+      data-chat-item={tool.id}
       className={`text-sm rounded-sm transition-colors duration-(--motion-med) ${flash ? 'bg-sel' : ''}`}
     >
       <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
         <StatusIcon status={background ? 'running' : tool.status} />
         <span className={`truncate ${tool.status === 'denied' ? 'text-text-subtle line-through decoration-text-subtle/50' : 'text-text-muted'}`}>{tool.label}</span>
         {(meta || background) && (
-          <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle tabular-nums">
+          <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle tabular-nums" data-find-skip>
             {[background ? 'in background' : undefined, meta].filter(Boolean).join(' · ')}
           </span>
         )}
@@ -334,6 +361,7 @@ function ToolGroup({ tools }: { tools: ChatToolItem[] }): React.ReactElement {
     openedFor.current = focus.seq
     setOpen(true)
   }, [focus, tools])
+  useReveal((reveal) => tools.some((tool) => tool.id === reveal.item), () => setOpen(true))
   const running = tools.some((tool) => tool.status === 'running' || tool.status === 'pending' || inBackground(tool, taskTools))
   const failed = tools.some((tool) => tool.status === 'error')
   const images = useMemo(() => tools.flatMap((tool) => tool.images ?? []), [tools])
@@ -354,16 +382,17 @@ function ToolGroup({ tools }: { tools: ChatToolItem[] }): React.ReactElement {
   )
 }
 
-function TodoList({ tool }: { tool: ChatToolItem }): React.ReactElement {
+/** `anchor`: find in the thread marks matches in it (not on the live card, which is one anchor). */
+function TodoList({ tool, anchor }: { tool: ChatToolItem; anchor?: string }): React.ReactElement {
   const todos = Array.isArray(tool.input.todos) ? tool.input.todos as Record<string, unknown>[] : []
   return (
-    <div className="text-sm rounded-md border-[0.5px] border-border bg-surface px-2.5 py-1.5 my-0.5">
+    <div className="text-sm rounded-md border-[0.5px] border-border bg-surface px-2.5 py-1.5 my-0.5" data-chat-item={anchor}>
       {todos.map((todo, index) => {
         const status = todo.status
         const text = String((status === 'in_progress' ? todo.activeForm : null) ?? todo.content ?? '')
         return (
           <div key={index} className="flex items-baseline gap-2 py-px">
-            <span className={`w-3 shrink-0 text-center ${status === 'completed' ? 'text-success' : status === 'in_progress' ? 'text-accent' : 'text-text-subtle'}`}>
+            <span data-find-skip className={`w-3 shrink-0 text-center ${status === 'completed' ? 'text-success' : status === 'in_progress' ? 'text-accent' : 'text-text-subtle'}`}>
               {status === 'completed' ? '✓' : status === 'in_progress' ? '▸' : '○'}
             </span>
             <span className={status === 'completed' ? 'text-text-subtle line-through' : status === 'in_progress' ? 'text-text' : 'text-text-muted'}>{text}</span>
@@ -431,7 +460,8 @@ function WorkingLine({ compacting, waiting, since, tool }: { compacting: boolean
 }
 
 /** Desk layout: your message, the work (a live card, or one folded line), then the answer. */
-const TurnBlock = memo(function TurnBlock({ turn, compacting, waiting, since, backgroundTasks, onStopTask }: {
+const TurnBlock = memo(function TurnBlock({ turnKey, turn, compacting, waiting, since, backgroundTasks, onStopTask }: {
+  turnKey: string
   turn: Turn
   compacting: boolean
   waiting: boolean
@@ -444,6 +474,7 @@ const TurnBlock = memo(function TurnBlock({ turn, compacting, waiting, since, ba
       {turn.user && <UserMessage item={turn.user} />}
       {turn.live
         ? <ProgressCard
+            turnKey={turnKey}
             turn={turn}
             compacting={compacting}
             waiting={waiting}
@@ -451,15 +482,15 @@ const TurnBlock = memo(function TurnBlock({ turn, compacting, waiting, since, ba
             backgroundTasks={turn.background ? backgroundTasks : NO_TASKS}
             onStopTask={onStopTask}
           />
-        : turn.work.length > 0 && <FoldedWork turn={turn} />}
-      {turn.answer.map((item) => <AssistantText key={item.id} text={item.text} streaming={item.streaming} />)}
-      {turn.tail.map((item) => <Notice key={item.id} text={item.text} tone={item.tone} />)}
+        : turn.work.length > 0 && <FoldedWork turnKey={turnKey} turn={turn} />}
+      {turn.answer.map((item) => <AssistantText key={item.id} id={item.id} text={item.text} streaming={item.streaming} />)}
+      {turn.tail.map((item) => <Notice key={item.id} id={item.id} text={item.text} tone={item.tone} />)}
     </>
   )
 })
 
 /** A finished turn's work as one line; open, it is the classic timeline of that turn. */
-function FoldedWork({ turn }: { turn: Turn }): React.ReactElement {
+function FoldedWork({ turnKey, turn }: { turnKey: string; turn: Turn }): React.ReactElement {
   const [open, setOpen] = useState(false)
   const { focus } = useContext(TimelineContext)
   const openedFor = useRef(-1)
@@ -469,14 +500,15 @@ function FoldedWork({ turn }: { turn: Turn }): React.ReactElement {
     openedFor.current = focus.seq
     setOpen(true)
   }, [focus, turn.work])
+  useReveal((reveal) => turn.work.some((item) => item.id === reveal.item), () => setOpen(true))
   const rows = useMemo(() => open ? buildTimeline(turn.work) : [], [open, turn.work])
   const failed = turn.work.some((item) => item.kind === 'tool' && item.status === 'error')
   return (
     <div className="text-sm">
-      <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
+      <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)} data-chat-item={`fold:${turnKey}`}>
         <ChevronRight size={12} className={`shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
         <span className="truncate text-text-muted">{foldedLine(turn)}</span>
-        {failed && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle">some calls failed</span>}
+        {failed && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle" data-find-skip>some calls failed</span>}
       </button>
       {open && (
         <div className="ml-1.5 mt-1 mb-1 flex flex-col gap-1.5 border-l border-border pl-3">
@@ -500,7 +532,8 @@ const CARD_STEPS = 8
  * answer. With `backgroundTasks` the turn has ended but work it started still runs:
  * a steady dot (Claude is idle), what runs and for how long, each with a Stop.
  */
-function ProgressCard({ turn, compacting, waiting, since, backgroundTasks, onStopTask }: {
+function ProgressCard({ turnKey, turn, compacting, waiting, since, backgroundTasks, onStopTask }: {
+  turnKey: string
   turn: Turn
   compacting: boolean
   waiting: boolean
@@ -528,8 +561,8 @@ function ProgressCard({ turn, compacting, waiting, since, backgroundTasks, onSto
     ? 'Answer below'
     : background ? 'Claude picks it up when it finishes' : "Folds into the answer when it's done · esc to stop"
   return (
-    <div className="rounded-lg border-[0.5px] border-border bg-surface-2 px-3 py-2.5 text-sm" data-testid="progress-card" data-background={background || undefined}>
-      <div className="flex items-center gap-2">
+    <div className="rounded-lg border-[0.5px] border-border bg-surface-2 px-3 py-2.5 text-sm" data-testid="progress-card" data-background={background || undefined} data-chat-item={`card:${turnKey}`}>
+      <div className="flex items-center gap-2" data-find-skip>
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${waiting ? 'bg-status-attention' : background ? 'bg-text-muted' : 'bg-text-muted desk-pulse'}`} />
         <span className="text-text">{label}</span>
         {elapsed && <span className="text-text-subtle tabular-nums">· {elapsed}</span>}
@@ -538,7 +571,7 @@ function ProgressCard({ turn, compacting, waiting, since, backgroundTasks, onSto
       {(shown.length > 0 || hidden > 0) && (
         <div className="mt-2 flex flex-col gap-1">
           {hidden > 0 && (
-            <button type="button" className="self-start text-xs text-text-subtle hover:text-text-muted cursor-pointer" onClick={() => setShowAll(true)}>
+            <button type="button" className="self-start text-xs text-text-subtle hover:text-text-muted cursor-pointer" onClick={() => setShowAll(true)} data-find-skip>
               {hidden === 1 ? '1 earlier step' : `${hidden} earlier steps`}
             </button>
           )}
@@ -546,7 +579,7 @@ function ProgressCard({ turn, compacting, waiting, since, backgroundTasks, onSto
             const last = index === shown.length - 1
             return (
               <div key={step.key} className="flex items-baseline gap-3 min-w-0">
-                <span className="w-9 shrink-0 text-right font-mono text-xs text-text-subtle tabular-nums">
+                <span className="w-9 shrink-0 text-right font-mono text-xs text-text-subtle tabular-nums" data-find-skip>
                   {step.at !== undefined && since !== undefined ? clock(step.at - since) : ''}
                 </span>
                 <span className={`min-w-0 break-words ${last && !waiting ? 'text-text' : step.calls ? 'text-text-subtle' : 'text-text-muted'}`}>{step.text}</span>
@@ -557,7 +590,7 @@ function ProgressCard({ turn, compacting, waiting, since, backgroundTasks, onSto
       )}
       {todos && <div className="mt-2"><TodoList tool={todos} /></div>}
       {background && (
-        <div className="mt-2 pt-2 border-t-[0.5px] border-border flex flex-col gap-1">
+        <div className="mt-2 pt-2 border-t-[0.5px] border-border flex flex-col gap-1" data-find-skip>
           {backgroundTasks.map((task) => (
             <div key={task.id} className="flex items-center gap-3 min-w-0" title={task.command ?? task.description}>
               <span className="w-9 shrink-0 text-right font-mono text-xs text-text-subtle tabular-nums">

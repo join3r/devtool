@@ -851,6 +851,8 @@ public enum ChatOp {
     public static let permissionsUpdate = "chat.permissions.update"
     /// `!command` (§8.17); parsed by `ChatBashParams`, not `ChatParams`.
     public static let bash = "chat.bash"
+    /// Find in the thread (§8.23); parsed by `ChatSearchParams`, not `ChatParams`.
+    public static let search = "chat.search"
     /// §8.20, behind `DesktopFeature.chatTasks`.
     public static let stopTask = "chat.task.stop"
 
@@ -862,6 +864,8 @@ public enum ChatOp {
     public static let maxRuleLength = 2000
     /// §8.17 limit, as `chat.send`'s.
     public static let maxBashLength = 32_000
+    /// §8.23 limit.
+    public static let maxSearchLength = 200
 }
 
 // MARK: - Parsing

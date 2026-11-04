@@ -20,6 +20,8 @@ import ColdCacheNotice from './ColdCacheNotice'
 import LoginCard from './LoginCard'
 import PermissionsDialog from './PermissionsDialog'
 import Composer from './Composer'
+import ChatFindBar from './ChatFindBar'
+import { useChatFind } from './useChatFind'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 import { takePendingPrompt } from '../promptBox'
 import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
@@ -385,12 +387,26 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
     void window.api.openExternal(url).catch(reportError)
   }, [reportError])
 
-  const hasPills = Object.keys(tasks).length > 0 || artifacts.length > 0
+  const rootRef = useRef<HTMLDivElement>(null)
+  const find = useChatFind({
+    tabId,
+    items: state.items,
+    busy: state.busy,
+    background: backgroundTasks.length > 0,
+    visible,
+    rootRef,
+    scrollRef,
+    onScrollAway: () => { stickRef.current = false }
+  })
+
+  const hasPills = Object.keys(tasks).length > 0 || artifacts.length > 0 || find.open
   const empty = state.items.length === 0 && !state.busy
   const starting = state.process === 'starting' && state.items.length === 0
 
   return (
     <div
+      ref={rootRef}
+      data-chat-tab={tabId}
       className="absolute inset-0 flex-col bg-bg"
       style={{ display: visible ? 'flex' : 'none' }}
       onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}
@@ -401,6 +417,7 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
         <div className="absolute top-2 right-3 z-(--z-sticky) flex items-start gap-1.5">
           <ArtifactIndicator artifacts={artifacts} onOpen={openArtifact} onOpenExternal={openExternal} />
           <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
+          {find.open && <ChatFindBar find={find} />}
         </div>
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto relative">
           {/* Room for the pills so they never cover the first message. */}
@@ -424,6 +441,7 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
                 folded
                 backgroundTasks={backgroundTasks}
                 onStopTask={stopTask}
+                reveal={find.reveal}
               />
             )}
           </div>

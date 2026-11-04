@@ -40,7 +40,8 @@ import Foundation
 ///   `-demoComposerText <text>` puts text in the composer (`/` shows the command
 ///   menu), and `-demoCommandSheet btw|permissions|tasks|workflow` opens that sheet (`btw` asks
 ///   `-demoMessage`, or a canned question; `workflow` is the task list with the
-///   first workflow's phases pushed).
+///   first workflow's phases pushed). `-demoFind <query>` opens the find bar on
+///   that query (§8.23) and `-demoFindSteps <n>` then goes n matches up.
 /// - `-pairLink <devtool://pair?d=…>` (Debug builds): open that pairing link at
 ///   launch, as if tapped; add `-autoConfirmPairing` to also press Pair. Lets
 ///   scripts pair the simulator without the system "Open in DevTool?" prompt.
@@ -113,6 +114,8 @@ struct LaunchOptions: Sendable {
     var demoAnswerDelay: Double?
     var demoComposerText: String?
     var demoCommandSheet: String?
+    var demoFind: String?
+    var demoFindSteps: Int?
     var pushGateway: URL?
     var fakePushToken: String?
     var mockAuth: String?
@@ -156,6 +159,8 @@ struct LaunchOptions: Sendable {
         demoAnswerDelay = value("-demoAnswerDelay").flatMap(Double.init)
         demoComposerText = value("-demoComposerText")
         demoCommandSheet = value("-demoCommandSheet")
+        demoFind = value("-demoFind")
+        demoFindSteps = value("-demoFindSteps").flatMap { Int($0) }
         pushGateway = (value("-pushGateway") ?? env["DEVTOOL_PUSH_GATEWAY"]).flatMap { URL(string: $0) }
         fakePushToken = (value("-fakePushToken") ?? env["DEVTOOL_FAKE_PUSH_TOKEN"])?.lowercased()
         #else

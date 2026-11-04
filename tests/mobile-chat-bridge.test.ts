@@ -475,6 +475,19 @@ describe('ChatBridge', () => {
     expect(await req('chat.bash', { tabId: 'nope', command: 'ls' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
   })
 
+  it('searches the whole chat, also before the phone\'s window (§8.23)', async () => {
+    const items: ChatItem[] = []
+    for (let i = 0; i < 100; i++) items.push(text(`t${i}`, i % 10 === 0 ? `Needle ${i}` : `hay ${i}`))
+    items.push({ kind: 'tool', id: 'tool1', name: 'Bash', label: 'Run it', input: { command: 'grep needle' }, status: 'done', result: 'needle needle' })
+    chats.update('tab-chat', (s) => ({ ...s, items }))
+    const res = await req('chat.search', { tabId: 'tab-chat', query: 'NEEDLE' })
+    expect(res).toMatchObject({ ok: true, result: { total: 13 } })
+    const { matches } = (res as { result: { matches: { itemId: string; count: number }[] } }).result
+    expect(matches[0]).toEqual({ itemId: 't0', count: 1 })
+    expect(matches.at(-1)).toEqual({ itemId: 'tool1', count: 3 })
+    expect(await req('chat.search', { tabId: 'nope', query: 'x' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+  })
+
   it('reads and edits /permissions rules in the chat\'s folder; remote projects are unsupported (§8.14)', async () => {
     expect(await req('chat.permissions', { tabId: 'tab-chat' })).toMatchObject({ ok: false, error: { code: 'unsupported' } })
     const rules: Record<string, string[]> = { allow: ['Read'], ask: [], deny: [] }

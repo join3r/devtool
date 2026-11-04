@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -1154,6 +1154,35 @@ function chatMessages(): unknown {
           text({ tabId: 'tab-chat' }),
           text({ tabId: 'tab-chat', command: ' \n ' }),
           text({ tabId: 'tab-chat', command: 'x'.repeat(32001) }),
+          'null'
+        ]
+      }
+    },
+    // §8.23: find in a chat thread.
+    search: {
+      params: [
+        text({ tabId: 'tab-chat', query: 'login' }),
+        text({ tabId: 'tab-chat', query: ' Fix the Bug ', extra: true }),
+        text({ tabId: 'tab-chat', query: 'x'.repeat(200) })
+      ].map((json) => ({ json, expected: parseChatSearchParams(JSON.parse(json)) })),
+      results: [
+        text({ matches: [{ itemId: 'u1', count: 1 }, { itemId: 't3', count: 4, extra: 1 }], total: 5 }),
+        text({ matches: [], total: 0 }),
+        text({ matches: [{ itemId: 'a9', count: 2 }], total: 7 })
+      ].map((json) => ({ json, expected: parseChatSearchResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ query: 'login' }),
+          text({ tabId: 'tab-chat' }),
+          text({ tabId: 'tab-chat', query: '  ' }),
+          text({ tabId: 'tab-chat', query: 'x'.repeat(201) }),
+          'null'
+        ],
+        results: [
+          text({ matches: [{ itemId: 'u1', count: 0 }], total: 0 }),
+          text({ matches: [{ count: 1 }], total: 1 }),
+          text({ matches: [] }),
+          text({ total: 0 }),
           'null'
         ]
       }

@@ -634,6 +634,20 @@ describe('MobileService chat.bash (SPEC.md §8.17)', () => {
   })
 })
 
+describe('MobileService chat.search (SPEC.md §8.23)', () => {
+  it('hands parsed params to the bridge and rejects a blank query', () => {
+    const requests: { op: string; params: unknown }[] = []
+    const env = pairedSetup({
+      chat: { request: (_phone, _id, op, params) => { requests.push({ op, params }) }, dropPhone: () => {}, dropAll: () => {}, projectsChanged: () => {} }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.search', params: { tabId: 't', query: 'Login', extra: 1 } })
+    expect(requests).toEqual([{ op: 'chat.search', params: { tabId: 't', query: 'Login' } }])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'chat.search', params: { tabId: 't', query: ' ' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'bad-request' } })
+    expect(requests).toHaveLength(1)
+  })
+})
+
 describe('MobileService chat.task.stop (SPEC.md §8.20)', () => {
   it('hands parsed params to the bridge and rejects a missing task id', () => {
     const requests: { op: string; params: unknown }[] = []

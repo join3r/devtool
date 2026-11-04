@@ -410,6 +410,15 @@ public actor MockDesktopConnection: DesktopConnection {
             guard chats[parsed.tabId] != nil else { throw notFound() }
             startBash(tabId: parsed.tabId, command: parsed.command)
             return .object([:])
+        case ChatOp.search:
+            let parsed: ChatSearchParams
+            do {
+                parsed = try ChatSearchParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard let chat = chats[parsed.tabId] else { throw notFound() }
+            return chat.search(parsed.query).json
         case ChatOp.permissions:
             guard chats[try string("tabId")] != nil else { throw notFound() }
             return ChatPermissionsResult(sources: permissionSources).json
@@ -1235,7 +1244,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.taskBusy, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
-            DesktopFeature.tokensUsage,
+            DesktopFeature.tokensUsage, DesktopFeature.chatSearch,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

@@ -65,6 +65,7 @@ import {
   parseChatCommandsParams,
   parseChatBtwParams,
   parseChatBashParams,
+  parseChatSearchParams,
   parseChatTaskStopParams,
   parseChatPermissionsParams,
   parseChatPermissionsUpdateParams,
@@ -294,6 +295,7 @@ const CHAT_PARAM_PARSERS: Record<string, (params: unknown) => ChatParams> = {
   [AppOp.ChatCommands]: parseChatCommandsParams,
   [AppOp.ChatBtw]: parseChatBtwParams,
   [AppOp.ChatBash]: parseChatBashParams,
+  [AppOp.ChatSearch]: parseChatSearchParams,
   [AppOp.ChatTaskStop]: parseChatTaskStopParams,
   [AppOp.ChatPermissions]: parseChatPermissionsParams,
   [AppOp.ChatPermissionsUpdate]: parseChatPermissionsUpdateParams

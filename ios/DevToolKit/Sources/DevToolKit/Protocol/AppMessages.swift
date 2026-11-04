@@ -237,6 +237,8 @@ public enum DesktopFeature {
     public static let queue = "queue"
     /// The desktop answers `chat.bash` (§8.17).
     public static let chatBash = "chat.bash"
+    /// The desktop answers `chat.search` (§8.23).
+    public static let chatSearch = "chat.search"
     /// The desktop sends the chat's `tasks` and answers `chat.task.stop` (§8.20).
     public static let chatTasks = "chat.tasks"
     /// The desktop answers `project.new` (§8.18).

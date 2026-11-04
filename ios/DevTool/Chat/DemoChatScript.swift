@@ -15,12 +15,21 @@ enum DemoChatScript {
         case tasks(workflow: String?)
     }
 
-    static func run(model: ChatModel, openDetail: (ChatItem) -> Void, setDraft: (String) -> Void, openSheet: (Sheet) -> Void) async {
+    static func run(model: ChatModel, openDetail: (ChatItem) -> Void, setDraft: (String) -> Void, openSheet: (Sheet) -> Void,
+                    find: (String) -> Void = { _ in }) async {
         let options = LaunchOptions.current
         guard options.demoToolDetail != nil || options.demoChatScript || options.demoComposerText != nil
-            || options.demoCommandSheet != nil else { return }
+            || options.demoCommandSheet != nil || options.demoFind != nil else { return }
         while model.state == nil || model.showingCache {
             guard (try? await Task.sleep(for: .milliseconds(100))) != nil else { return }
+        }
+        if let query = options.demoFind {
+            guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
+            find(query)
+            for _ in 0..<(options.demoFindSteps ?? 0) {
+                guard (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
+                model.stepSearch(-1)
+            }
         }
         if let text = options.demoComposerText {
             guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
