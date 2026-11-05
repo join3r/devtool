@@ -127,6 +127,7 @@ import { renameTaskIfStill } from '../../shared/task-name'
 import { registerTaskNameHandlers } from '../ipc/task-names'
 import { registerTokenUsageHandlers } from '../ipc/token-usage'
 import { TokenUsageIndex } from '../token-usage-index'
+import { readCodexModels } from '../agent-models'
 import type { TokenUsageReport } from '../../shared/token-usage'
 import { closeTask, findClosableTab, landTask, removeTabFromData } from '../mobile/close-task'
 import { setPinInData } from '../mobile/pin'
@@ -1350,7 +1351,8 @@ export class HostServices {
       },
       requestSecret: (input, signal) => this.requestSecretForAgent(input, signal),
       redact: (text) => redactSecrets(text, this.secretRequests.redactionList()),
-      reported: (taskIds) => this.delegation.reported(taskIds)
+      reported: (taskIds) => this.delegation.reported(taskIds),
+      modelsFor: (agent) => (agent === 'codex' ? readCodexModels() : null)
     }
   }
 

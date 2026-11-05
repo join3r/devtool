@@ -83,6 +83,32 @@ function addedContent(diff: string): string {
   return lines.every((line) => line === '' || line.startsWith('+')) ? lines.map((line) => line.slice(1)).join('\n') : diff
 }
 
+/**
+ * A Codex error message as one readable line. Codex often passes the API's own
+ * error body through as the message (`{"type":"error","error":{"message":…}}`);
+ * that body's message is the part a person wants to read.
+ */
+export function codexErrorText(message: string): string {
+  const text = message.trim()
+  if (text.startsWith('{')) {
+    try {
+      const body = obj(JSON.parse(text))
+      const inner = str(obj(body?.error)?.message) ?? str(body?.message) ?? str(body?.detail)
+      if (inner) return inner.trim()
+    } catch { /* not JSON after all */ }
+  }
+  return text
+}
+
+/**
+ * A failed turn's `codexErrorInfo` (a bare name like `usageLimitExceeded`, or an
+ * object keyed by one) as a snake_case code for the StopFailure hook.
+ */
+export function codexErrorCode(info: unknown): string {
+  const name = typeof info === 'string' ? info : obj(info) ? Object.keys(obj(info)!)[0] : undefined
+  return name ? name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase() : 'unknown'
+}
+
 export function codexStatus(status: unknown): ChatToolStatus {
   switch (status) {
     case 'completed': return 'done'

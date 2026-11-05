@@ -488,7 +488,9 @@ export function reduceAgentActivity(
       next.subagents = 0
       next.compacting = false
       next.turnStartedAt = undefined
-      next.waiting = { kind: 'error', label: describeStopFailure(error), since: now }
+      // DevTool's Codex and Pi sessions pass the error's own text; Claude's hook only a code.
+      const message = firstLine(str(body.error_message), 160)
+      next.waiting = { kind: 'error', label: message ?? describeStopFailure(error), since: now }
       statusEvent = 'hook-needs-input'
       break
     }

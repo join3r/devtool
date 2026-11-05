@@ -4,7 +4,7 @@ import type { ArchivedTask, ProjectArchive } from '../shared/archive'
 import { autopilotActive, autopilotBusy, autopilotLine, autopilotNeedsYou, autopilotTab } from '../shared/autopilot'
 import { landingNeedsYou, statusTabs, taskStatus } from '../shared/inbox-state'
 import { mapTaskInProject, taskDirectory, taskTabs } from '../shared/streams'
-import { AI_TAB_TYPES, type AiTabType, type Project, type ProjectsData, type Schedule, type ScheduleUnit, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
+import { AI_TAB_META, AI_TAB_TYPES, type AiTabType, type Project, type ProjectsData, type Schedule, type ScheduleUnit, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
 import {
   applyScheduleOp,
   cadenceError,
@@ -17,6 +17,7 @@ import {
   textError
 } from '../shared/schedules'
 import { hasMcpTools } from './agent-context'
+import { resolveModel, type AgentModel } from './agent-models'
 import { DEFAULT_SECRET_FILE, SECRET_REASON_MAX, isDotenvFile, safeSecretFile, validSecretName } from '../shared/secrets'
 import type { SecretOutcome } from './secrets/secret-requests'
 import { childProgress, childProgressLine, delegationTree, waitingOnChildren } from '../shared/delegation'
@@ -134,6 +135,8 @@ export interface DevtoolMcpDeps {
    * the wake-up message (`delegation-delivery.ts`) needn't tell it again.
    */
   reported?(taskIds: readonly string[]): void
+  /** The models `agent` offers, its preferred first; null (or absent) when DevTool can't tell, and `model` goes through unchecked. */
+  modelsFor?(agent: AiTabType): AgentModel[] | null
   now?(): number
 }
 
@@ -486,7 +489,7 @@ export const TOOLS: ToolDef[] = [
         prompt: { type: 'string', description: 'The new agent\'s first message: a complete, self-contained brief.' },
         streamId: { type: 'string', description: 'A stream from list_tasks. Default: your stream.' },
         agent: { type: 'string', enum: [...AI_TAB_TYPES], description: 'The agent that does the task. Default `claude`. `codex` and `pi` need turning on in DevTool\'s Settings.' },
-        model: { type: 'string', description: 'The model it starts on, as that agent names it (Claude: an alias like `opus` or `sonnet`, or a full model id; Codex: e.g. `gpt-5-codex`; Pi: `provider/model` from its config). Default: the agent\'s own default.' },
+        model: { type: 'string', description: 'The model it starts on, as that agent names it (Claude: an alias like `opus` or `sonnet`, or a full model id; Codex: a model id from its list, e.g. `gpt-6-luna`, or a short name like `luna` that DevTool turns into the best fitting id, and an unknown name is refused with the list; Pi: `provider/model` from its config). Default: the agent\'s own default.' },
         autopilot: { type: 'boolean', description: 'Default true. False leaves the finished task open for the user (state `idle`) instead of landing it.' },
         codexReview: { type: 'boolean', description: 'Autopilot only, default false: a Codex review of its diff before landing, its findings sent back to the agent once.' }
       },
@@ -704,8 +707,13 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const agentArg = str(args, 'agent') ?? 'claude'
       if (!(AI_TAB_TYPES as readonly string[]).includes(agentArg)) throw new ToolError(`\`agent\` must be one of: ${AI_TAB_TYPES.join(', ')}.`)
       const agent = agentArg as AiTabType
-      const model = str(args, 'model')?.trim() || undefined
-      if (model && (model.length > MODEL_LIMIT || /[\s\0]/.test(model))) throw new ToolError('`model` must be one model name, with no spaces.')
+      const asked = str(args, 'model')?.trim() || undefined
+      if (asked && (asked.length > MODEL_LIMIT || /[\s\0]/.test(asked))) throw new ToolError('`model` must be one model name, with no spaces.')
+      // A name the agent doesn't know would start a task whose every turn fails; a short one ("luna") means its id.
+      const known = asked ? deps.modelsFor?.(agent) ?? null : null
+      const resolved = asked && known ? resolveModel(asked, known, AI_TAB_META[agent].label) : null
+      if (resolved && !resolved.ok) throw new ToolError(resolved.error)
+      const model = resolved?.ok ? resolved.model : asked
       const result = await deps.startTask({
         projectId: project.id,
         streamId,
@@ -720,6 +728,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       if (!result.ok) throw new ToolError(result.error)
       const found = find(deps.peek(), result.taskId)
       const notes = [
+        resolved?.ok && resolved.note ? resolved.note : '',
         result.ownWorktree ? 'It works in a git worktree of its own.' : '',
         result.queued ? 'Another agent works in its folder, so it waits its turn (state `queued`).' : '',
         !result.autopilot && bool(args, 'autopilot', true)

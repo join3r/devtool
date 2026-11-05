@@ -165,6 +165,23 @@ describe('tools', () => {
     expect(json).toMatchObject({ agent: 'codex', model: 'gpt-5-codex' })
   })
 
+  it('start_task turns a short Codex model name into its id and refuses an unknown one', async () => {
+    const { deps, started } = fakeDeps(data())
+    const models = [{ id: 'gpt-6.1-sol' }, { id: 'gpt-reserve', hidden: true }, { id: 'gpt-6-luna' }, { id: 'gpt-5.6-luna' }]
+    deps.modelsFor = (agent) => (agent === 'codex' ? models : null)
+    const { json } = await call(deps, 'start_task', { prompt: 'Port it', agent: 'codex', model: 'luna' })
+    expect(started[0]).toMatchObject({ agent: 'codex', model: 'gpt-6-luna' })
+    expect(json.model).toBe('gpt-6-luna')
+    expect(json.note).toMatch(/"luna" is gpt-6-luna \(also fits: gpt-5.6-luna/)
+    const refused = await call(deps, 'start_task', { prompt: 'Port it', agent: 'codex', model: 'nova' })
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toMatch(/Codex has no model "nova"\. Its models: gpt-6.1-sol, gpt-6-luna, gpt-5.6-luna\./)
+    expect(started).toHaveLength(1)
+    // Claude's models aren't listed here: its name goes through as given.
+    await call(deps, 'start_task', { prompt: 'x', model: 'opus' })
+    expect(started[1]).toMatchObject({ agent: 'claude', model: 'opus' })
+  })
+
   it('send_to_task reaches only tasks the caller started', async () => {
     const { deps, sent } = fakeDeps(data())
     expect((await call(deps, 'send_to_task', { taskId: 'parent', message: 'hi' })).text).toMatch(/your own task/)

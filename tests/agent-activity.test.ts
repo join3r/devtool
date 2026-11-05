@@ -151,6 +151,14 @@ describe('reduceAgentActivity', () => {
     expect(activity?.turnStartedAt).toBeUndefined()
   })
 
+  it('labels a failed turn with the error\'s own text when the session passes it', () => {
+    const { activity } = fold([
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Go' },
+      { hook_event_name: 'StopFailure', error: 'bad_request', error_message: "The 'luna' model is not supported." }
+    ])
+    expect(describeActivity(activity, 'attention')).toBe("The 'luna' model is not supported.")
+  })
+
   it('counts subagents and ignores their tool calls for the label', () => {
     const { activity } = fold([
       { hook_event_name: 'UserPromptSubmit', prompt: 'Research' },

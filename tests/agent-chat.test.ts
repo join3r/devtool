@@ -165,6 +165,7 @@ afterEach(() => {
 function manager() {
   const events: ChatEvent[] = []
   const hooks: string[] = []
+  const bodies: Record<string, unknown>[] = []
   const fakes = { codex: path.resolve('tests/helpers/fake-codex.mjs'), pi: path.resolve('tests/helpers/fake-pi.mjs') }
   const deps: ChatManagerDeps = {
     sendToClient: (_clientId, channel, _tabId, _seq, event) => { if (channel === 'chat-event') events.push(event as ChatEvent) },
@@ -177,14 +178,14 @@ function manager() {
     bashSpawn: (config, command) => ({ file: '/bin/sh', args: ['-c', command], cwd: config.cwd }),
     claudeSpawn: () => { throw new Error('no claude here') },
     remoteExec: async () => '',
-    onHook: (_tabId, body) => { hooks.push(String(body.hook_event_name)) },
+    onHook: (_tabId, body) => { hooks.push(String(body.hook_event_name)); bodies.push(body) },
     onPromptResolved: () => {},
     onProcessChange: () => {},
     log: () => {}
   }
   const chats = new ClaudeChatManager(deps)
   managers.push(chats)
-  return { chats, events, hooks }
+  return { chats, events, hooks, bodies }
 }
 
 function config(agent: 'codex' | 'pi', sessionId: string): ChatTabConfig {
@@ -219,6 +220,28 @@ describe('codex chat session', () => {
     ])
     expect(done.usage).toMatchObject({ contextTokens: 1020, contextMax: 200000, fiveHour: { utilization: 12 }, sevenDay: { utilization: 40 } })
     expect(hooks).toEqual(expect.arrayContaining(['UserPromptSubmit', 'PermissionRequest', 'PreToolUse', 'PostToolUse', 'Stop']))
+  }, 20_000)
+
+  it('hands the turn\'s reply to the Stop hook', async () => {
+    const { chats, bodies } = manager()
+    await chats.attach('win', 'tab', config('codex', 'fresh-id'))
+    await expect.poll(() => chats.snapshot('tab')?.state.process).toBe('running')
+    await chats.send('tab', 'list files')
+    await expect.poll(() => chats.snapshot('tab')?.state.pending.length).toBe(1)
+    chats.respond('tab', chats.snapshot('tab')!.state.pending[0].id, { behavior: 'allow' })
+    await expect.poll(() => bodies.find((b) => b.hook_event_name === 'Stop')).toMatchObject({ last_assistant_message: 'Done.' })
+  }, 20_000)
+
+  it('reports a failed turn with its error, not as a plain stop', async () => {
+    const { chats, bodies } = manager()
+    await chats.attach('win', 'tab', config('codex', 'fresh-id'))
+    await expect.poll(() => chats.snapshot('tab')?.state.process).toBe('running')
+    await chats.setModel('tab', 'luna')
+    await chats.send('tab', 'hello')
+    const message = "The 'luna' model is not supported when using Codex with a ChatGPT account."
+    await expect.poll(() => bodies.find((b) => b.hook_event_name === 'StopFailure')).toMatchObject({ error: 'bad_request', error_message: message })
+    expect(bodies.some((b) => b.hook_event_name === 'Stop')).toBe(false)
+    expect(chats.snapshot('tab')!.state.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'notice', text: message, tone: 'error' })]))
   }, 20_000)
 
   it('resumes a known thread with its history', async () => {

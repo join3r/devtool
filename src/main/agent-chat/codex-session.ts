@@ -14,6 +14,8 @@ import { spawnJsonl, withContext, type AgentChatSession, type AgentSessionOption
 import {
   codexContextUsage,
   codexDefaultModel,
+  codexErrorCode,
+  codexErrorText,
   codexHistoryRows,
   codexItemRows,
   codexModels,
@@ -93,6 +95,9 @@ export class CodexChatSession implements AgentChatSession {
   private readonly output = new Map<string, string>()
   /** Rows by item id, so approvals can show what they are about. */
   private readonly rows = new Map<string, ChatToolItem>()
+  /** The turn's last reply text and last error, for the Stop/StopFailure hook. */
+  private turnReply: string | undefined
+  private turnError: string | undefined
   private model: string | undefined
   private effort: string | undefined
   private mode: string
@@ -255,9 +260,18 @@ export class CodexChatSession implements AgentChatSession {
         this.turnStarting = false
         this.output.clear()
         const status = str(turn?.status)
-        const error = str(obj(turn?.error)?.message)
+        const turnError = obj(turn?.error)
+        const raw = str(turnError?.message)
+        const error = raw ? codexErrorText(raw) : this.turnError
+        const reply = this.turnReply
+        this.turnReply = undefined
+        this.turnError = undefined
         o.onEvent({ t: 'turn', state: 'end', interrupted: status === 'interrupted', ...(status === 'failed' ? { error: error ?? 'The turn failed.' } : {}), at: Date.now() })
-        this.hook({ hook_event_name: 'Stop', session_id: this.threadId })
+        if (status === 'failed') {
+          this.hook({ hook_event_name: 'StopFailure', session_id: this.threadId, error: codexErrorCode(turnError?.codexErrorInfo), error_message: error ?? 'The turn failed.', ...(reply ? { last_assistant_message: reply } : {}) })
+        } else {
+          this.hook({ hook_event_name: 'Stop', session_id: this.threadId, ...(reply ? { last_assistant_message: reply } : {}) })
+        }
         return
       }
       case 'item/started':
@@ -275,6 +289,10 @@ export class CodexChatSession implements AgentChatSession {
           item.aggregatedOutput = this.output.get(itemId)
         }
         const rows = codexItemRows(item)
+        if (method === 'item/completed' && item.type === 'agentMessage') {
+          const text = str(item.text)?.trim()
+          if (text) this.turnReply = text
+        }
         this.emitRows(rows)
         for (const row of rows) {
           if (row.kind !== 'tool') continue
@@ -320,8 +338,10 @@ export class CodexChatSession implements AgentChatSession {
         o.onEvent({ t: 'meta', usage: codexRateLimits(p.rateLimits) })
         return
       case 'error': {
-        const message = str(obj(p.error)?.message)
-        if (!message) return
+        const raw = str(obj(p.error)?.message)
+        if (!raw) return
+        const message = codexErrorText(raw)
+        if (p.willRetry !== true) this.turnError = message
         o.onEvent({ t: 'notice', text: p.willRetry === true ? `${message} — retrying` : message, tone: p.willRetry === true ? 'warning' : 'error' })
         return
       }

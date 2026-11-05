@@ -12,6 +12,13 @@ let pendingTurn = null
 function runTurn(threadId, turnId, input) {
   notify('turn/started', { threadId, turn: { id: turnId, items: [], status: 'inProgress' } })
   notify('item/started', { threadId, turnId, item: { type: 'userMessage', id: 'u-1', clientId: input.clientUserMessageId, content: input.input } })
+  // A model the account can't use: the API's error body comes through as the message.
+  if (input.model === 'luna') {
+    const message = JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: "The 'luna' model is not supported when using Codex with a ChatGPT account.", code: 'model_not_found' } })
+    notify('error', { threadId, turnId, willRetry: false, error: { message, codexErrorInfo: 'badRequest' } })
+    notify('turn/completed', { threadId, turn: { id: turnId, items: [], status: 'failed', error: { message, codexErrorInfo: 'badRequest' } } })
+    return
+  }
   const command = { type: 'commandExecution', id: 'exec-1', command: '/bin/zsh -lc ls', status: 'inProgress', aggregatedOutput: null, exitCode: null }
   notify('item/started', { threadId, turnId, item: command })
   pendingTurn = { threadId, turnId, command }

@@ -216,7 +216,7 @@ export class PiChatSession implements AgentChatSession {
             o.onEvent({ t: 'item', item: row, at: Date.now() })
           }
         }
-        if (piMessageError(message)) this.hook({ hook_event_name: 'StopFailure', error: piMessageError(message) })
+        if (piMessageError(message)) this.hook({ hook_event_name: 'StopFailure', error: 'unknown', error_message: piMessageError(message) })
         return
       }
       case 'tool_execution_start': {
