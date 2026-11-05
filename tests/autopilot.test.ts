@@ -180,6 +180,20 @@ describe('AutopilotRunner', () => {
     expect(reviewCalls).toHaveLength(0)
   })
 
+  it('waits for background shells before it lands, though the turn is over', async () => {
+    startWith({ phase: 'working' })
+    fs.writeFileSync(path.join(own.worktreePath, 'b.txt'), 'new\n')
+    const shell = { background: 1, backgroundTasks: [{ id: 'b1', type: 'local_bash', label: 'npm test', startedAt: 0 }] }
+    activity.set('tab-1', 'working')
+    activity.set('tab-1', null, { lastAnswer: 'Tests are running.', ...shell })
+    await tick(60)
+    expect(landCalls).toHaveLength(0)
+    activity.set('tab-1', null, { lastAnswer: 'Tests are running.' })
+    const deadline = Date.now() + 2000
+    while (landCalls.length === 0 && Date.now() < deadline) await tick(10)
+    expect(landCalls).toEqual([{ summary: 'Tests are running.' }])
+  })
+
   it('follows a Codex or Pi chat as it does Claude\'s', async () => {
     startWith({ phase: 'working' }, { chat: 'codex-chat' })
     fs.writeFileSync(path.join(own.worktreePath, 'b.txt'), 'new\n')

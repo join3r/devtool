@@ -4,6 +4,7 @@ import {
   describeActivity,
   firstLine,
   reduceAgentActivity,
+  shellsRunning,
   summarizeTool,
   type AgentActivity
 } from '../src/shared/agent-activity'
@@ -228,7 +229,7 @@ describe('TabActivityRegistry', () => {
     expect(registry.getStatus('tab')).toBe('working')
   })
 
-  it('keeps a turn that leaves background tasks running working until they end', () => {
+  it('keeps a turn that leaves background agents running working until they end', () => {
     const registry = new TabActivityRegistry(() => 1)
     const hook = (body: Record<string, unknown>): void => {
       const update = registry.applyHook('tab', body)
@@ -236,13 +237,35 @@ describe('TabActivityRegistry', () => {
     }
     hook({ hook_event_name: 'UserPromptSubmit', prompt: 'Run the eval' })
     registry.working('tab')
-    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1, tasks: [{ id: 'b1', type: 'local_bash', description: 'xcodebuild test' }] })
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1, tasks: [{ id: 'a1', type: 'local_agent', description: 'Review the diff' }] })
     hook({ hook_event_name: 'Stop' })
     registry.stopped('tab')
     expect(registry.getStatus('tab')).toBe('working')
-    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Background · xcodebuild test')
+    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Waiting for Review the diff')
 
     hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 0 })
+    expect(registry.getStatus('tab')).toBeNull()
+  })
+
+  it('lets a turn end while background shells still run', () => {
+    const registry = new TabActivityRegistry(() => 1)
+    const hook = (body: Record<string, unknown>): void => {
+      const update = registry.applyHook('tab', body)
+      if (update?.statusEvent) registry.statusEvent('tab', update.statusEvent)
+    }
+    hook({ hook_event_name: 'UserPromptSubmit', prompt: 'Look at the logs' })
+    registry.working('tab')
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1, tasks: [{ id: 'b1', type: 'local_bash', description: 'pmset -g thermlog' }] })
+    hook({ hook_event_name: 'Stop' })
+    registry.stopped('tab')
+    expect(registry.getStatus('tab')).toBeNull()
+    expect(shellsRunning(registry.getActivity('tab'))).toBe(1)
+
+    // An agent starting after the turn holds it; the shell alone never did.
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 2, tasks: [{ id: 'b1', type: 'local_bash', description: 'pmset -g thermlog' }, { id: 'a1', type: 'local_agent', description: 'Phone side' }] })
+    expect(registry.getStatus('tab')).toBe('working')
+    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Waiting for Phone side +1')
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1, tasks: [{ id: 'b1', type: 'local_bash', description: 'pmset -g thermlog' }] })
     expect(registry.getStatus('tab')).toBeNull()
   })
 
@@ -262,7 +285,7 @@ describe('TabActivityRegistry', () => {
     expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Waiting for Stop hook')
 
     hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 2, tasks: [{ id: 'hook:h1', type: 'hook', description: 'Stop hook' }, { id: 'b1', type: 'local_bash', description: 'npm test' }] })
-    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Background · Stop hook +1')
+    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Waiting for Stop hook +1')
   })
 
   it('leaves a running turn alone when its background tasks end', () => {
@@ -306,14 +329,20 @@ describe('background tasks', () => {
   })
 
   it('updates when one task replaces another at the same count, without a status event', () => {
-    const first = reduceAgentActivity(undefined, level([{ id: 'b1', type: 'local_bash', description: 'build' }]), 1000)
+    const first = reduceAgentActivity(undefined, level([{ id: 'b1', type: 'local_agent', description: 'build' }]), 1000)
     expect(first.statusEvent).toBe('background-started')
-    const swapped = reduceAgentActivity(first.activity, level([{ id: 'b2', type: 'local_bash', description: 'test' }]), 2000)
+    const swapped = reduceAgentActivity(first.activity, level([{ id: 'b2', type: 'local_agent', description: 'test' }]), 2000)
     expect(swapped.changed).toBe(true)
     expect(swapped.statusEvent).toBeNull()
     expect(swapped.activity.backgroundTasks?.map((t) => t.id)).toEqual(['b2'])
-    const same = reduceAgentActivity(swapped.activity, level([{ id: 'b2', type: 'local_bash', description: 'test' }]), 3000)
+    const same = reduceAgentActivity(swapped.activity, level([{ id: 'b2', type: 'local_agent', description: 'test' }]), 3000)
     expect(same.changed).toBe(false)
+  })
+
+  it('starts no status change for a shell alone', () => {
+    const first = reduceAgentActivity(undefined, level([{ id: 'b1', type: 'local_bash', description: 'build' }]), 1000)
+    expect(first.statusEvent).toBeNull()
+    expect(reduceAgentActivity(first.activity, level([]), 2000).statusEvent).toBeNull()
   })
 
   it('labels a task without a description by its kind', () => {
@@ -328,7 +357,9 @@ describe('background tasks', () => {
     ])
     expect(backgroundWork(activity)).toBeNull()
     const stopped = reduceAgentActivity(activity, { hook_event_name: 'Stop' }, 9000).activity
-    expect(backgroundWork(stopped)).toEqual({ tasks: stopped.backgroundTasks, label: 'xcodebuild +1', since: 1001, hooksOnly: false })
+    // The agent holds the task, so it names it; the shell still counts.
+    const [shell, agent] = stopped.backgroundTasks ?? []
+    expect(backgroundWork(stopped)).toEqual({ tasks: [agent, shell], label: 'Review +1', since: 1001, hooksOnly: false })
     expect(backgroundWork({ ...stopped, waiting: { kind: 'error', label: 'x', since: 1 } })).toBeNull()
     expect(backgroundWork(reduceAgentActivity(stopped, level([]), 9500).activity)).toBeNull()
   })

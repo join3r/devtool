@@ -257,22 +257,49 @@ export interface BackgroundWork {
   hooksOnly: boolean
 }
 
-/** The row's line for it: "Background · xcodebuild", or "Waiting for Stop hook". */
+/** The row's line for it: "Waiting for Stop hook", "Waiting for Phone side of schedules +1". */
 export function backgroundLine(work: BackgroundWork): string {
-  return work.hooksOnly ? `Waiting for ${work.label}` : `Background · ${work.label}`
+  return `Waiting for ${work.label}`
 }
 
 export function backgroundWork(activity: AgentActivity | undefined): BackgroundWork | null {
   if (!activity || activity.turnStartedAt !== undefined || activity.waiting) return null
   const count = activity.background ?? 0
   if (count === 0) return null
-  const tasks = activity.backgroundTasks ?? []
+  // What holds the task (agents, workflows, hooks) names it before any shell.
+  const all = activity.backgroundTasks ?? []
+  const tasks = [...all.filter((task) => !isShellTask(task)), ...all.filter(isShellTask)]
   const first = tasks[0]
   const label = first
     ? (count > 1 ? `${first.label} +${count - 1}` : first.label)
     : (count === 1 ? '1 task' : `${count} tasks`)
   const hooksOnly = tasks.length === count && tasks.every((task) => task.type === 'hook')
-  return { tasks, label, since: first?.startedAt ?? activity.updatedAt, hooksOnly }
+  const since = all.length > 0 ? Math.min(...all.map((task) => task.startedAt)) : activity.updatedAt
+  return { tasks, label, since, hooksOnly }
+}
+
+/**
+ * Background shells (`local_bash`) don't hold a task in Working once its turn is
+ * over: as often as not one is a watcher or a command that never exits, and the
+ * answer is in. Agents, workflows and hooks do: Claude picks the turn back up
+ * when they finish. Autopilot still waits for the shells (`shellsRunning`), since
+ * landing ends the tab and everything running in it.
+ */
+export function isShellTask(task: Pick<BackgroundTask, 'type'>): boolean {
+  return task.type === 'local_bash'
+}
+
+/** Live background work that keeps the task working past its turn. A count with no list counts in full. */
+export function holdingBackground(activity: AgentActivity | undefined): number {
+  const count = activity?.background ?? 0
+  if (count === 0) return 0
+  const shells = (activity?.backgroundTasks ?? []).filter(isShellTask).length
+  return Math.max(0, count - shells)
+}
+
+/** Background shells still running, held or not. */
+export function shellsRunning(activity: AgentActivity | undefined | null): number {
+  return (activity?.backgroundTasks ?? []).filter(isShellTask).length
 }
 
 export function emptyActivity(now: number): AgentActivity {
@@ -417,9 +444,12 @@ export function reduceAgentActivity(
       if (count === before && sameBackgroundTasks(base.backgroundTasks, tasks)) return { activity: base, statusEvent: null, changed: false }
       next.background = count > 0 ? count : undefined
       next.backgroundTasks = count > 0 && tasks.length > 0 ? tasks : undefined
+      // Only work that holds the task counts (shells don't, see holdingBackground).
+      const heldBefore = holdingBackground(base)
+      const held = holdingBackground(next)
       if (next.turnStartedAt === undefined) {
-        if (before === 0 && count > 0) statusEvent = 'background-started'
-        else if (count === 0 && before > 0) statusEvent = 'background-done'
+        if (heldBefore === 0 && held > 0) statusEvent = 'background-started'
+        else if (held === 0 && heldBefore > 0) statusEvent = 'background-done'
       }
       break
     }

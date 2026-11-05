@@ -1,5 +1,5 @@
 import type { AgentActivity } from '../shared/agent-activity'
-import { describeActivity } from '../shared/agent-activity'
+import { describeActivity, isShellTask } from '../shared/agent-activity'
 import type { ArchivedTask, ProjectArchive } from '../shared/archive'
 import { autopilotActive, autopilotBusy, autopilotLine, autopilotNeedsYou, autopilotTab } from '../shared/autopilot'
 import { landingNeedsYou, statusTabs, taskStatus } from '../shared/inbox-state'
@@ -293,13 +293,22 @@ export function liveTaskState(task: Task, deps: Pick<DevtoolMcpDeps, 'statusOf' 
   if (status === 'attention') return { state: 'needs_you', detail: said ?? 'Its agent waits on an answer' }
   if (status === 'working') return { state: 'working', ...(autopilotLine(task.autopilot) ?? said ? { detail: autopilotLine(task.autopilot) ?? said } : {}) }
   if (autopilotBusy(task)) return { state: 'working', detail: autopilotLine(task.autopilot) ?? 'Autopilot is at work' }
+  const shells = shellLine(tabs.map(tab => deps.activityOf(tab.id)))
   // Between a turn and Autopilot's next step (review, landing): it moves on by itself.
-  if (autopilotActive(task)) return { state: 'working', detail: 'Autopilot is between steps' }
+  if (autopilotActive(task)) return { state: 'working', detail: shells ? `Autopilot waits for ${shells}` : 'Autopilot is between steps' }
   if (status === 'exited') return { state: 'exited', detail: 'Its agent exited' }
   if (autopilotNeedsYou(task)) return { state: 'needs_you', detail: `Autopilot handed it back: ${task.autopilot?.reason ?? 'no reason given'}` }
   const seen = tabs.some(tab => deps.activityOf(tab.id) !== null)
   if (!seen && now - (task.lastInteractedAt ?? 0) < STARTING_MS) return { state: 'starting' }
-  return { state: 'idle', detail: 'Its agent finished its turn and waits for a message' }
+  return { state: 'idle', detail: `Its agent finished its turn and waits for a message${shells ? `; ${shells} still runs` : ''}` }
+}
+
+/** "a background shell (npm test)", for shells still running past a finished turn; null when none. */
+function shellLine(activities: ReadonlyArray<AgentActivity | null>): string | null {
+  const shells = activities.flatMap(activity => (activity?.backgroundTasks ?? []).filter(isShellTask))
+  if (shells.length === 0) return null
+  const what = shells.length === 1 ? 'a background shell' : `${shells.length} background shells`
+  return `${what} (${shells[0].label}${shells.length > 1 ? ', …' : ''})`
 }
 
 function closedDetail(entry: ArchivedTask): string {

@@ -1,5 +1,5 @@
 import { classifyNotification, nextAiStatus, type AiStatusEvent } from '../shared/ai-status'
-import { reduceAgentActivity, type ActivityUpdate, type AgentActivity } from '../shared/agent-activity'
+import { holdingBackground, reduceAgentActivity, type ActivityUpdate, type AgentActivity } from '../shared/agent-activity'
 import type { TabStatusValue } from '../shared/types'
 
 /**
@@ -59,9 +59,12 @@ export class TabActivityRegistry {
     this.apply(tabId, (current) => nextAiStatus(current, 'hook-stopped', ctx))
   }
 
-  /** Live background tasks the tab's agent reported, 0 when none or unknown. */
+  /**
+   * Live background tasks that keep the tab working past its turn, 0 when none or
+   * unknown. Shells don't count (`holdingBackground`).
+   */
   backgroundTasks(tabId: string): number {
-    return this.activities.get(tabId)?.background ?? 0
+    return holdingBackground(this.activities.get(tabId))
   }
 
   /**

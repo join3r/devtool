@@ -1,4 +1,4 @@
-import type { AgentActivity } from '../shared/agent-activity'
+import { shellsRunning, type AgentActivity } from '../shared/agent-activity'
 import { autopilotActive, autopilotSupported, autopilotTab, stoppedAutopilot } from '../shared/autopilot'
 
 export { autopilotTab }
@@ -23,7 +23,7 @@ import type { TaskLandingManager } from './task-landing'
  * A stopped run is never picked up again: you take it from there.
  *
  * A turn is over when the tab leaves `working`, which waits for what the turn
- * left running: background agents and shells, and hooks still going after its
+ * left running: background agents and shells (see `statusOf`), and hooks still going after its
  * Stop. One of those is an `asyncRewake` review (the security-guidance plugin)
  * that can wake Claude with findings to fix; Autopilot acts after that turn.
  *
@@ -163,9 +163,19 @@ export class AutopilotRunner {
 
   // ---- watching ----------------------------------------------------------------------
 
+  /**
+   * The tab's status as Autopilot reads it: background shells keep a finished turn
+   * `working` here, though not in the inbox. Landing ends the tab, and with it a
+   * test run Claude would pick the turn back up for.
+   */
+  private statusOf(tabId: string): TabStatusValue {
+    const status = this.deps.statusOf(tabId)
+    return status === null && shellsRunning(this.deps.activityOf(tabId)) > 0 ? 'working' : status
+  }
+
   private tabChanged(tabId: string): void {
     const previous = this.lastStatus.get(tabId) ?? null
-    const status = this.deps.statusOf(tabId)
+    const status = this.statusOf(tabId)
     this.lastStatus.set(tabId, status)
     if (previous === status) return
     const found = this.findByTab(tabId)
@@ -216,7 +226,7 @@ export class AutopilotRunner {
     const { phase } = found.autopilot
     if (phase !== 'working' && phase !== 'fixing') return
     // A turn that resumed meanwhile, or a landing someone else started (✓ Done).
-    if (this.deps.statusOf(tabId) !== null || found.task.landing || this.deps.landing.isBusy(taskId) || this.acting.has(taskId)) return
+    if (this.statusOf(tabId) !== null || found.task.landing || this.deps.landing.isBusy(taskId) || this.acting.has(taskId)) return
     this.acting.add(taskId)
     try {
       await this.advance(found)
