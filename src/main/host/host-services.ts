@@ -16,7 +16,7 @@ import { isVisibleOnMobile } from '../mobile/inbox'
 import { resolveLocalTerminalSpawn } from '../resolve-local-terminal'
 import { HookServer, MCP_PATH } from '../hook-server'
 import { HookInjector, hookEndpointFor } from '../hook-injector'
-import { agentContextForTab } from '../agent-context'
+import { agentContextForTab, agentHookEnv } from '../agent-context'
 import { ClaudeChatManager } from '../claude-chat/chat-manager'
 import { SshConnectionManager } from '../ssh-connection-manager'
 import { CodexSessionManager } from '../codex-session-manager'
@@ -575,6 +575,7 @@ export class HostServices {
       log: (message) => this.logDebug(message),
       piExtensionPath: () => env.resourcePath(PI_EXTENSION_RESOURCE),
       agentContext: (tabId) => this.agentContext(tabId),
+      agentEnv: (tabId) => this.agentEnv(tabId),
       mcpEndpoint: (tabId) => this.mcpEndpoint(tabId),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
       onKill: (tabId) => this.shutdownNotebookKernel(tabId),
@@ -1666,7 +1667,21 @@ export class HostServices {
 
   /** What DevTool tells the agent in `tabId` about where it runs (`agent-context.ts`); null outside a project task. */
   agentContext(tabId: string): string | null {
-    return agentContextForTab(this.projectsStore.peek().projects, tabId, { port: this.hookServer.getPort(), token: this.hookServer.tabToken(tabId) })
+    return agentContextForTab(this.projectsStore.peek().projects, tabId, this.hookServer.isReady())
+  }
+
+  /**
+   * The env the agent in `tabId` lands and updates its task with (the note's
+   * command reads it): set on every spawn, so a restarted DevTool's new port and
+   * token reach a resumed session. Empty outside a local project task.
+   */
+  agentEnv(tabId: string): Record<string, string> {
+    if (!this.hookServer.isReady()) return {}
+    for (const project of this.projectsStore.peek().projects) {
+      if (!project.streams?.some(stream => stream.tasks.some(task => taskTabs(task).some(tab => tab.id === tabId)))) continue
+      return project.ssh ? {} : agentHookEnv(this.hookServer.getPort(), this.hookServer.tabToken(tabId))
+    }
+    return {}
   }
 
   private async answerHook(endpoint: string, tabId: string, body: Record<string, unknown>): Promise<string | undefined> {
@@ -1862,6 +1877,7 @@ export class HostServices {
     return new ClaudeChatManager({
       sendToClient: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       agentContext: (tabId) => this.agentContext(tabId),
+      agentEnv: (tabId) => this.agentEnv(tabId),
       mcpEndpoint: (tabId) => this.mcpEndpoint(tabId),
       redact: (event) => redactDeep(event, this.secretRequests.redactionList()),
       resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),

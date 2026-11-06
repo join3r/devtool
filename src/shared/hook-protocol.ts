@@ -19,6 +19,14 @@ export const HOOK_PORT_ENV = 'DEVTOOL_HOOK_PORT'
 export const HOOK_TOKEN_ENV = 'DEVTOOL_HOOK_TOKEN'
 
 /**
+ * Env var: the tab's own token (`HookServer.tabToken`) for its task's land /
+ * update. Set with {@link HOOK_PORT_ENV} on every agent spawn, and the agent's
+ * note names both rather than their values: a resumed Claude keeps the system
+ * prompt of its first start, while port and token change with every DevTool start.
+ */
+export const TASK_TOKEN_ENV = 'DEVTOOL_TASK_TOKEN'
+
+/**
  * Reject hook bodies larger than this (bytes). PostToolUse carries the whole
  * `tool_response` (a Read of a big file, long Bash output), so this is sized for
  * that rather than for the small lifecycle events. A dropped PostToolUse only

@@ -76,6 +76,8 @@ export interface ChatManagerDeps {
   log: (message: string) => void
   /** What the tab's agent is told about where it runs (`agent-context.ts`); null for none. */
   agentContext?: (tabId: string) => string | null
+  /** Env the tab's agent lands/updates its task with (`agentHookEnv`); set on every spawn, local only. */
+  agentEnv?: (tabId: string) => Record<string, string>
   /** Where the tab's agent reaches DevTool's MCP server (`devtool-mcp.ts`); null for nowhere. */
   mcpEndpoint?: (tabId: string) => DevtoolMcpEndpoint | null
   /**
@@ -642,7 +644,7 @@ export class ClaudeChatManager {
         }
       )
     } else {
-      env = { ...this.deps.localEnv(), [TAB_OWNER_ENV]: tabId }
+      env = { ...this.deps.localEnv(), ...this.deps.agentEnv?.(tabId), [TAB_OWNER_ENV]: tabId }
       executable = this.deps.resolveLocalClaude()
     }
 
@@ -702,7 +704,7 @@ export class ClaudeChatManager {
       cwd: config.cwd,
       sessionId: config.sessionId,
       executable: this.deps.resolveLocalAgent(agent),
-      env: { ...this.deps.localEnv(), [TAB_OWNER_ENV]: tabId },
+      env: { ...this.deps.localEnv(), ...this.deps.agentEnv?.(tabId), [TAB_OWNER_ENV]: tabId },
       extraArgs: agentExtraArgs(agent, this.deps.mcpEndpoint?.(tabId) ?? null, this.deps.agentContext?.(tabId) ?? null, config.extraArgs),
       model: runtime.model,
       permissionMode: runtime.permissionMode,

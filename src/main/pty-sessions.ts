@@ -64,6 +64,8 @@ export interface PtySessionsDeps {
   hookPort: () => number
   /** What the tab's agent is told about where it runs (`agent-context.ts`); Codex gets it at spawn. */
   agentContext?: (tabId: string) => string | null
+  /** Env the tab's agent lands/updates its task with (`agentHookEnv`), on every local agent spawn. */
+  agentEnv?: (tabId: string) => Record<string, string>
   /** Where the tab's agent reaches DevTool's MCP server (`devtool-mcp.ts`); null for nowhere. */
   mcpEndpoint?: (tabId: string) => DevtoolMcpEndpoint | null
   hookToken: () => string
@@ -500,7 +502,7 @@ export class PtySessions {
         spawnArgs = wrapped.args
         deps.log(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
       }
-      if (isAiAgentCommand(shell)) localEnv = { ...localEnv, [TAB_OWNER_ENV]: id }
+      if (isAiAgentCommand(shell)) localEnv = { ...localEnv, ...deps.agentEnv?.(id), [TAB_OWNER_ENV]: id }
       deps.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks, condaEnv)
     }
   }

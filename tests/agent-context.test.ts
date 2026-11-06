@@ -9,7 +9,7 @@ import type { Project, Stream, Task, WorkspaceConfig } from '../src/shared/types
 const streamWs: WorkspaceConfig = { worktreePath: '/repo/.worktrees/0.7.0', branchName: '0.7.0', baseBranch: 'main', relativeProjectPath: '' }
 const ownWs: WorkspaceConfig = { worktreePath: '/repo/.worktrees/0.7.0--fix', branchName: '0.7.0--fix', baseBranch: '0.7.0', relativeProjectPath: '' }
 const project = { name: 'Stem', directory: '/repo' }
-const hook = { port: 4321, token: 'tok', tabId: 'tab-1' }
+const hook = { tabId: 'tab-1' }
 
 describe('buildAgentContext', () => {
   it('tells a task in its own worktree that DevTool lands it, and how to ask', () => {
@@ -23,7 +23,8 @@ describe('buildAgentContext', () => {
     expect(note).toContain('`0.7.0--fix`, cut from `0.7.0`')
     expect(note).toContain('merges `0.7.0` into `main`')
     expect(note).toContain('Do not merge, rebase onto, cherry-pick, pull or switch branches yourself')
-    expect(note).toContain("http://127.0.0.1:4321/hook/land -H 'X-Tab-Id: tab-1' -H 'X-Devtool-Token: tok'")
+    // Port and token from the env, set on every spawn: a resumed Claude keeps its first system prompt.
+    expect(note).toContain(`"http://127.0.0.1:$DEVTOOL_HOOK_PORT/hook/land" -H 'X-Tab-Id: tab-1' -H "X-Devtool-Token: $DEVTOOL_TASK_TOKEN"`)
     expect(note).toContain('/hook/update')
     expect(note).toContain('"Merge to main"')
   })
@@ -95,10 +96,10 @@ describe('agentContextForTab', () => {
   it('finds the task owning the tab, and gives the land call only to an own worktree', () => {
     const stream: Stream = { id: 's1', name: '0.7.0', workspace: streamWs, taskWorktrees: true, tasks: [{ id: 't1', name: 'Fix', workspace: ownWs, panes: [{ tabs: [tab], activeTabId: 'tab-1', width: 1 }] }] }
     const p: Project = { ...fixtureProject({ id: 'p1', name: 'Stem', directory: '/repo' }), streams: [stream] }
-    const note = agentContextForTab([p], 'tab-1', { port: 1, token: 't' })
+    const note = agentContextForTab([p], 'tab-1', true)
     expect(note).toContain('task "Fix"')
     expect(note).toContain('/hook/land')
-    expect(agentContextForTab([p], 'nope', { port: 1, token: 't' })).toBeNull()
+    expect(agentContextForTab([p], 'nope', true)).toBeNull()
     expect(note).not.toContain('Autopilot')
     expect(agentContextForTab([{ ...p, ssh: { host: 'h', username: 'u', port: 22, remoteDir: '/r' } as Project['ssh'] }], 'tab-1')).toBeNull()
   })

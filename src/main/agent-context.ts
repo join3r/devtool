@@ -3,7 +3,7 @@ import path from 'path'
 import type { Project, Stream, Task } from '../shared/types'
 import { taskDirectory, taskTabs } from '../shared/streams'
 import { autopilotActive, autopilotSupported, autopilotTab } from '../shared/autopilot'
-import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../shared/hook-protocol'
+import { HOOK_PORT_ENV, HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER, TASK_TOKEN_ENV } from '../shared/hook-protocol'
 import { readWorktreeConfig } from './worktree-setup'
 
 /**
@@ -19,12 +19,19 @@ import { readWorktreeConfig } from './worktree-setup'
  * `developer_instructions`.
  */
 
-/** How the agent reaches DevTool's hook server to land or update its task. */
+/**
+ * How the agent reaches DevTool's hook server to land or update its task. Port
+ * and token come from the agent's env ({@link agentHookEnv}), not the note: the
+ * note outlives a DevTool restart (a resumed Claude keeps its first system
+ * prompt), the port and token don't.
+ */
 export interface AgentContextHook {
-  port: number
-  /** The tab's own token (`HookServer.tabToken`), good for this task's land/update only. */
-  token: string
   tabId: string
+}
+
+/** The env an agent's land/update command reads: the hook server's port and the tab's own token. */
+export function agentHookEnv(port: number, tabToken: string): Record<string, string> {
+  return { [HOOK_PORT_ENV]: String(port), [TASK_TOKEN_ENV]: tabToken }
 }
 
 /** A `.devtool/worktree.json` symlink in the task's worktree and where it points. */
@@ -57,7 +64,7 @@ function mergeAsk(base: string): string {
 }
 
 function hookCommand(hook: AgentContextHook, endpoint: string, body: string): string {
-  return `curl -s -X POST http://127.0.0.1:${hook.port}/hook/${endpoint} -H '${HOOK_TAB_ID_HEADER}: ${hook.tabId}' -H '${HOOK_TOKEN_HEADER}: ${hook.token}' -d '${body}'`
+  return `curl -s -X POST "http://127.0.0.1:$${HOOK_PORT_ENV}/hook/${endpoint}" -H '${HOOK_TAB_ID_HEADER}: ${hook.tabId}' -H "${HOOK_TOKEN_HEADER}: $${TASK_TOKEN_ENV}" -d '${body}'`
 }
 
 function sharedLines(links: SharedLink[]): string[] {
@@ -208,12 +215,12 @@ export function sharedLinksIn(root: string): SharedLink[] {
 
 /**
  * The note for the agent in `tabId`, or null when no project task owns the tab.
- * `hook` is omitted where the agent can't reach DevTool's hook server.
+ * `hook` is false where the agent can't reach DevTool's hook server.
  */
 export function agentContextForTab(
   projects: readonly Project[],
   tabId: string,
-  hook?: Omit<AgentContextHook, 'tabId'>
+  hook = false
 ): string | null {
   for (const project of projects) {
     for (const stream of project.streams ?? []) {
@@ -227,7 +234,7 @@ export function agentContextForTab(
         stream,
         task,
         dir: taskDirectory(project, task),
-        hook: task.workspace && hook ? { ...hook, tabId } : undefined,
+        hook: task.workspace && hook ? { tabId } : undefined,
         links: root ? sharedLinksIn(root) : [],
         mcp: hasMcpTools(taskTabs(task).find(tab => tab.id === tabId)?.type),
         // Only the chat Autopilot follows (`autopilotTab`).
