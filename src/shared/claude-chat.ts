@@ -364,6 +364,21 @@ export const USER_IMAGE_LIMIT = 8
 const SHOWN_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 const INPUT_STRING_LIMIT = 50_000
 
+/**
+ * The agent's last reply in full: every text after the last user message,
+ * oldest first. What a Codex or Pi chat gives back when DevTool reads a reply
+ * (the activity registry only keeps a one-line preview).
+ */
+export function lastReplyFromItems(items: readonly ChatItem[]): string | null {
+  const texts: string[] = []
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item.kind === 'user') break
+    if (item.kind === 'text' && item.text.trim()) texts.unshift(item.text.trim())
+  }
+  return texts.length > 0 ? texts.join('\n\n') : null
+}
+
 export function emptyChatState(): ChatState {
   return {
     items: [],

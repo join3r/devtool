@@ -8,6 +8,7 @@ import {
   emptyChatState,
   isChatPermissionMode,
   reduceChat,
+  lastReplyFromItems,
   CHAT_AGENT_FEATURES,
   type ChatAgent,
   type ChatEvent,
@@ -207,6 +208,12 @@ export class ClaudeChatManager {
 
   detachClient(clientId: string): void {
     for (const runtime of this.runtimes.values()) runtime.attached.delete(clientId)
+  }
+
+  /** The agent's last reply in full, from the live timeline; null when the tab has no runtime. */
+  lastReply(tabId: string): string | null {
+    const runtime = this.runtimes.get(tabId)
+    return runtime ? lastReplyFromItems(runtime.state.items) : null
   }
 
   attachedClients(tabId: string): Set<string> | undefined {

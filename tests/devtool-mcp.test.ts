@@ -371,7 +371,9 @@ describe('agent wiring', () => {
     expect(codexMcpArgs(endpoint)).toEqual([
       '-c', 'mcp_servers.devtool.url="http://127.0.0.1:5/mcp"',
       '-c', 'mcp_servers.devtool.http_headers={ "X-Tab-Id" = "t1", "X-Devtool-Token" = "tok" }',
-      '-c', 'mcp_servers.devtool.tool_timeout_sec=3660'
+      '-c', 'mcp_servers.devtool.tool_timeout_sec=3660',
+      ...['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score']
+        .flatMap(tool => ['-c', `mcp_servers.devtool.tools.${tool}.approval_mode="approve"`])
     ])
   })
 

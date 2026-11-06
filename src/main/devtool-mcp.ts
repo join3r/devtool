@@ -48,7 +48,8 @@ export interface DevtoolMcpEndpoint {
  * messaging one go through the tab's own permission mode (in auto mode Claude's
  * classifier decides, so an Autopilot run isn't stopped by them).
  */
-export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
+export const MCP_ALLOWED_TOOLS = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score'] as const
+export const MCP_ALLOW_RULES = MCP_ALLOWED_TOOLS.map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
 
 /** The server as Claude's MCP config (`--mcp-config`, the Agent SDK's `mcpServers`) names it. */
 export function claudeMcpServers(endpoint: DevtoolMcpEndpoint): Record<string, { type: 'http'; url: string; headers: Record<string, string> }> {
@@ -71,7 +72,10 @@ export function codexMcpArgs(endpoint: DevtoolMcpEndpoint): string[] {
     '-c', `mcp_servers.${MCP_SERVER_NAME}.url=${JSON.stringify(endpoint.url)}`,
     '-c', `mcp_servers.${MCP_SERVER_NAME}.http_headers={ ${headers} }`,
     // Codex gives a tool call 60 s by default; waiting on tasks or on the user takes longer.
-    '-c', `mcp_servers.${MCP_SERVER_NAME}.tool_timeout_sec=${WAIT_MAX_S + 60}`
+    '-c', `mcp_servers.${MCP_SERVER_NAME}.tool_timeout_sec=${WAIT_MAX_S + 60}`,
+    // Codex asks before any MCP tool not marked read-only; under its `never` approval policy (Autopilot, loop
+    // judges) that ask is a refusal, so a judge could never call `submit_score`. Same allow list as Claude's.
+    ...MCP_ALLOWED_TOOLS.flatMap(tool => ['-c', `mcp_servers.${MCP_SERVER_NAME}.tools.${tool}.approval_mode="approve"`])
   ]
 }
 const SERVER_VERSION = '1.0.0'

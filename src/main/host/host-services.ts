@@ -485,11 +485,8 @@ export class HostServices {
         startJudge: (input) => this.startLoopJudge(input),
         closeJudge: (project, judge) => this.archiveTaskFromMain(project, judge),
         sendFirstPrompt: (projectId, taskId, tabId, prompt, mode) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt, mode),
-        lastReply: async (project, task, tab) => {
-          const live = this.activityRegistry.getActivity(tab.id)?.lastAnswer ?? null
-          if (tab.type !== 'claude-chat' || !tab.sessionId) return live
-          return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, taskDirectory(project, task))) ?? live
-        }
+        lastReply: async (project, task, tab) =>
+          (await this.fullLastReply(tab, taskDirectory(project, task))) ?? this.activityRegistry.getActivity(tab.id)?.lastAnswer ?? null
       },
       log: (message) => this.logDebug(message)
     })
@@ -503,10 +500,7 @@ export class HostServices {
         return () => { for (const stop of stops) stop() }
       },
       send: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
-      lastReply: async (tab, dir) => {
-        if (tab.type !== 'claude-chat' || !tab.sessionId) return null
-        return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, dir))
-      },
+      lastReply: (tab, dir) => this.fullLastReply(tab, dir),
       isLanding: (taskId) => this.taskLanding.isBusy(taskId),
       log: (message) => this.logDebug(message)
     })
@@ -1361,10 +1355,7 @@ export class HostServices {
       callerMode: (tabId) => this.callerPermissionMode(tabId),
       newId: () => randomUUID(),
       sendToTask: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
-      lastReply: async (tab, dir) => {
-        if (tab.type !== 'claude-chat' || !tab.sessionId) return null
-        return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, dir))
-      },
+      lastReply: (tab, dir) => this.fullLastReply(tab, dir),
       requestSecret: (input, signal) => this.requestSecretForAgent(input, signal),
       redact: (text) => redactSecrets(text, this.secretRequests.redactionList()),
       reported: (taskIds) => this.delegation.reported(taskIds),
@@ -1657,6 +1648,18 @@ export class HostServices {
   }
 
   /** The permission mode a chat tab's agent runs in now; null for a terminal tab, whose mode main can't see. */
+  /**
+   * An agent tab's last reply in full: a Claude chat's from its transcript (it
+   * survives a restart), any other chat's from its live timeline.
+   */
+  private async fullLastReply(tab: Tab, dir: string): Promise<string | null> {
+    if (tab.type === 'claude-chat' && tab.sessionId) {
+      const fromTranscript = lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, dir))
+      if (fromTranscript) return fromTranscript
+    }
+    return isChatTabType(tab.type) ? this.chatManager.lastReply(tab.id) : null
+  }
+
   private callerPermissionMode(tabId: string): string | null {
     return this.chatManager.snapshot(tabId)?.state.info.permissionMode ?? null
   }
