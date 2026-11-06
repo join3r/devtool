@@ -133,14 +133,26 @@ export function badgeRun(runs: readonly StreamRunState[]): StreamRunState | unde
  * a folder that's gone) shows as a toast. `taskId` runs it in that task's
  * worktree (`StreamRuns.control`).
  */
+/** A run's command name, once main has reported the run. */
+function findStreamRunName(streamId: string, commandId: string): string | undefined {
+  return states[streamRunKey(streamId, commandId)]?.name
+}
+
 export async function controlStreamRun(
-  projectId: string, streamId: string, commandId: string, action: StreamRunAction, taskId?: string
+  projectId: string, streamId: string, commandId: string, action: StreamRunAction, taskId?: string, name?: string
 ): Promise<void> {
   const result = await (taskId
     ? window.api.streamRunControl(projectId, streamId, commandId, action, taskId)
     : window.api.streamRunControl(projectId, streamId, commandId, action))
     .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }))
   if (!result.ok) showToast(`Couldn't ${action === 'restart' ? 'restart' : action === 'stop' ? 'stop' : 'start'} it: ${result.error}`)
+  // Started from a menu, the run would otherwise only show in the status bar.
+  else if (action !== 'stop') {
+    const label = name ?? findStreamRunName(streamId, commandId)
+    showToast(`${action === 'restart' ? 'Restarted' : 'Started'} ${label ?? 'the command'}`, {
+      action: { label: 'Show logs', run: () => openStreamRunLogs({ projectId, streamId, commandId }) }
+    })
+  }
 }
 
 // ---- the logs view, the command picker and the commands dialog -----------------

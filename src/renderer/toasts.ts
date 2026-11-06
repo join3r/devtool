@@ -4,6 +4,8 @@ import { useSyncExternalStore } from 'react'
 export interface Toast {
   id: number
   message: string
+  /** One follow-up, e.g. "Show logs"; it dismisses the toast. */
+  action?: { label: string; run: () => void }
 }
 
 const TOAST_MS = 4000
@@ -15,13 +17,14 @@ function emit(): void {
   for (const listener of [...listeners]) listener()
 }
 
-export function showToast(message: string): void {
+export function showToast(message: string, options: { action?: Toast['action'] } = {}): void {
   // The same note twice in a row reads as one.
   if (toasts.some(toast => toast.message === message)) return
-  const toast = { id: nextId++, message }
+  const toast: Toast = { id: nextId++, message, action: options.action }
   toasts = [...toasts, toast]
   emit()
-  setTimeout(() => dismissToast(toast.id), TOAST_MS)
+  // One with an action stays a little longer: there is something to do with it.
+  setTimeout(() => dismissToast(toast.id), options.action ? TOAST_MS * 1.5 : TOAST_MS)
 }
 
 export function dismissToast(id: number): void {

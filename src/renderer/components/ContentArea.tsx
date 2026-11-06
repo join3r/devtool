@@ -383,14 +383,17 @@ export default function ContentArea(): React.ReactElement {
                 <button className={tunnelButtonClassName} onClick={() => setTunnelPopupOpen(true)} title="Tunnel">&#8596;</button>
               )}
               {canShowLocalTabs && openInIdeAvailable(selectedProject, desktopPlatform()) && (
-                <OpenInIdeButton
-                  editors={config?.externalEditors?.editors ?? []}
-                  defaultId={config?.externalEditors?.defaultId ?? null}
-                  folder={localProjectFolder(selectedProject, selectedTask, desktopPlatform())}
-                  projectId={selectedProject?.id}
-                  serverId={selectedProject?.host}
-                  onError={setOpenInIdeError}
-                />
+                // A narrow header keeps the task name: Open in IDE gives way first (⌘K has it too).
+                <span className="hidden @[520px]/hdr:contents">
+                  <OpenInIdeButton
+                    editors={config?.externalEditors?.editors ?? []}
+                    defaultId={config?.externalEditors?.defaultId ?? null}
+                    folder={localProjectFolder(selectedProject, selectedTask, desktopPlatform())}
+                    projectId={selectedProject?.id}
+                    serverId={selectedProject?.host}
+                    onError={setOpenInIdeError}
+                  />
+                </span>
               )}
               <DeskTaskTools project={selectedProject} task={selectedTask} />
             </>

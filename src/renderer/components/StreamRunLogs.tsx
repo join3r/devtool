@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import React, { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -12,6 +13,7 @@ import { bindCopyOnSelect } from './copyOnSelect'
 import { WEB_LINK_REGEX } from '../utils/terminalLinkAt'
 import { controlStreamRun, openStreamRunLogs, useStreamRun, useStreamRuns, type StreamRunLogsTarget } from '../streamRuns'
 import { StreamRunButtons, StreamRunStatusLabel } from './StreamRunControls'
+import { useDialog } from '../hooks/useDialog'
 
 /**
  * One command's run log: the run's own PTY, shown like a terminal (typing
@@ -36,6 +38,7 @@ export default function StreamRunLogs({ projectId, streamId, commandId, embedded
   const close = () => (embedded ? embedded.onClose() : openStreamRunLogs(null))
   const pick = (other: string) => (embedded ? embedded.onPick(other) : openStreamRunLogs({ projectId, streamId, commandId: other }))
   const isEmbedded = !!embedded
+  const cardRef = useDialog<HTMLDivElement>()
 
   // The stream went away (closed, deleted): nothing left to show.
   useEffect(() => {
@@ -44,11 +47,18 @@ export default function StreamRunLogs({ projectId, streamId, commandId, embedded
 
   useEffect(() => {
     if (isEmbedded) return
+    // Capture phase: the log is read-only, but its xterm still takes (and swallows) Escape when focused.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) close()
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (document.querySelector('[role="menu"], [role="listbox"]')) return
+      const modals = document.querySelectorAll('[aria-modal="true"]')
+      if (cardRef.current && modals[modals.length - 1] !== cardRef.current) return
+      e.preventDefault()
+      e.stopPropagation()
+      close()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [isEmbedded])
 
   // One xterm for the view's lifetime.
@@ -56,6 +66,8 @@ export default function StreamRunLogs({ projectId, streamId, commandId, embedded
     const host = hostRef.current
     if (!host || !config) return
     const term = new Terminal({
+      // Programs pick their own colours (a prompt in dark blue on the dark theme): xterm lifts any below WCAG AA.
+      minimumContrastRatio: 4.5,
       fontFamily: config.fontFamily,
       fontSize: config.fontSize + terminalZoomDelta,
       theme: buildXtermTheme(effectiveTerminalTheme, config.terminalColorScheme),
@@ -141,6 +153,10 @@ export default function StreamRunLogs({ projectId, streamId, commandId, embedded
 
   const body = (
     <div
+      ref={isEmbedded ? undefined : cardRef}
+      role={isEmbedded ? undefined : 'dialog'}
+      aria-modal={isEmbedded ? undefined : true}
+      aria-label={isEmbedded ? undefined : 'Run logs'}
       className={isEmbedded
         ? 'flex-1 min-h-0 bg-surface flex flex-col overflow-hidden'
         : 'w-[min(1100px,92vw)] h-[78vh] rounded-xl border border-border bg-surface shadow-pop flex flex-col overflow-hidden'}
@@ -164,11 +180,14 @@ export default function StreamRunLogs({ projectId, streamId, commandId, embedded
           />
         </span>
         <button
+          type="button"
           onClick={close}
-          className="bg-transparent border-0 text-text-muted cursor-pointer text-lg leading-none px-1 rounded-sm hover:text-text"
+          className="size-7 shrink-0 inline-flex items-center justify-center bg-transparent border-0 text-text-muted cursor-pointer rounded-md hover:text-text hover:bg-sel transition-colors duration-(--motion-fast)"
           title={isEmbedded ? 'Close the log (the app keeps running)' : 'Close (the app keeps running)'}
+          aria-label={isEmbedded ? 'Close the log' : 'Close'}
+          data-dialog-close
         >
-          &times;
+          <X size={15} />
         </button>
       </header>
       {others.length > 1 && (

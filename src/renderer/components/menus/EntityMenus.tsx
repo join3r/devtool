@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { confirmAction } from '../../confirmAction'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { isRemoteProject, isShellCommandProject, pinnedItemKey } from '../../../shared/types'
@@ -245,13 +246,13 @@ function ProjectMenuBody({ project, onDone, folderMissing, onRenameInline }: Pro
       )}
       {revealItem(revealFolder(projects, project.id), project.id, onDone)}
       <button className={dangerCls} onClick={act(() => {
-        if (!window.confirm(projectDeletePrompt(project))) return
-        void removeProject(project.id)
+        void confirmAction(projectDeletePrompt(project), { confirmLabel: 'Delete project', danger: true })
+          .then(ok => { if (ok) void removeProject(project.id) })
       })}>Delete…</button>
       {canTrashProjectFolder(project, folderMissing) && (
         <button className={dangerCls} onClick={act(() => {
-          if (!window.confirm(projectDeleteWithFolderPrompt(project))) return
-          void removeProject(project.id, { trashDirectory: true })
+          void confirmAction(projectDeleteWithFolderPrompt(project), { confirmLabel: 'Delete with folder', danger: true })
+            .then(ok => { if (ok) void removeProject(project.id, { trashDirectory: true }) })
         })}>Delete with folder…</button>
       )}
       <div className="border-t border-hair mt-1 px-2.5 pt-1.5 pb-1">

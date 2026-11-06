@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { confirmAction } from '../../confirmAction'
 import { Check, ChevronDown, Clock, Pin } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { pinnedItemKey, type PinnedItem, type Project, type Task } from '../../../shared/types'
@@ -93,7 +94,7 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
       {pin && (
         <button
           type="button"
-          className={`shrink-0 mr-1 size-[26px] flex items-center justify-center rounded-[7px] border-0 cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${pinned ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text'}`}
+          className={`shrink-0 mr-1 size-[26px] hidden @[440px]/hdr:flex items-center justify-center rounded-[7px] border-0 cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${pinned ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text'}`}
           title={pinned ? 'Unpin: the task leaves the Inbox while its agent works' : 'Pin: the task stays in the Inbox while its agent works'}
           aria-label={pinned ? 'Unpin from Inbox' : 'Pin to Inbox'}
           aria-pressed={pinned}
@@ -108,7 +109,8 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
       ) : (
         <button
           type="button"
-          className={ghostCls}
+          // In a narrow header the task name wins; Snooze stays on the row, its menu and ⌘⇧S.
+          className={`${ghostCls} hidden @[400px]/hdr:inline-block`}
           aria-haspopup="menu"
           aria-expanded={snoozeAt !== null}
           title={`Snooze (${formatShortcutForApp('CmdOrCtrl+Shift+S')})`}
@@ -187,8 +189,9 @@ export function DeskDoneButton({ project, task }: { project: Project; task: Task
           if (choice === 'land') void landingActions.land(project, task)
           else if (choice === 'update') void landingActions.update(project, task)
           else if (choice === 'keep') void done(project.id, task.id, 'keep')
-          else if (window.confirm(`Discard "${task.name}"? Its worktree and branch go, with every change not landed.`)) {
-            void done(project.id, task.id, 'discard')
+          else {
+            void confirmAction(`Discard "${task.name}"?\n\nIts worktree and branch go, with every change not landed.`, { confirmLabel: 'Discard', danger: true })
+              .then(ok => { if (ok) void done(project.id, task.id, 'discard') })
           }
         }}
       />

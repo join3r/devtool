@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, Plus } from 'lucide-react'
+import { ArrowUp, ChevronDown, Plus, X } from 'lucide-react'
 import { isChatTabType, type AppConfig, type Project, type PromptBoxAgent, type Tag } from '../../shared/types'
 import { dirBasename } from '../../shared/paths'
 import { Field, HelperText, SegCtl, menuItemCls } from './ui'
@@ -16,6 +16,7 @@ import { normalizeLoopSettings } from '../../shared/loop'
 import { AUTOPILOT_OFF, autopilotAvailable, loopAvailable, startsInOwnWorktree, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, type DeskAutopilot } from './desk/deskStart'
 import SameFolderWarning from './desk/SameFolderWarning'
 import { useAllTabStatuses } from '../context/TabStatusContext'
+import { useDialog } from '../hooks/useDialog'
 
 interface Props {
   projects: Project[]
@@ -56,6 +57,34 @@ interface TargetRow {
   adhoc: boolean
 }
 
+/**
+ * A task typed here and closed without starting (Escape, a click outside, the ×)
+ * is kept whole: prompt, pictures, where it was going (project or directory,
+ * stream), terminal or agent, and the agent's settings. It comes back only when
+ * the dialog opens on that same destination, so a prompt written for one project
+ * is never sent to another. Window-local and in memory: a restart starts empty.
+ */
+interface UnsentDraft {
+  prompt: string
+  images: Attachment[]
+  target: NewTaskTarget
+  streamId: string | null
+  kind: NewTaskKind
+  picked: PromptBoxAgent | null
+  mode: string
+  model: string
+  effort: string
+}
+/** One kept draft per destination: project or directory, and stream. */
+const unsentDrafts = new Map<string, UnsentDraft>()
+
+function draftKey(target: NewTaskTarget, streamId: string | null): string {
+  return `${target.kind === 'project' ? `p:${target.projectId}` : `d:${target.directory}`}|${streamId ?? ''}`
+}
+
+/** Tests only. */
+export function resetUnsentPromptForTests(): void { unsentDrafts.clear() }
+
 function sameTarget(a: NewTaskTarget | null, b: NewTaskTarget): boolean {
   if (!a || a.kind !== b.kind) return false
   return a.kind === 'project' && b.kind === 'project'
@@ -89,18 +118,25 @@ export default function NewTaskModal({
   onCreate,
   onClose
 }: Props): React.ReactElement {
+  const cardRef = useDialog<HTMLDivElement>()
   const [target, setTarget] = useState<NewTaskTarget | null>(() => {
     if (defaultProjectId && projects.some(p => p.id === defaultProjectId)) {
       return { kind: 'project', projectId: defaultProjectId }
     }
     return projects[0] ? { kind: 'project', projectId: projects[0].id } : null
   })
-  const [prompt, setPrompt] = useState(initialPrompt)
-  const [picked, setPicked] = useState<PromptBoxAgent | null>(null)
-  const [mode, setMode] = useState(config.promptBoxMode ?? '')
-  const [model, setModel] = useState('')
-  const [effort, setEffort] = useState('')
-  const [kind, setKind] = useState<NewTaskKind>('agent')
+  // The kept draft, when this dialog opens where it was going (and nothing else was handed in).
+  const [kept] = useState<UnsentDraft | null>(() => {
+    if (!target || initialPrompt || initialImages?.length) return null
+    return unsentDrafts.get(draftKey(target, defaultStreamId ?? null)) ?? null
+  })
+  const [prompt, setPrompt] = useState(() => initialPrompt || kept?.prompt || '')
+  const [restored, setRestored] = useState(() => kept !== null)
+  const [picked, setPicked] = useState<PromptBoxAgent | null>(kept?.picked ?? null)
+  const [mode, setMode] = useState(kept?.mode ?? config.promptBoxMode ?? '')
+  const [model, setModel] = useState(kept?.model ?? '')
+  const [effort, setEffort] = useState(kept?.effort ?? '')
+  const [kind, setKind] = useState<NewTaskKind>(kept?.kind ?? 'agent')
   // Off every time; "+ Codex review" starts the way Settings has it.
   const [autopilot, setAutopilot] = useState<DeskAutopilot>({ ...AUTOPILOT_OFF, review: config.enableCodex && !!config.autopilotReview })
   // Null: the target project's current stream.
@@ -179,7 +215,7 @@ export default function NewTaskModal({
   const promptText = agent || takesCommand ? prompt.trim() : ''
   // Only the chat view takes images; switching away hides them rather than dropping them.
   const takesImages = !!agent && isChatTabType(agent)
-  const attachments = useImageAttachments(takesImages, initialImages)
+  const attachments = useImageAttachments(takesImages, initialImages ?? kept?.images)
   const images = takesImages ? attachments.images : []
   // Images go with a prompt: one alone would name the task and branch after nothing.
   const imagesNeedPrompt = images.length > 0 && !promptText
@@ -223,7 +259,27 @@ export default function NewTaskModal({
 
   const focusPrompt = (): void => { requestAnimationFrame(() => promptRef.current?.focus()) }
 
-  const requestClose = (): void => { onClose() }
+  // Read at close time: the Escape listener below keeps the requestClose of the render it was bound in.
+  const latest = useRef<UnsentDraft | null>(null)
+  latest.current = target
+    ? { prompt, images: attachments.images, target, streamId: pickedStreamId, kind, picked, mode, model, effort }
+    : null
+  // Kept under where the dialog opened (that is where it looks next time), and
+  // under where it ended up when the destination was changed in it.
+  const openedKey = useRef(target ? draftKey(target, defaultStreamId ?? null) : null)
+  const forgetDraft = (): void => {
+    if (openedKey.current) unsentDrafts.delete(openedKey.current)
+    if (target) unsentDrafts.delete(draftKey(target, pickedStreamId))
+  }
+  const requestClose = (): void => {
+    const now = latest.current
+    forgetDraft()
+    if (now && (now.prompt.trim() || now.images.length)) {
+      // Under where it is going now: changed in the dialog, it belongs to the new destination only.
+      unsentDrafts.set(draftKey(now.target, now.streamId), now)
+    }
+    onClose()
+  }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -265,6 +321,7 @@ export default function NewTaskModal({
    */
   const handleCreate = (forceAutopilot = false): void => {
     if (!valid || !target) return
+    forgetDraft()
     const run = canAutopilot && promptText && (forceAutopilot || autopilot.on) ? autopilot : null
     if (choice === 'queue' && !run) { handleQueue(); return }
     const where = target.kind === 'project' && streamId ? { streamId } : {}
@@ -299,6 +356,7 @@ export default function NewTaskModal({
   /** The warning's Queue: the chat starts once the agents in its folder finish. */
   const handleQueue = (): void => {
     if (!valid || !target || target.kind !== 'project' || !agent || !promptText) return
+    forgetDraft()
     onCreate({
       target,
       ...(streamId ? { streamId } : {}),
@@ -375,11 +433,13 @@ export default function NewTaskModal({
 
   return (
     <>
-      <div data-modal className="ui-fade-in fixed inset-0 z-(--z-modal) flex items-start justify-center pt-[14vh] bg-black/45 backdrop-blur-[2px]" onClick={requestClose}>
+      <div data-modal className="ui-fade-in fixed inset-0 z-(--z-modal) flex items-start justify-center pt-[min(14vh,120px)] pb-4 bg-black/45 backdrop-blur-[2px]" onClick={requestClose}>
         <div
+          ref={cardRef}
           role="dialog"
+          aria-modal="true"
           aria-label="New task"
-          className="w-[640px] max-w-[90vw] rounded-xl border border-border bg-surface shadow-pop flex flex-col gap-3 p-4"
+          className="w-[640px] max-w-[90vw] max-h-full rounded-xl border border-border bg-surface shadow-pop flex flex-col gap-3 p-4"
           onClick={(e) => e.stopPropagation()}
         >
           <header className="flex items-center gap-1.5 min-w-0">
@@ -476,14 +536,19 @@ export default function NewTaskModal({
             <button
               type="button"
               onClick={requestClose}
-              className="bg-transparent border-0 text-text-muted cursor-pointer text-lg leading-none px-1 rounded-sm hover:text-text"
-              title="Close"
+              className="size-7 shrink-0 inline-flex items-center justify-center bg-transparent border-0 text-text-muted cursor-pointer rounded-md hover:text-text hover:bg-sel transition-colors duration-(--motion-fast)"
+              title="Close (Esc)"
+              aria-label="Close"
+              data-dialog-close
             >
-              &times;
+              <X size={15} />
             </button>
           </header>
 
+          {/* What can grow is bounded by the window, so the prompt and Create stay on screen at any size.
+              (The card itself doesn't scroll: its pickers and chip menus are popups that would be clipped.) */}
           {project && prompt.trim() !== '' && (
+            <div className="max-h-[28vh] overflow-y-auto shrink min-h-0">
             <SameFolderWarning
               project={project}
               stream={stream}
@@ -493,13 +558,14 @@ export default function NewTaskModal({
               choice={choice}
               onChoose={setPickedChoice}
             />
+            </div>
           )}
 
           <div
             className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)"
             {...attachments.dropProps}
           >
-            <AttachmentStrip images={images} onRemove={attachments.remove} />
+            <div className="max-h-[20vh] overflow-y-auto"><AttachmentStrip images={images} onRemove={attachments.remove} /></div>
             <textarea
               ref={promptRef}
               rows={terminal ? 1 : 3}
@@ -511,7 +577,7 @@ export default function NewTaskModal({
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={onPromptKeyDown}
               onPaste={attachments.onPaste}
-              className={`block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] ${terminal ? 'font-mono min-h-[40px]' : 'min-h-[82px]'} max-h-60 disabled:cursor-default`}
+              className={`block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] ${terminal ? 'font-mono min-h-[40px]' : 'min-h-[82px]'} max-h-[min(15rem,30vh)] disabled:cursor-default`}
             />
             <div className="flex items-end gap-1 px-1.5 pb-1.5">
               <div className="flex-1 min-w-0 flex items-center gap-0.5 flex-wrap">
@@ -544,6 +610,18 @@ export default function NewTaskModal({
             </div>
           </div>
 
+          {restored && (prompt.trim() !== '' || attachments.images.length > 0) && (
+            <div className="flex items-center gap-2 text-sm text-text-muted" data-testid="new-task-restored">
+              <span>Your unsent {kind === 'terminal' ? 'command' : 'prompt'} for this {target?.kind === 'dir' ? 'directory' : 'project'} is back.</span>
+              <button
+                type="button"
+                className="p-0 border-0 bg-transparent text-sm text-text underline underline-offset-2 decoration-[color-mix(in_srgb,currentColor_40%,transparent)] cursor-pointer hover:decoration-current"
+                onClick={() => { setPrompt(''); attachments.clear(); setRestored(false); forgetDraft(); focusPrompt() }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
           {imagesNeedPrompt ? (
             <HelperText>Add a prompt to send the images with.</HelperText>
           ) : !target ? (

@@ -11,6 +11,7 @@ import { paletteCommandEntities, runPaletteCommand } from '../../palette/palette
 import { useAllStreamRuns, useDismissedStreamRunCrashes } from '../../streamRuns'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import { useFileNewTask } from '../../hooks/useFileNewTask'
+import { useDialog } from '../../hooks/useDialog'
 import { resolveLandingTaskId } from '../../hooks/taskNavigation'
 import { showToast } from '../../toasts'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
@@ -49,6 +50,9 @@ export default function DeskCommandBar(): React.ReactElement | null {
   const [autopilot, setAutopilot] = useState<DeskAutopilot>(AUTOPILOT_OFF)
   const [files, setFiles] = useState<{ dir: string; list: string[] } | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  // Tab stays in the bar, Escape from any of its controls closes it, the app behind is inert.
+  // Focus goes back through setPaletteReturnFocus, not the dialog hook.
+  const cardRef = useDialog<HTMLDivElement>({ onEscape: () => close(), open, restoreFocus: false })
   const mirrorRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const returnFocus = useRef<HTMLElement | null>(null)
@@ -250,7 +254,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
       onMouseDown={e => { if (e.target === e.currentTarget) close() }}
       data-testid="command-bar"
     >
-      <div role="dialog" aria-label="Command bar" className="w-full max-w-[760px] bg-surface-2 text-text rounded-[14px] ui-pop-in border border-line shadow-pop overflow-hidden flex flex-col max-h-[76vh]">
+      <div ref={cardRef} role="dialog" aria-modal="true" aria-label="Command bar" className="w-full max-w-[760px] bg-surface-2 text-text rounded-[14px] ui-pop-in border border-line shadow-pop overflow-hidden flex flex-col max-h-[76vh]">
         <div className="px-[18px] py-4 flex flex-col gap-3 border-b border-hair">
           <div className="relative text-[16px] leading-[1.6]">
             <div ref={mirrorRef} aria-hidden className="absolute inset-0 overflow-hidden whitespace-pre-wrap break-words pointer-events-none text-text">

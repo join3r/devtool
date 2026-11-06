@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
+import { confirmAction } from '../confirmAction'
 import { ChevronRight, GitBranch } from 'lucide-react'
 import type { GitRepoStatus, GitStatusResult, GitStatusEntry } from '../../shared/types'
 import { gitEntryPaths } from '../../shared/types'
@@ -358,7 +359,8 @@ function RepoPanel({ repo, title, projectDir, projectId, onFileClick, canReveal 
         danger: true,
         disabled: busy,
         onSelect: () => {
-          if (window.confirm(`Discard your changes to "${name}"? This can't be undone.`)) void handleDiscard(gitEntryPaths(entry))
+          void confirmAction(`Discard your changes to "${name}"?\n\nThis can't be undone.`, { confirmLabel: 'Discard changes', danger: true })
+            .then(ok => { if (ok) void handleDiscard(gitEntryPaths(entry)) })
         }
       })
     }

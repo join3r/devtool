@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Bot, FileCode, GitCompare, Globe, NotebookPen, Sparkles, SquareTerminal, StickyNote } from 'lucide-react'
+import { Bot, FileCode, GitCompare, Globe, NotebookPen, Sparkles, SquareTerminal, StickyNote, X } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
 import { isRenamableTab } from '../../shared/types'
@@ -254,7 +254,9 @@ export default function TabBar({
               )}
               {tab.id !== mainTabId && (
                 <button
-                  className="bg-transparent border-0 text-text-muted cursor-pointer text-md px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)"
+                  type="button"
+                  aria-label={`Close ${tab.title}`}
+                  className="size-5 inline-flex items-center justify-center bg-transparent border-0 text-text-muted cursor-pointer rounded-sm shrink-0 hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-(--motion-fast)"
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -262,7 +264,7 @@ export default function TabBar({
                   }}
                   title={`Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`}
                 >
-                  &times;
+                  <X size={12} />
                 </button>
               )}
             </div>

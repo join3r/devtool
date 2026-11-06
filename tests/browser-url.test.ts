@@ -11,6 +11,14 @@ describe('normalizeBrowserUrl', () => {
     expect(normalizeBrowserUrl('example.com')).toBe('https://example.com')
   })
 
+  it('uses http for a local dev server', () => {
+    expect(normalizeBrowserUrl('localhost:3000')).toBe('http://localhost:3000')
+    expect(normalizeBrowserUrl('localhost')).toBe('http://localhost')
+    expect(normalizeBrowserUrl('127.0.0.1:8080/app')).toBe('http://127.0.0.1:8080/app')
+    expect(normalizeBrowserUrl('mybox.local:5173')).toBe('http://mybox.local:5173')
+    expect(normalizeBrowserUrl('localhost.example.com')).toBe('https://localhost.example.com')
+  })
+
   it('trims whitespace before normalizing', () => {
     expect(normalizeBrowserUrl('  example.com/test  ')).toBe('https://example.com/test')
   })

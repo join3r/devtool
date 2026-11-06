@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { confirmAction } from '../../confirmAction'
 import { useApp } from '../../context/AppContext'
 import { openEntityDialog } from '../../entityActions'
 import { closeArchivedView, getArchivedView, type ArchivedViewTarget } from '../archivedViewTarget'
@@ -42,15 +43,19 @@ export function useDoneRowActions(): DoneRowActions {
       })
     },
     deleteTask: (projectId, entry) => {
-      if (!window.confirm(`Delete "${entry.task.name}" permanently? It can't be reopened afterwards. The agent's own session files are kept.`)) return
-      if (getArchivedView()?.id === entry.task.id) closeArchivedView()
-      void deleteArchived(projectId, { tasks: [entry.task.id] })
+      void confirmAction({ title: `Delete "${entry.task.name}" permanently?`, message: 'It can\'t be reopened afterwards. The agent\'s own session files are kept.', confirmLabel: 'Delete', danger: true }).then(ok => {
+        if (!ok) return
+        if (getArchivedView()?.id === entry.task.id) closeArchivedView()
+        void deleteArchived(projectId, { tasks: [entry.task.id] })
+      })
     },
     deleteStream: (projectId, entry) => {
       const count = entry.stream.tasks.length + entry.doneTasks.length
-      if (!window.confirm(`Delete stream "${entry.stream.name}" and its ${count} ${count === 1 ? 'task' : 'tasks'} permanently? It can't be reopened afterwards. Its branch and the agents' session files are kept.`)) return
-      if (getArchivedView()?.id === entry.stream.id) closeArchivedView()
-      void deleteArchived(projectId, { streams: [entry.stream.id] })
+      void confirmAction({ title: `Delete stream "${entry.stream.name}" and its ${count} ${count === 1 ? 'task' : 'tasks'} permanently?`, message: 'It can\'t be reopened afterwards. Its branch and the agents\' session files are kept.', confirmLabel: 'Delete', danger: true }).then(ok => {
+        if (!ok) return
+        if (getArchivedView()?.id === entry.stream.id) closeArchivedView()
+        void deleteArchived(projectId, { streams: [entry.stream.id] })
+      })
     }
   }), [showArchived, reopenTask, reopenStream, deleteArchived])
 }

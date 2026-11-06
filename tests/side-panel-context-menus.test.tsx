@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { GitStatusResult } from '../src/shared/types'
 
 void React
@@ -36,7 +36,7 @@ afterEach(() => {
 })
 
 describe('notes right-click menu', () => {
-  it('opens, renames and deletes (after asking)', () => {
+  it('opens, renames and deletes (after asking)', async () => {
     render(<NotesList />)
     fireEvent.contextMenu(screen.getByText('Ideas'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Open' }))
@@ -54,11 +54,12 @@ describe('notes right-click menu', () => {
     fireEvent.contextMenu(screen.getByText('Ideas'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
     expect(confirm).toHaveBeenCalled()
+    await Promise.resolve()
     expect(app.deleteNote).not.toHaveBeenCalled()
     confirm.mockReturnValue(true)
     fireEvent.contextMenu(screen.getByText('Ideas'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
-    expect(app.deleteNote).toHaveBeenCalledWith('p1', 'n1')
+    await waitFor(() => expect(app.deleteNote).toHaveBeenCalledWith('p1', 'n1'))
   })
 })
 
@@ -72,7 +73,7 @@ describe('git panel right-click menu', () => {
   }
   status.repos = [{ path: '', staged: status.staged, unstaged: status.unstaged, untracked: status.untracked }]
 
-  it('reveals a file, and discards only after asking', () => {
+  it('reveals a file, and discards only after asking', async () => {
     render(<GitStatus gitStatus={status} projectDir="/repo" onFileClick={vi.fn()} />)
     fireEvent.contextMenu(screen.getByText('src/a.ts'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Reveal in Finder' }))
@@ -81,10 +82,10 @@ describe('git panel right-click menu', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     fireEvent.contextMenu(screen.getByText('src/a.ts'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Discard changes…' }))
-    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', '', ['src/a.ts'], undefined)
+    await waitFor(() => expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', '', ['src/a.ts'], undefined))
   })
 
-  it('gives each nested repo its own block, with repo-relative rows and operations', () => {
+  it('gives each nested repo its own block, with repo-relative rows and operations', async () => {
     const entry = { relativePath: 'lib/x/b.ts', status: 'M' as const }
     const nested: GitStatusResult = {
       staged: [], unstaged: [entry], untracked: [], summary: {} as GitStatusResult['summary'],
@@ -95,7 +96,7 @@ describe('git panel right-click menu', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     fireEvent.contextMenu(screen.getByText('b.ts'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Discard changes…' }))
-    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', 'lib/x', ['lib/x/b.ts'], undefined)
+    await waitFor(() => expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', 'lib/x', ['lib/x/b.ts'], undefined))
   })
 
   it('shows why a repo was skipped instead of a commit box', () => {

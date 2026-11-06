@@ -91,7 +91,7 @@ const actionCls = 'h-6 px-2 inline-flex items-center gap-1 rounded-md border-0 b
 
 export default function DeskRow({
   entry, kind, agent, activity, background = null, diff, selected, jumpNumber, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onTogglePin, onHover, rename,
-  depth = 0, childLine, bubbled
+  depth = 0, childLine, bubbled, hideProject = false
 }: {
   entry: InboxEntry
   kind: DeskRowKind
@@ -138,6 +138,8 @@ export default function DeskRow({
   childLine?: { text: string; expanded: boolean; onToggle: () => void }
   /** In Needs you only because this task under it needs you. */
   bubbled?: InboxEntry
+  /** Under its project's group head, or with the column scoped to it: the name would only repeat. */
+  hideProject?: boolean
 }): React.ReactElement {
   const { task, project, stream } = entry
   const nested = depth > 0
@@ -149,6 +151,23 @@ export default function DeskRow({
     ? { lead: 'Needs secret:', text: secret.reason ? `${secret.name} · ${secret.reason}` : secret.name }
     : preview(kind, entry, agent, activity, now, bubbled)
   const unread = entry.unread && kind !== 'working'
+  // Nothing to say above the title (project shown elsewhere, main stream): no meta line; the marks end the title line.
+  const bareMeta = (nested || hideProject) && stream.isMain
+  // State dots and lines changed: on the meta line, or at the end of the title line when there is none.
+  const marks = (
+    <span className={`${bareMeta ? 'ml-auto self-center pl-1 text-xs text-text-muted' : ''} shrink-0 tabular-nums flex items-center gap-1.5 ${checking ? '' : 'group-hover:invisible group-has-[:focus-visible]:invisible'} ${jumpNumber !== undefined ? '[body.meta-held_&]:invisible' : ''}`}>
+      {/* Background work: a steady dot, since the agent itself is idle. */}
+      {kind === 'working' && (inBackground
+        ? <span className="w-[7px] h-[7px] rounded-full bg-status-working" role="img" aria-label="background" data-testid="desk-row-background" />
+        : <span className="w-[7px] h-[7px] rounded-full bg-status-working desk-pulse" role="img" aria-label="working" />)}
+      {unread && <span className="w-[7px] h-[7px] rounded-full bg-answered shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-answered)_18%,transparent)]" role="img" aria-label="unread" />}
+      {diff && (diff.added > 0 || diff.deleted > 0) && (
+        <span className="font-mono" title={`${diff.added} lines added, ${diff.deleted} removed${diff.files ? ` in ${diff.files === 1 ? '1 file' : `${diff.files} files`}` : ''}`} data-testid="desk-row-diff">
+          <span className="text-running">+{formatLineCount(diff.added)}</span> <span className="text-crashed">−{formatLineCount(diff.deleted)}</span>
+        </span>
+      )}
+    </span>
+  )
   return (
     <div
       className={[
@@ -170,6 +189,25 @@ export default function DeskRow({
       data-checked={checked || undefined}
       data-depth={nested ? depth : undefined}
     >
+      {/* The row's own action: a real button under the content, so Tab, Enter and Space and screen
+          readers get "open this task" while the tile and hover actions stay buttons of their own.
+          Its click bubbles to the row's onClick, which also takes ⌘/⇧ for ticking. */}
+      {!rename && (
+        <button
+          type="button"
+          className="absolute inset-0 w-full h-full p-0 m-0 rounded-[10px] border-0 bg-transparent cursor-pointer outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-border-focus)]"
+          aria-label={`${task.name}, ${project.name}${kind === 'needsYou' ? ', needs you' : unread ? ', unread' : kind === 'working' ? ', working' : kind === 'snoozed' ? ', snoozed' : ''}`}
+          aria-current={selected ? 'true' : undefined}
+          onKeyDown={(e) => {
+            if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+              e.preventDefault()
+              const r = e.currentTarget.getBoundingClientRect()
+              onContextMenu({ ...e, clientX: r.left + 24, clientY: r.top + 24, preventDefault: () => {}, stopPropagation: () => {} } as unknown as React.MouseEvent)
+            }
+          }}
+          data-testid="desk-row-open"
+        />
+      )}
       {selected && !checked && (
         <span className="absolute left-1 top-3 bottom-3 w-[3px] rounded-full bg-text" aria-hidden="true" />
       )}
@@ -187,7 +225,7 @@ export default function DeskRow({
           aria-checked={checked}
           aria-label={`Select ${task.name}`}
           className={[
-            'shrink-0 w-6 h-6 flex items-center justify-center p-0 rounded-md cursor-pointer border',
+            'relative z-[1] shrink-0 w-6 h-6 flex items-center justify-center p-0 rounded-md cursor-pointer border',
             checked ? 'bg-accent border-accent text-accent-ink' : 'bg-transparent border-border-strong text-transparent hover:border-text-muted'
           ].join(' ')}
           onClick={(e) => { e.stopPropagation(); onCheck() }}
@@ -198,36 +236,26 @@ export default function DeskRow({
       ) : showTile && !nested && (
         <button
           type="button"
-          className="shrink-0 p-0 border-0 bg-transparent cursor-pointer rounded-md"
+          className="relative z-[1] shrink-0 p-0 border-0 bg-transparent cursor-pointer rounded-md"
           title={`Show only ${project.name}`}
           onClick={(e) => { e.stopPropagation(); onScopeProject(project) }}
         >
           <ProjectTileBadge project={project} theme={theme} size={24} />
         </button>
       )}
-      <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
-        <div className="flex justify-between gap-2 text-xs text-text-muted">
+      {/* Clicks fall through the text to the row's button; the controls inside stay clickable. */}
+      <div className={`relative z-[1] flex-1 min-w-0 flex flex-col gap-[3px] ${rename ? '' : 'pointer-events-none [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_a]:pointer-events-auto [&_[data-usage]]:pointer-events-auto'}`}>
+        {!bareMeta && <div className="flex justify-between gap-2 text-xs text-text-muted">
           <span className="overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
-            {nested
+            {nested || hideProject
               ? !stream.isMain && <span className="font-mono">{stream.name}</span>
               : <>
                 <span className="font-medium text-text-muted">{project.name}</span>
                 {!stream.isMain && <> › <span className="font-mono">{stream.name}</span></>}
               </>}
           </span>
-          <span className={`shrink-0 tabular-nums flex items-center gap-1.5 ${checking ? '' : 'group-hover:invisible'} ${jumpNumber !== undefined ? '[body.meta-held_&]:invisible' : ''}`}>
-            {/* Background work: a steady dot, since the agent itself is idle. */}
-            {kind === 'working' && (inBackground
-              ? <span className="w-[7px] h-[7px] rounded-full bg-status-working" aria-label="background" data-testid="desk-row-background" />
-              : <span className="w-[7px] h-[7px] rounded-full bg-status-working desk-pulse" aria-label="working" />)}
-            {unread && <span className="w-[7px] h-[7px] rounded-full bg-answered shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-answered)_18%,transparent)]" aria-label="unread" />}
-            {diff && (diff.added > 0 || diff.deleted > 0) && (
-              <span className="font-mono" title={`${diff.added} lines added, ${diff.deleted} removed${diff.files ? ` in ${diff.files === 1 ? '1 file' : `${diff.files} files`}` : ''}`} data-testid="desk-row-diff">
-                <span className="text-running">+{formatLineCount(diff.added)}</span> <span className="text-crashed">−{formatLineCount(diff.deleted)}</span>
-              </span>
-            )}
-          </span>
-        </div>
+          {marks}
+        </div>}
         {rename ? (
           <input
             autoFocus
@@ -250,10 +278,11 @@ export default function DeskRow({
               {task.name}
             </span>
             <WorkPlaceMark place={taskWorkPlace(project, stream, task)} />
-            {pinned && <Pin size={11} className="shrink-0 self-center text-text-subtle" aria-label="pinned" />}
+            {pinned && <Pin size={11} className="shrink-0 self-center text-text-subtle" role="img" aria-label="pinned" />}
             {autopilotActive(task) && <AutopilotMark />}
             {/* Under the hover actions, which cover the line above: the chart stays reachable. */}
-            {!offline && <span className="ml-auto self-end shrink-0 pl-1"><TaskUsagePills task={task} /></span>}
+            {!offline && <span data-usage className={`${bareMeta ? '' : 'ml-auto'} self-end shrink-0 pl-1`}><TaskUsagePills task={task} /></span>}
+            {bareMeta && marks}
           </span>
         )}
         {inBackground && background ? (
@@ -295,7 +324,7 @@ export default function DeskRow({
         )}
       </div>
       <div
-        className={`ui-pop-in absolute right-2 top-1.5 hidden ${checking ? '' : 'group-hover:flex'} items-center gap-px p-0.5 rounded-lg bg-field border-[0.5px] border-border-strong shadow-pop`}
+        className={`ui-pop-in absolute z-[2] right-2 top-1.5 hidden ${checking ? '' : 'group-hover:flex group-has-[:focus-visible]:flex'} items-center gap-px p-0.5 rounded-lg bg-field border-[0.5px] border-border-strong shadow-pop`}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -330,7 +359,7 @@ function WorkPlaceMark({ place }: { place: TaskWorkPlace }): React.ReactElement 
     ? place.branch ? `Own git worktree · ${place.branch}` : 'Own git worktree, made when it starts'
     : place.kind === 'stream' ? `Stream's git worktree · ${place.branch}` : 'Project folder, no worktree'
   return (
-    <span className="shrink-0 self-center flex text-text-subtle" title={label} aria-label={label} data-testid="desk-row-workplace" data-place={place.kind}>
+    <span className="shrink-0 self-center flex text-text-subtle" title={label} role="img" aria-label={label} data-testid="desk-row-workplace" data-place={place.kind}>
       {place.kind === 'folder' ? <Folder size={11} /> : <GitBranch size={11} />}
     </span>
   )

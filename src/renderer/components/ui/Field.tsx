@@ -1,7 +1,8 @@
 import React from 'react'
+import { useBlockLabel } from './labelContext'
 
 const fieldCls =
-  'h-(--ctl-h) px-2.5 rounded-md bg-field border border-border text-base text-text ' +
+  'h-(--ctl-h) px-2.5 rounded-md bg-field border border-control text-base text-text ' +
   'focus:border-border-focus focus:shadow-focus outline-none disabled:opacity-50 ' +
   'placeholder:text-text-subtle'
 
@@ -12,15 +13,17 @@ export const Field = React.forwardRef<HTMLInputElement, InputProps>(function Fie
   { className, ...rest },
   ref
 ) {
-  return <input ref={ref} className={`${fieldCls} ${className ?? ''}`} {...rest} />
+  const labelledBy = useBlockLabel(!!(rest['aria-label'] || rest['aria-labelledby'] || rest.id))
+  return <input ref={ref} aria-labelledby={labelledBy} className={`${fieldCls} ${className ?? ''}`} {...rest} />
 })
 
 type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement>
 
 /** Standard dropdown, same geometry as Field. Native option lists on Windows ignore CSS — conda pickers use ThemedSelect. */
 export function Select({ className, children, ...rest }: SelectProps): React.ReactElement {
+  const labelledBy = useBlockLabel(!!(rest['aria-label'] || rest['aria-labelledby'] || rest.id))
   return (
-    <select className={`${fieldCls} cursor-pointer ${className ?? ''}`} {...rest}>
+    <select aria-labelledby={labelledBy} className={`${fieldCls} cursor-pointer ${className ?? ''}`} {...rest}>
       {children}
     </select>
   )

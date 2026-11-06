@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useId } from 'react'
+import { BlockLabelContext } from './labelContext'
 
 interface Props {
   /** Sentence-case control label */
@@ -12,11 +13,12 @@ interface Props {
 
 /** A labelled control inside a FormGroup. */
 export default function SetBlock({ label, sub, divider, children }: Props): React.ReactElement {
+  const labelId = useId()
   return (
     <div className={`flex flex-col gap-1.5 ${divider ? 'pt-2.5 border-t border-border' : ''}`}>
-      {label && <div className="text-base text-text">{label}</div>}
+      {label && <div id={labelId} className="text-base text-text">{label}</div>}
       {sub && <div className="text-xs text-text-muted">{sub}</div>}
-      {children}
+      <BlockLabelContext.Provider value={label ? labelId : undefined}>{children}</BlockLabelContext.Provider>
     </div>
   )
 }

@@ -76,6 +76,8 @@ export function useSshInstallTerminal(): SshInstallTerminal {
   useEffect(() => {
     if (!shown || termRef.current || !hostRef.current) return
     const term = new Terminal({
+      // Programs pick their own colours (a prompt in dark blue on the dark theme): xterm lifts any below WCAG AA.
+      minimumContrastRatio: 4.5,
       fontFamily: initial.current.fontFamily,
       fontSize: 12,
       theme: initial.current.theme,

@@ -396,6 +396,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
     const termTheme = buildXtermTheme(effectiveTerminalTheme, config.terminalColorScheme)
 
     const term = new Terminal({
+      // Programs pick their own colours (a prompt in dark blue on the dark theme): xterm lifts any below WCAG AA.
+      minimumContrastRatio: 4.5,
       fontFamily: config.fontFamily,
       fontSize: config.fontSize + terminalZoomDelta,
       theme: termTheme,

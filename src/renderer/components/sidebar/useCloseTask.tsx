@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react'
+import { confirmAction } from '../../confirmAction'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import { isEphemeralProject } from '../../../shared/types'
@@ -94,10 +95,10 @@ export function useCloseTask(): {
     if (!await settleChildTasks(projects, projectId, taskId, (tabId) => tabStatusStore.getStatus(tabId))) return
     const lands = canLandTask(project, task)
     if (lands && remove) {
-      if (!confirmed && !window.confirm(taskRemoveQuestion(task))) return
+      if (!confirmed && !await confirmAction(taskRemoveQuestion(task), { confirmLabel: 'Remove', danger: true })) return
     } else if (!lands) {
       const question = taskCloseQuestion(task, (tabId) => tabStatusStore.getStatus(tabId))
-      if (question && !window.confirm(question)) return
+      if (question && !await confirmAction(question, { confirmLabel: 'Close anyway' })) return
     }
     // The last task of a hidden ad-hoc project takes the project with it, and any
     // worktree stream it still has: that gets the stream's pre-flight first.

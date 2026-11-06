@@ -1,4 +1,5 @@
 import React, { useCallback, useRef } from 'react'
+import { confirmAction } from '../../confirmAction'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { Project, StreamMergeResult, TaskLandingResult } from '../../../shared/types'
@@ -79,7 +80,7 @@ export function useCloseStream(): {
     if (!project || !stream || stream.isMain) return
     const statusOf = (tabId: string) => tabStatusStore.getStatus(tabId)
     const question = streamCloseQuestion(stream, statusOf)
-    if (question && !window.confirm(question)) return
+    if (question && !await confirmAction(question, { confirmLabel: 'Close stream' })) return
 
     const own = stream.tasks.filter(task => canLandTask(project, task))
     const busy = own.find(task => task.landing?.state === 'landing' || getLandingOp(task.id))

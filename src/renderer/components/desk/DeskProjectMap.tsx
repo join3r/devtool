@@ -301,7 +301,7 @@ function StreamLane({ project, stream, graph, track, local, folderPosture, statu
 
         <div className="flex-1 min-w-0 relative flex items-center">
           <span aria-hidden className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2" style={{ background: rail, opacity: stream.isMain || stream.workspace ? 0.9 : 0.6 }} />
-          <div ref={trackRef} className="relative flex-1 min-w-0 flex items-center gap-6 px-6 py-3 overflow-x-auto [scrollbar-width:none]">
+          <div ref={trackRef} className="relative flex-1 min-w-0 flex items-center gap-6 px-6 py-3 overflow-x-auto [scrollbar-width:none] [mask-image:linear-gradient(to_right,transparent,black_24px,black_calc(100%-24px),transparent)]">
             {track.items.map(item => item.kind === 'commit'
               ? (
                   <span

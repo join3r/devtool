@@ -113,6 +113,19 @@ async function row(name: string): Promise<HTMLElement> {
 }
 
 describe('Inbox row menu and project menu', () => {
+  it('gives each row a named button that opens the task, and keeps its actions as separate buttons', async () => {
+    renderSidebar()
+    const r = await row('Fix the thing')
+    const open = r.querySelector<HTMLButtonElement>('[data-testid="desk-row-open"]')!
+    expect(open.tagName).toBe('BUTTON')
+    expect(open.getAttribute('aria-label')).toMatch(/^Fix the thing, /)
+    // The hover actions are siblings, not buttons nested inside the row's button.
+    expect(open.querySelector('button')).toBeNull()
+    expect(r.querySelector('[data-testid="desk-row-done"]')).not.toBeNull()
+    fireEvent.click(open)
+    await waitFor(() => expect(r.querySelector('[data-testid="desk-row-open"]')?.getAttribute('aria-current')).toBe('true'))
+  })
+
   it('opens on a task row and snoozes the task until it needs you', async () => {
     renderSidebar()
     fireEvent.contextMenu(await row('Fix the thing'))

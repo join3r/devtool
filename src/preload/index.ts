@@ -1,6 +1,6 @@
 import type { ArtifactPreviewFile } from '../shared/artifact-preview'
 import type { StreamRunAction, StreamRunState } from '../shared/stream-run'
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type {
   AppConfig,
   CommitHistoryResult,
@@ -786,6 +786,10 @@ const api = {
   updatesGetStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-get-status'),
   updatesCheck: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-check'),
   updatesInstall: (): Promise<void> => ipcRenderer.invoke('updates-install'),
+  /** Settings → Appearance → Interface size: zooms this window's whole UI, like browser zoom. */
+  setUiZoom: (factor: number): void => {
+    if (Number.isFinite(factor) && factor >= 0.75 && factor <= 1.5) webFrame.setZoomFactor(factor)
+  },
   onUpdatesStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => callback(status)
     ipcRenderer.on('updates-status', handler)

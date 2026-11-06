@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { confirmAction } from '../confirmAction'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
 import { ChevronRight, Folder, FileText, BookText } from 'lucide-react'
 import { pollWhileVisible } from '../hooks/fileBrowserRefresh'
@@ -645,10 +646,12 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     setMenu(null)
     if (!relativePath) return
     const name = relativePath.split('/').pop() ?? relativePath
-    const ok = window.confirm(
+    const ok = await confirmAction(
+      // Deleted from disk, not moved to the Trash: say so, and where.
       isDirectory
-        ? `Delete folder "${name}" and everything inside it?`
-        : `Delete "${name}"?`
+        ? `Delete folder "${name}" and everything inside it?\n\n${relativePath} is removed from disk. This can't be undone.`
+        : `Delete "${name}"?\n\n${relativePath} is removed from disk. This can't be undone.`,
+      { confirmLabel: 'Delete', danger: true }
     )
     if (!ok) return
     try {

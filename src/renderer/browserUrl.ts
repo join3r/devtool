@@ -7,5 +7,7 @@ export function normalizeBrowserUrl(url: string): string {
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     return trimmed
   }
+  // A dev server on this machine (or the LAN) speaks plain http: `localhost:3000` would fail as https.
+  if (/^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\]|[\w-]+\.local)(:\d+)?(\/|$)/i.test(trimmed)) return `http://${trimmed}`
   return `https://${trimmed}`
 }

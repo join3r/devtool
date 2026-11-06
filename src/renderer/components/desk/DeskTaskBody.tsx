@@ -148,6 +148,7 @@ export default function DeskTaskBody({ project, task, visible, projectDir }: {
               tab={view === 'changes' ? 'git' : view === 'files' ? 'files' : 'notes'}
               active={visible}
               pane={benchNewTabPane(panes, focusedPane)}
+              onOpened={(taskId) => openBench(taskId, 'panes')}
             />
           </div>
         ) : null

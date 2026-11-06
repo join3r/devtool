@@ -93,6 +93,8 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+    // A scrollbar only once it stops growing: a rounding pixel would otherwise show a thumb on one line.
+    el.style.overflowY = el.scrollHeight > 160 ? 'auto' : 'hidden'
   }, [text])
 
   const edit = (next: string, nextCaret: number): void => {

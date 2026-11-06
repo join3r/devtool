@@ -27,6 +27,11 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   fontFamily: str,
   fontSize: num,
   theme: v.literal('system', 'dark', 'light'),
+  uiScale: (value, path) => {
+    const n = num(value, path)
+    if (n < 0.75 || n > 1.5) throw new IpcValidationError(`Invalid IPC argument ${path}: interface size out of range`)
+    return n
+  },
   terminalTheme: v.literal('system', 'dark', 'light'),
   terminalColorScheme: v.literal('auto', 'solarized-dark', 'solarized-light', 'one-dark', 'dracula', 'monokai', 'classic'),
   defaultShell: str,

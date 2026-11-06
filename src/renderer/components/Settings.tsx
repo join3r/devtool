@@ -4,6 +4,7 @@ import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, PromptB
 import { PROMPT_BOX_AGENTS } from '../../shared/types'
 import { PROMPT_BOX_AGENT_LABEL } from './promptBox'
 import { useApp } from '../context/AppContext'
+import { useDialog } from '../hooks/useDialog'
 import { TERMINAL_SCHEME_OPTIONS } from './terminalThemes'
 import {
   EDITOR_FONT_SIZE_MAX,
@@ -53,6 +54,13 @@ const DONE_RETENTION_OPTIONS: Array<{ days: number; label: string }> = [
   { days: 365, label: '1 year' },
   { days: 0, label: 'Forever' }
 ]
+
+const uiScaleOptions = [
+  { value: '0.9', label: '90%' },
+  { value: '1', label: '100%' },
+  { value: '1.1', label: '110%' },
+  { value: '1.25', label: '125%' }
+] as const
 
 const themeOptions = [
   { value: 'system', label: 'System' },
@@ -117,6 +125,7 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
   const [initial] = useState(() => resolveTab(initialTab))
   const [activeTab, setActiveTab] = useState<SettingsTab>(initial.tab)
   const page = tabs.find(t => t.id === activeTab) ?? tabs[0]
+  const cardRef = useDialog<HTMLDivElement>(onClose)
 
   if (!config) return <div />
 
@@ -128,11 +137,21 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
             <FormGroup>
               <SetBlock label="Application theme">
                 <SegCtl
+                  label="Application theme"
                   options={themeOptions}
                   value={config.theme}
                   onChange={(theme) => updateConfig({ theme })}
                 />
                 <HelperText>System follows the macOS appearance.</HelperText>
+              </SetBlock>
+              <SetBlock label="Interface size" divider>
+                <SegCtl
+                  label="Interface size"
+                  options={uiScaleOptions}
+                  value={(uiScaleOptions.find(o => Number(o.value) === (config.uiScale ?? 1))?.value ?? '1')}
+                  onChange={(value) => updateConfig({ uiScale: Number(value) })}
+                />
+                <HelperText>Scales the whole window: lists, dialogs and controls. Terminal and editor text keep their own size (⌘+ and ⌘− while one is focused).</HelperText>
               </SetBlock>
             </FormGroup>
           </>
@@ -711,11 +730,17 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
   }
 
   return (
-    <div className="ui-fade-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/45 backdrop-blur-[2px]" data-modal>
-      <div className="w-[860px] max-w-[92vw] h-[640px] max-h-[88vh] ui-rise-in rounded-2xl border border-border bg-surface shadow-pop flex overflow-hidden">
+    <div className="ui-fade-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/45 backdrop-blur-[2px]" data-modal onClick={onClose}>
+      <div
+        ref={cardRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(e) => e.stopPropagation()}
+        className="w-[860px] max-w-[92vw] h-[640px] max-h-[88vh] ui-rise-in rounded-2xl border border-border bg-surface shadow-pop flex overflow-hidden">
         {/* left rail */}
         <nav className="w-48 shrink-0 bg-surface-2 border-r border-hair flex flex-col px-2 pb-3 overflow-y-auto" aria-label="Settings pages">
-          <h2 className="m-0 px-2.5 pt-4 pb-3 text-md font-semibold text-text">Settings</h2>
+          <h2 id="settings-title" className="m-0 px-2.5 pt-4 pb-3 text-md font-semibold text-text">Settings</h2>
           {tabGroups.map(group => (
             <div key={group.label} className="flex flex-col gap-px mb-3">
               <div className="px-2.5 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-text-subtle">{group.label}</div>
@@ -748,15 +773,16 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
         <div className="flex-1 min-w-0 flex flex-col">
           <header className="flex items-start gap-3 px-6 pt-5 pb-4 border-b border-hair shrink-0">
             <div className="flex-1 min-w-0 flex flex-col gap-1">
-              <h3 className="m-0 text-lg font-semibold text-text">{page.label}</h3>
+              <h3 className="m-0 text-lg font-semibold text-text tracking-[-0.01em]">{page.label}</h3>
               <p className="m-0 text-sm text-text-muted leading-snug">{page.blurb}</p>
             </div>
             <button
               type="button"
               onClick={onClose}
               className="shrink-0 -mr-2 -mt-1 w-7 h-7 flex items-center justify-center bg-transparent border-0 text-text-muted cursor-pointer rounded-md hover:text-text hover:bg-surface-3"
-              title="Close"
+              title="Close (Esc)"
               aria-label="Close settings"
+              data-dialog-close
             >
               <X size={15} />
             </button>

@@ -1,9 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
+import { confirmAction } from '../confirmAction'
 import { Plus, X } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { ContextMenu } from './ui'
 
-export default function NotesList(): React.ReactElement {
+/** `onOpened`: a note opened in the task (the Bench shows its tabs then). */
+export default function NotesList({ onOpened }: { onOpened?: (taskId: string) => void } = {}): React.ReactElement {
   const {
     selectedProjectId,
     selectedTaskId,
@@ -58,7 +60,8 @@ export default function NotesList(): React.ReactElement {
   const handleNoteClick = useCallback((noteId: string) => {
     if (!selectedProjectId) return
     openOrFocusNoteTab(selectedProjectId, selectedTaskId, 'focused', noteId)
-  }, [selectedProjectId, selectedTaskId, openOrFocusNoteTab])
+    if (selectedTaskId) onOpened?.(selectedTaskId)
+  }, [selectedProjectId, selectedTaskId, openOrFocusNoteTab, onOpened])
 
   const handleDoubleClick = useCallback((noteId: string, currentName: string) => {
     setEditingNoteId(noteId)
@@ -138,9 +141,10 @@ export default function NotesList(): React.ReactElement {
             label: 'Delete…',
             danger: true,
             onSelect: () => {
-              if (selectedProjectId && window.confirm(`Delete note "${menuNote.name}"? This can't be undone.`)) {
-                deleteNote(selectedProjectId, menuNote.id)
-              }
+              const projectId = selectedProjectId
+              if (!projectId) return
+              void confirmAction(`Delete note "${menuNote.name}"?\n\nThis can't be undone.`, { confirmLabel: 'Delete note', danger: true })
+                .then(ok => { if (ok) deleteNote(projectId, menuNote.id) })
             }
           }
         ] : []}

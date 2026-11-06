@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Folders, Inbox, List, Search, X } from 'lucide-react'
+import { confirmAction } from '../../confirmAction'
+import { CheckCheck, ChevronDown, Folders, Inbox, List, Search, X } from 'lucide-react'
 import type { DeskScope, DeskTab, Project } from '../../../shared/types'
 import { autopilotLanded } from '../../../shared/autopilot'
 import { useApp } from '../../context/AppContext'
@@ -32,6 +33,16 @@ import { isTaskJumpKey, jumpDigit } from '../../hooks/useMetaHeld'
 export const DESK_DEFAULT_WIDTH = 420
 const clampDeskWidth = (width: number): number => Math.min(640, Math.max(340, width))
 
+function useWindowWidth(): number {
+  const [w, setW] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const on = (): void => setW(window.innerWidth)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return w
+}
+
 const TABS: ReadonlyArray<{ id: DeskTab; label: string }> = [
   { id: 'inbox', label: 'Inbox' },
   { id: 'working', label: 'Working' },
@@ -49,7 +60,7 @@ function typingTarget(target: EventTarget | null): boolean {
 function GroupHead({ label, count, tone, hint }: { label: string; count: number; tone?: 'needs' | 'answered'; hint?: string }): React.ReactElement {
   const color = tone === 'needs' ? 'text-needs' : tone === 'answered' ? 'text-answered' : 'text-text-muted'
   return (
-    <div className="flex items-center justify-between px-[18px] pt-4 pb-1.5 text-2xs font-semibold uppercase tracking-[0.08em]" data-testid="desk-group">
+    <div className="flex items-center justify-between px-[18px] pt-4 pb-1.5 text-2xs font-semibold uppercase tracking-[0.08em]" role="heading" aria-level={2} data-testid="desk-group">
       <span className={`flex items-center gap-1.5 ${color}`}>
         {tone && <span className={`size-1.5 rounded-full ${tone === 'needs' ? 'bg-needs' : 'bg-answered'}`} aria-hidden="true" />}
         {label}
@@ -176,7 +187,10 @@ export default function DeskColumn({
     return () => window.clearInterval(id)
   }, [])
 
-  const width = clampDeskWidth(desk.width ?? DESK_DEFAULT_WIDTH)
+  const storedWidth = clampDeskWidth(desk.width ?? DESK_DEFAULT_WIDTH)
+  // A narrow window keeps most of its width for the task: the column gives way (the stored width stays for wider windows).
+  const windowWidth = useWindowWidth()
+  const width = Math.min(storedWidth, Math.max(Math.round(windowWidth * 0.4), Math.min(340, Math.round(windowWidth * 0.45))))
   const resize = useResizeHandle({ width, onWidthChange: (w) => updateDesk({ width: clampDeskWidth(w) }), edge: 'right' })
   const tab: DeskTab = desk.tab ?? 'inbox'
   const scope: DeskScope | null = useMemo(() => liveScope(projects, desk.scope), [projects, desk.scope])
@@ -312,7 +326,7 @@ export default function DeskColumn({
     },
     remove: async (entries: readonly InboxEntry[]): Promise<void> => {
       if (entries.length === 1) return onRemove(entries[0].project.id, entries[0].task.id)
-      if (!window.confirm(`Remove ${entries.length} tasks and all their changes?\n\nWorktrees of their own are deleted with their branches, uncommitted work with them. Nothing is landed.`)) return
+      if (!await confirmAction(`Remove ${entries.length} tasks and all their changes?\n\nWorktrees of their own are deleted with their branches, uncommitted work with them. Nothing is landed.`, { confirmLabel: `Remove ${entries.length} tasks`, danger: true })) return
       clearChecked()
       for (const { project, task } of entries) await latest.current.onRemove(project.id, task.id, true)
     },
@@ -448,7 +462,7 @@ export default function DeskColumn({
 
   const jumpIndex = new Map(shown.slice(0, 9).map((entry, i) => [entry.task.id, i + 1]))
   const statusOf = statusFrom(allStatuses)
-  const renderRow = (entry: InboxEntry, kind: DeskRowKind, depth = 0): React.ReactElement => {
+  const renderRow = (entry: InboxEntry, kind: DeskRowKind, depth = 0, inGroup = false): React.ReactElement => {
     const background = kind === 'working' ? taskBackground(entry.task, activities) : null
     const progress = nesting.children.has(entry.task.id) || entry.task.startedTaskIds?.length ? childProgress(tree, entry.task, statusOf) : null
     const hasNested = nesting.children.has(entry.task.id)
@@ -474,7 +488,8 @@ export default function DeskColumn({
         pinned={pinnedTaskIds.has(entry.task.id)}
         onTogglePin={() => togglePinnedItem({ type: 'task', projectId: entry.project.id, streamId: entry.stream.id, taskId: entry.task.id })}
         offline={offlineIds.has(entry.project.id)}
-        showTile={showTiles}
+        showTile={showTiles && !inGroup && !scope}
+        hideProject={inGroup || !!scope}
         now={now}
         theme={effectiveTheme}
         onSelect={(e) => {
@@ -519,7 +534,7 @@ export default function DeskColumn({
   return (
     <nav
       aria-label="Inbox"
-      className="desk-column relative flex flex-col shrink-0 min-h-0 bg-surface border-r border-hair select-none"
+      className="desk-column @container/desk relative flex flex-col shrink-0 min-h-0 bg-surface border-r border-hair select-none"
       style={{ width, minWidth: width, maxWidth: width }}
       onClick={onBlankClick}
       data-testid="desk-column"
@@ -569,7 +584,7 @@ export default function DeskColumn({
             onClear={clearChecked}
           />
         ) : <div className="flex gap-2 items-center">
-          <div className="flex gap-0.5 items-center p-0.5 rounded-lg bg-sel" role="tablist">
+          <div className="flex min-w-0 gap-0.5 items-center p-0.5 rounded-lg bg-sel overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Lists">
           {TABS.map(({ id, label }) => {
             const active = tab === id
             const count = counts[id]
@@ -580,13 +595,18 @@ export default function DeskColumn({
                 role="tab"
                 aria-selected={active}
                 className={[
-                  'h-6 rounded-md px-2.5 text-sm border-0 cursor-pointer flex items-center transition-[color,background-color,box-shadow] duration-(--motion-fast)',
+                  'h-6 shrink-0 rounded-md px-1 text-xs @[330px]/desk:px-1.5 @[330px]/desk:text-sm @[360px]/desk:px-2 border-0 cursor-pointer flex items-center whitespace-nowrap transition-[color,background-color,box-shadow] duration-(--motion-fast)',
                   active ? 'bg-field text-text font-semibold shadow-(--shadow-raise)' : 'bg-transparent text-text-muted font-medium hover:text-text'
                 ].join(' ')}
                 onClick={() => updateDesk({ tab: id })}
                 data-testid={`desk-tab-${id}`}
               >
-                {label}{count ? <span className={`ml-1.5 tabular-nums text-xs ${active ? 'text-text-muted' : 'text-text-subtle'}`}>{count}</span> : null}
+                {label}{count ? (
+                  // Inbox counts what is unread (or needs you), in the unread colour; Working counts every row.
+                  id === 'inbox'
+                    ? <span className="ml-1.5 min-w-[18px] h-4 px-1 inline-flex items-center justify-center rounded-full tabular-nums text-2xs font-semibold text-answered bg-[color-mix(in_srgb,var(--color-answered)_16%,transparent)]" title={`${count} unread`}>{count}<span className="sr-only"> unread</span></span>
+                    : <span className={`ml-1.5 tabular-nums text-xs ${active ? 'text-text-muted' : 'text-text-subtle'}`}>{count}<span className="sr-only"> running</span></span>
+                ) : null}
               </button>
             )
           })}
@@ -594,7 +614,7 @@ export default function DeskColumn({
           <span className="flex-1" />
           <button
             type="button"
-            className={`size-7 flex items-center justify-center rounded-md border-0 cursor-pointer transition-colors duration-(--motion-fast) hover:text-text hover:bg-sel ${grouped ? 'bg-sel text-text' : 'bg-transparent text-text-muted'}`}
+            className={`shrink-0 size-7 flex items-center justify-center rounded-md border-0 cursor-pointer transition-colors duration-(--motion-fast) hover:text-text hover:bg-sel ${grouped ? 'bg-sel text-text' : 'bg-transparent text-text-muted'}`}
             onClick={() => updateConfig({ inboxLayout: grouped ? 'flat' : 'grouped' })}
             title={grouped ? 'Group by status' : 'Group by project'}
             aria-pressed={grouped}
@@ -609,7 +629,7 @@ export default function DeskColumn({
           : groupInboxByProject(listed, [...pinnedIds]).map(group => (
             <React.Fragment key={group.project.id}>
               <ProjectGroupHead project={group.project} count={group.entries.length} theme={effectiveTheme} showTile={showTiles} onScope={() => pickScope({ projectId: group.project.id })} />
-              {drawn(group.entries).map(row => renderRow(row.entry, row.kind ?? (tab === 'inbox' ? inboxKind(lists, row.entry) : tab === 'working' ? 'working' : 'snoozed'), row.depth))}
+              {drawn(group.entries).map(row => renderRow(row.entry, row.kind ?? (tab === 'inbox' ? inboxKind(lists, row.entry) : tab === 'working' ? 'working' : 'snoozed'), row.depth, true))}
             </React.Fragment>
           )))}
         {!grouped && tab === 'inbox' && (
@@ -686,7 +706,15 @@ function DoneList({ entries, loading, now, theme, showTiles, showingOlder, onSho
   onReopen: (entry: DoneEntry) => void
 }): React.ReactElement {
   if (entries.length === 0) {
-    return <div className="px-6 py-10 text-center text-sm text-text-muted">{loading ? 'Loading…' : 'Nothing done in the last 30 days.'}</div>
+    return (
+      <div className="px-6 py-12 flex flex-col items-center gap-3 text-center text-sm text-text-muted" data-testid="desk-empty">
+        <span className="size-10 rounded-full flex items-center justify-center bg-sel text-text-subtle" aria-hidden="true"><CheckCheck size={18} strokeWidth={1.75} /></span>
+        <span className="max-w-[240px]" role="status">{loading ? 'Loading…' : showingOlder ? 'Nothing done yet. Tasks you close land here.' : 'Nothing done in the last 30 days.'}</span>
+        {!loading && !showingOlder && (
+          <button type="button" className="px-3 py-1 rounded-md border-0 bg-transparent text-sm text-text-muted underline underline-offset-2 decoration-[color-mix(in_srgb,currentColor_40%,transparent)] cursor-pointer hover:text-text" onClick={onShowOlder}>Show older</button>
+        )}
+      </div>
+    )
   }
   return (
     <>
@@ -695,25 +723,32 @@ function DoneList({ entries, loading, now, theme, showTiles, showingOlder, onSho
         return (
           <div
             key={entry.task.id}
-            className="group relative flex gap-3 mx-2 px-3 py-2.5 rounded-[9px] items-start cursor-pointer hover:bg-row-hover"
+            className="group relative flex gap-3 mx-2 px-3 py-2.5 rounded-[10px] items-start cursor-pointer hover:bg-row-hover"
             onClick={() => onOpen(item)}
             data-testid="desk-done-row"
           >
-            {showTiles && <ProjectTileBadge project={project} theme={theme} size={24} />}
-            <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
+            {/* The row's own action, as in the Inbox: a real button under the content. */}
+            <button
+              type="button"
+              className="absolute inset-0 w-full h-full p-0 m-0 rounded-[10px] border-0 bg-transparent cursor-pointer outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-border-focus)]"
+              aria-label={`${entry.task.name}, ${project.name}, done`}
+              data-testid="desk-done-open"
+            />
+            {showTiles && <span className="relative z-[1]"><ProjectTileBadge project={project} theme={theme} size={24} /></span>}
+            <div className="relative z-[1] flex-1 min-w-0 flex flex-col gap-[3px] pointer-events-none">
               <div className="flex justify-between gap-2 text-xs text-text-muted">
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                  <strong className="font-semibold text-body">{project.name}</strong>
+                  <span className="font-medium text-text-muted">{project.name}</span>
                   {entry.streamName && entry.streamName !== 'main' && <> › <span className="font-mono">{entry.streamName}</span></>}
                 </span>
-                <span className="tabular-nums group-hover:invisible">{entry.archivedAt ? formatRelativeAge(now - entry.archivedAt) : ''}</span>
+                <span className="tabular-nums group-hover:invisible group-has-[:focus-visible]:invisible">{entry.archivedAt ? formatRelativeAge(now - entry.archivedAt) : ''}</span>
               </div>
               <span className="flex items-baseline gap-1.5 min-w-0">
                 <span className="text-base text-text-muted overflow-hidden text-ellipsis whitespace-nowrap">{entry.task.name}</span>
                 {autopilotLanded(entry.task) && <AutopilotMark />}
               </span>
             </div>
-            <div className="absolute right-2.5 top-2 hidden group-hover:flex gap-1 pl-2 bg-row-hover" onClick={(e) => e.stopPropagation()}>
+            <div className="absolute z-[2] right-2.5 top-2 hidden group-hover:flex group-has-[:focus-visible]:flex gap-1 pl-2 bg-row-hover" onClick={(e) => e.stopPropagation()}>
               <button type="button" className="px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong" onClick={() => onReopen(item)}>Reopen</button>
             </div>
           </div>

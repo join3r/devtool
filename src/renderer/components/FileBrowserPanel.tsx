@@ -129,10 +129,12 @@ export default function FileBrowserPanel(): React.ReactElement | null {
  * or the project when no task is selected. `active` polls git status.
  * `pane` is where a file, diff or terminal opened from here goes.
  */
-export function FileBrowserBody({ tab, active, pane = 'focused' }: {
+export function FileBrowserBody({ tab, active, pane = 'focused', onOpened }: {
   tab: FileBrowserTab
   active: boolean
   pane?: PaneRef
+  /** A file, diff, terminal or note opened as a tab of this task: the Bench switches to its tabs. */
+  onOpened?: (taskId: string) => void
 }): React.ReactElement {
   const {
     selectedProjectId,
@@ -172,18 +174,18 @@ export function FileBrowserBody({ tab, active, pane = 'focused' }: {
       // From the Home page (no task) the file opens in a `main` task.
       const type = isNotebookFile(filePath) ? 'notebook' : 'editor'
       const taskId = taskForTab(selectedProjectId, selectedTaskId, () => createTab(type, { filePath }), dirBasename(filePath))
-      if (taskId) openOrFocusEditorTab(selectedProjectId, taskId, pane, filePath)
+      if (taskId) { openOrFocusEditorTab(selectedProjectId, taskId, pane, filePath); onOpened?.(taskId) }
     },
-    [selectedProjectId, selectedTaskId, openOrFocusEditorTab, taskForTab, pane]
+    [selectedProjectId, selectedTaskId, openOrFocusEditorTab, taskForTab, pane, onOpened]
   )
 
   const handleGitFileClick = useCallback(
     (filePath: string) => {
       if (!selectedProjectId) return
       const taskId = taskForTab(selectedProjectId, selectedTaskId, () => createTab('diff', { filePath }), dirBasename(filePath))
-      if (taskId) openOrFocusDiffTab(selectedProjectId, taskId, pane, filePath)
+      if (taskId) { openOrFocusDiffTab(selectedProjectId, taskId, pane, filePath); onOpened?.(taskId) }
     },
-    [selectedProjectId, selectedTaskId, openOrFocusDiffTab, taskForTab, pane]
+    [selectedProjectId, selectedTaskId, openOrFocusDiffTab, taskForTab, pane, onOpened]
   )
 
   const handleRevealInTerminal = useCallback(async (relativeDir: string) => {
@@ -202,8 +204,8 @@ export function FileBrowserBody({ tab, active, pane = 'focused' }: {
     }
     const cwd = joinWorkspaceDir(dir, relativeDir || undefined)
     const taskId = taskForTab(selectedProjectId, selectedTaskId, () => createTab('terminal', { cwd }), 'Terminal')
-    if (taskId) addTab(selectedProjectId, taskId, pane, 'terminal', { cwd })
-  }, [addTab, effectiveDir, selectedProject, selectedProjectId, selectedTask, selectedTaskId, taskForTab, pane])
+    if (taskId) { addTab(selectedProjectId, taskId, pane, 'terminal', { cwd }); onOpened?.(taskId) }
+  }, [addTab, effectiveDir, selectedProject, selectedProjectId, selectedTask, selectedTaskId, taskForTab, pane, onOpened])
 
   const shown = !isLocalProject && tab !== 'notes' ? 'notes' : tab
   return (
@@ -247,7 +249,7 @@ export function FileBrowserBody({ tab, active, pane = 'focused' }: {
           canReveal={canReveal}
         />
       ) : (
-        <NotesList />
+        <NotesList onOpened={onOpened} />
       )}
     </>
   )

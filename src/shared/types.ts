@@ -893,6 +893,8 @@ export interface AppConfig {
   fontFamily: string
   fontSize: number
   theme: 'system' | 'dark' | 'light'
+  /** Settings → Appearance → Interface size: the window's zoom factor (1 = 100%). Terminal and editor fonts zoom on their own. */
+  uiScale: number
   terminalTheme: 'system' | 'dark' | 'light'
   terminalColorScheme: TerminalColorScheme
   /**
@@ -1236,6 +1238,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   fontFamily: 'monospace',
   fontSize: 14,
   theme: 'system',
+  uiScale: 1,
   terminalTheme: 'system',
   terminalColorScheme: 'auto',
   defaultShell: '',

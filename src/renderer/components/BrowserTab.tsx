@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { ArrowLeft, ArrowRight, Globe, RotateCw, TriangleAlert, Wrench } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import type { SshConfig } from '../../shared/types'
 import { BLANK_BROWSER_URL, normalizeBrowserUrl } from '../browserUrl'
@@ -21,6 +22,7 @@ interface Props {
   artifact?: Tab['artifact']
 }
 
+const iconBtn = 'inline-flex items-center justify-center size-7 bg-transparent border-0 text-text-muted cursor-pointer rounded-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)'
 const toolbarBtn = 'bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-sm whitespace-nowrap hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)'
 
 /** An artifact tab opens on its local copy unless it was left on a web page (the published one). */
@@ -46,6 +48,9 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   const artifact = artifactProp && artifactProp.url.startsWith('https://claude.ai/') ? artifactProp : undefined
   const [url, setUrl] = useState(artifact ? artifactStartUrl(artifact, initialUrl) : (initialUrl || BLANK_BROWSER_URL))
   const [inputUrl, setInputUrl] = useState(url)
+  /** The main frame's last load: in flight, or failed (connection refused, DNS…), so the page isn't just blank. */
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<{ url: string; description: string; code: number } | null>(null)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
   const [proxyEnabled, setProxyEnabled] = useState(!!sshConfig)
   const [proxyLoading, setProxyLoading] = useState(false)
@@ -124,6 +129,19 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     webview.addEventListener('did-navigate', handleNavigation)
     webview.addEventListener('did-navigate-in-page', handleNavigation)
 
+    const handleStart = () => { setLoading(true); setLoadError(null) }
+    const handleStop = () => setLoading(false)
+    const handleFail = (e: Event) => {
+      const { errorCode, errorDescription, validatedURL, isMainFrame } = e as Electron.DidFailLoadEvent
+      // -3 (ABORTED) is a navigation replaced by another, not a failure.
+      if (!isMainFrame || errorCode === -3) return
+      setLoading(false)
+      setLoadError({ url: validatedURL, description: errorDescription || 'The page did not load.', code: errorCode })
+    }
+    webview.addEventListener('did-start-loading', handleStart)
+    webview.addEventListener('did-stop-loading', handleStop)
+    webview.addEventListener('did-fail-load', handleFail)
+
     const handleContextMenu = (e: Event) => {
       const { linkURL, x, y } = (e as Electron.ContextMenuEvent).params
       if (!linkURL) return
@@ -136,6 +154,9 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     return () => {
       webview.removeEventListener('did-navigate', handleNavigation)
       webview.removeEventListener('did-navigate-in-page', handleNavigation)
+      webview.removeEventListener('did-start-loading', handleStart)
+      webview.removeEventListener('did-stop-loading', handleStop)
+      webview.removeEventListener('did-fail-load', handleFail)
       webview.removeEventListener('context-menu', handleContextMenu)
     }
   }, [webviewMounted, partition, projectId, taskId, tabId, updateTabUrl, markTaskInteracted])
@@ -294,9 +315,9 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   return (
     <div className="w-full h-full flex flex-col" style={{ display: visible ? 'flex' : 'none' }}>
       <div className="flex items-center gap-1 px-2 py-1 bg-surface-2 border-b-[0.5px] border-border">
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.goBack()} title="Back">&larr;</button>
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.goForward()} title="Forward">&rarr;</button>
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => { if (showingCopy) void showCopy(); else webviewRef.current?.reload() }} title={`Reload (${formatShortcutForApp('CmdOrCtrl+R')})`}>&#8635;</button>
+        <button type="button" className={iconBtn} onClick={() => webviewRef.current?.goBack()} title="Back" aria-label="Back"><ArrowLeft size={15} /></button>
+        <button type="button" className={iconBtn} onClick={() => webviewRef.current?.goForward()} title="Forward" aria-label="Forward"><ArrowRight size={15} /></button>
+        <button type="button" className={iconBtn} onClick={() => { if (showingCopy) void showCopy(); else webviewRef.current?.reload() }} title={`Reload (${formatShortcutForApp('CmdOrCtrl+R')})`} aria-label="Reload"><RotateCw size={14} className={loading ? 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none' : ''} /></button>
         <div className="flex-1 flex items-center relative">
           {isRemote && proxyEnabled && <span className="absolute right-2 bg-accent text-accent-ink text-2xs font-semibold px-1.5 py-px rounded-sm uppercase tracking-wider pointer-events-none z-(--z-sticky)">Remote</span>}
           {isServer && proxyReady && (
@@ -308,7 +329,9 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
             </span>
           )}
           <input
-            className="flex-1 bg-field text-text border border-border px-2 h-(--ctl-h-sm) rounded-md text-sm outline-none focus:border-border-focus focus:shadow-focus"
+            aria-label="Address"
+            placeholder="Type a URL, e.g. localhost:3000"
+            className="flex-1 bg-field text-text border border-control px-2 h-(--ctl-h-sm) rounded-md text-sm outline-none placeholder:text-text-subtle focus:border-border-focus focus:shadow-focus"
             value={inputUrl}
             onChange={(e) => setInputUrl(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -334,16 +357,22 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
         ))}
         {isRemote && (
           <button
-            className={['bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text disabled:opacity-40 disabled:cursor-not-allowed', proxyEnabled ? 'text-accent' : ''].join(' ').trim()}
+            type="button"
+            aria-label="Route through the remote host"
+            aria-pressed={proxyEnabled}
+            className={[iconBtn, 'disabled:opacity-40 disabled:cursor-not-allowed', proxyEnabled ? 'text-info' : ''].join(' ').trim()}
             onClick={() => void handleProxyToggle()}
             disabled={proxyLoading}
             title={proxyEnabled ? 'Routing through remote host (click to use direct)' : 'Direct connection (click to route through remote host)'}
           >
-            &#127760;
+            <Globe size={14} />
           </button>
         )}
         <button
-          className={['bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)', devToolsOpen ? 'text-accent' : ''].join(' ').trim()}
+          type="button"
+          aria-label="DevTools"
+          aria-pressed={devToolsOpen}
+          className={[iconBtn, devToolsOpen ? 'bg-sel text-text' : ''].join(' ').trim()}
           onClick={() => {
             if (devToolsOpen) {
               webviewRef.current?.closeDevTools()
@@ -354,10 +383,26 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
           }}
           title={`Toggle DevTools (${formatShortcutForApp('CmdOrCtrl+Alt+I')})`}
         >
-          &#9874;
+          <Wrench size={14} />
         </button>
       </div>
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        {loading && <div className="absolute top-0 inset-x-0 h-0.5 z-(--z-sticky) overflow-hidden" aria-hidden="true"><div className="h-full w-1/3 bg-info animate-pulse" /></div>}
+        {loadError && !copyPending && proxyReady && (
+          <div className="absolute inset-0 z-(--z-sticky) flex flex-col items-center justify-center gap-3 px-6 text-center bg-bg" role="alert" data-testid="browser-load-error">
+            <span className="size-10 rounded-full flex items-center justify-center bg-[color-mix(in_srgb,var(--color-danger)_14%,transparent)] text-danger" aria-hidden="true"><TriangleAlert size={18} /></span>
+            <div className="text-md font-semibold text-text">Couldn&apos;t load this page</div>
+            <div className="text-sm text-text-muted max-w-[420px] break-all font-mono">{loadError.url}</div>
+            <div className="text-sm text-text-muted">{loadError.description}{loadError.code ? ` (${loadError.code})` : ''}. Is the server running?</div>
+            <button
+              type="button"
+              className="h-(--ctl-h) px-3 rounded-md border border-border bg-field text-sm text-text cursor-pointer hover:bg-surface-3"
+              onClick={() => { setLoadError(null); webviewRef.current?.reload() }}
+            >
+              Try again
+            </button>
+          </div>
+        )}
         {!activated ? null : copyPending ? (
           copy.state === 'error' ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center text-text-muted text-base" role="alert">
@@ -385,7 +430,9 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
             key={partition ?? 'default'}
             ref={webviewRef}
             src={url}
-            className="flex-1 w-full h-full"
+            // A page that sets no background is white in every browser; the guest is transparent by default,
+            // which put such a page's black text on the dark app.
+            className={`flex-1 w-full h-full ${url === BLANK_BROWSER_URL ? '' : 'bg-white'}`}
             // Guest pages are a real browser for the agent — not a Node process.
             webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=yes, webSecurity=yes"
             {...(partition ? { partition } : {})}

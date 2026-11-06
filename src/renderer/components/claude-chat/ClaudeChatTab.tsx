@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { confirmAction } from '../../confirmAction'
 import { ArrowDown, FolderOpen } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
@@ -295,8 +296,9 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
     void window.api.chatLogin(tabId, method).catch(reportError)
   }, [tabId, reportError])
   const logout = useCallback(() => {
-    if (!window.confirm('Sign out of Claude? Every Claude tab and terminal on this machine uses the same login.')) return
-    void window.api.chatLogout(tabId).catch(reportError)
+    void confirmAction('Sign out of Claude?\n\nEvery Claude tab and terminal on this machine uses the same login.', { confirmLabel: 'Sign out' }).then(ok => {
+      if (ok) void window.api.chatLogout(tabId).catch(reportError)
+    })
   }, [tabId, reportError])
 
   const respond = useCallback((promptId: string, response: ChatPromptResponse) => {

@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { confirmAction } from '../confirmAction'
 import { useApp } from '../context/AppContext'
 import { NEW_TASK_NAME } from '../../shared/types'
 import {
@@ -47,7 +48,10 @@ export function useMoveTask(): (projectId: string, taskId: string, toStreamId: s
         : to.workspace ? `the ${to.workspace.branchName} worktree` : 'the project folder'
       const lines = [`Move "${task.name}" to ${to.name}?`, `It will work in ${where}.`]
       if (taskTabs(task).some(runsInTaskDir)) lines.push('Its agent and terminals restart there.')
-      if (!window.confirm(lines.join('\n\n'))) return
+      void confirmAction(lines.join('\n\n'), { confirmLabel: 'Move' }).then(ok => {
+        if (ok) void moveTask(projectId, taskId, toStreamId, toIndex ?? to.tasks.length, { restart })
+      })
+      return
     }
     void moveTask(projectId, taskId, toStreamId, toIndex ?? to.tasks.length, { restart })
   }, [projects, moveTask])

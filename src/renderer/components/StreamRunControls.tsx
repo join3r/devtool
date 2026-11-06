@@ -150,7 +150,7 @@ export function streamRunMenuEntries(
     const run = runs.find(r => r.commandId === row.id)
     const here = isHere(run)
     const running = run?.status === 'running'
-    const control = (action: StreamRunAction) => () => void controlStreamRun(project.id, stream.id, row.id, action, taskId)
+    const control = (action: StreamRunAction) => () => void controlStreamRun(project.id, stream.id, row.id, action, taskId, row.name)
     if (running && here) {
       if (!row.removed) group.push({ label: `Restart ${row.name}${at}`, hint: 'running', title: `$ ${run.command}`, onSelect: control('restart') })
       group.push({ label: `Stop ${row.name}${at}`, onSelect: () => void controlStreamRun(project.id, stream.id, row.id, 'stop') })

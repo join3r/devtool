@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useId } from 'react'
+import Switch from './Switch'
 
 interface GroupProps {
   children: React.ReactNode
@@ -24,6 +25,11 @@ interface GroupRowProps {
 /** A row inside a Group; consecutive rows separate with a hairline. */
 export function GroupRow({ icon, label, sub, trailing, selected, disabled, onClick }: GroupRowProps): React.ReactElement {
   const Tag = onClick ? 'button' : 'div'
+  const labelId = useId()
+  // A switch in the row is named by the row's label.
+  const control = React.isValidElement<{ labelledBy?: string }>(trailing) && trailing.type === Switch && !trailing.props.labelledBy
+    ? React.cloneElement(trailing, { labelledBy: labelId })
+    : trailing
   return (
     <Tag
       onClick={onClick}
@@ -37,10 +43,10 @@ export function GroupRow({ icon, label, sub, trailing, selected, disabled, onCli
     >
       {icon && <span className="shrink-0 text-text-muted flex items-center">{icon}</span>}
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
-        <span className="text-base text-text truncate">{label}</span>
+        <span id={labelId} className="text-base text-text truncate">{label}</span>
         {sub && <span className="text-xs text-text-muted">{sub}</span>}
       </span>
-      {trailing && <span className="shrink-0 flex items-center gap-2">{trailing}</span>}
+      {control && <span className="shrink-0 flex items-center gap-2">{control}</span>}
     </Tag>
   )
 }

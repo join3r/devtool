@@ -36,6 +36,8 @@
 
   /* semantic */
   --color-danger: #d97b6c;
+  /* Text on a filled danger button. */
+  --color-danger-ink: #1d0d09;
   --color-warn: #d9a441;
   --color-info: #6e9fca;
   --color-success: #5fae74;
@@ -59,6 +61,7 @@
   --color-row-sel: #322e28;
   --color-body: #f0ece4;
   --color-line: #45403a;
+  --color-control: #7c766c;
 
   /* type scale — 13px body */
   --text-2xs: 10px;
@@ -150,6 +153,7 @@
   --color-accent-400: #ececed;
   --color-accent-500: #d6d6d8;
   --color-danger: #f0806e;
+  --color-danger-ink: #1d0d09;
   --color-warn: #e8b04b;
   --color-info: #8cb2ff;
   --color-success: #6cc58f;
@@ -164,6 +168,8 @@
   --color-row-sel: #212329;
   --color-body: #d6d6d8;
   --color-line: #2f3237;
+  /* Outline of a text field or an off switch: 3:1 against the surfaces it sits on. */
+  --color-control: #6b6e76;
   --shadow-pop: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 16px 40px -8px rgba(0, 0, 0, 0.6), 0 4px 12px -2px rgba(0, 0, 0, 0.35);
   --shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --scroll-thumb: rgba(236, 236, 237, 0.14);
@@ -178,35 +184,37 @@
   --color-surface-3: #e8e9ec;
   --color-field: #ffffff;
   --color-text: #17181b;
-  --color-text-muted: #5f626a;
-  --color-text-subtle: #7d8088;
+  --color-text-muted: #52555c;
+  --color-text-subtle: #62656d;
   --color-border: #dcdde1;
   --color-border-strong: #c8cad0;
-  --color-border-focus: #2f63d0;
+  --color-border-focus: #2a59bf;
   --color-hair: #e4e5e8;
   --color-sel: rgba(23, 24, 27, 0.07);
   --color-accent: #17181b;
   --color-accent-ink: #ffffff;
   --color-accent-400: #17181b;
   --color-accent-500: #2a2c31;
-  --color-danger: #c4473a;
-  --color-warn: #a86b00;
-  --color-info: #2f63d0;
-  --color-success: #2f8a57;
+  --color-danger: #b03a2e;
+  --color-danger-ink: #ffffff;
+  --color-warn: #8a5600;
+  --color-info: #2a59bf;
+  --color-success: #23744a;
   --color-status-working: #6b6e76;
-  --color-status-attention: #a86b00;
-  --color-status-exited: #a5a8ae;
-  --color-ssh-connected: #2f8a57;
-  --color-ssh-connecting: #a86b00;
-  --color-ssh-disconnected: #c4473a;
-  --color-needs: #a86b00;
-  --color-answered: #2f63d0;
-  --color-running: #2f8a57;
-  --color-crashed: #c4473a;
+  --color-status-attention: #8a5600;
+  --color-status-exited: #878a92;
+  --color-ssh-connected: #23744a;
+  --color-ssh-connecting: #8a5600;
+  --color-ssh-disconnected: #b03a2e;
+  --color-needs: #8a5600;
+  --color-answered: #2a59bf;
+  --color-running: #23744a;
+  --color-crashed: #b03a2e;
   --color-row-hover: #eeeef1;
   --color-row-sel: #e6e7eb;
   --color-body: #2a2c31;
   --color-line: #d5d7dc;
+  --color-control: #878a92;
   --shadow-pop: 0 0 0 1px rgba(15, 16, 20, 0.06), 0 16px 40px -8px rgba(15, 16, 20, 0.18), 0 4px 12px -2px rgba(15, 16, 20, 0.08);
   --shadow-raise: 0 1px 2px rgba(15, 16, 20, 0.06), 0 0 0 0.5px rgba(15, 16, 20, 0.04);
   --scroll-thumb: rgba(23, 24, 27, 0.16);
@@ -265,7 +273,7 @@
 
   /* Keyboard focus: one clear ring everywhere; the mouse doesn't get it. */
   :where(button, a, [role="tab"], [role="menuitem"], [role="checkbox"], [tabindex]:not([tabindex="-1"])):focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-border-focus) 70%, transparent);
+    outline: 2px solid var(--color-border-focus);
     outline-offset: 1px;
   }
   .xterm :focus-visible, .monaco-editor :focus-visible { outline: none; }

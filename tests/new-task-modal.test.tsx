@@ -6,7 +6,7 @@ import { render, fireEvent, screen, act, cleanup, waitFor } from '@testing-libra
 // React import is required by the JSX runtime under vitest's default transform.
 void React
 
-import NewTaskModal from '../src/renderer/components/NewTaskModal'
+import NewTaskModal, { resetUnsentPromptForTests } from '../src/renderer/components/NewTaskModal'
 import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
 import type { NewTaskSubmission, NewTaskTarget } from '../src/renderer/components/newTask'
 import { createMainStream, type AppConfig, type Project } from '../src/shared/types'
@@ -49,6 +49,7 @@ function api(): {
 }
 
 beforeEach(() => {
+  resetUnsentPromptForTests()
   // jsdom has no layout, so keeping the cursor row visible is a no-op here.
   Element.prototype.scrollIntoView = vi.fn()
   onCreate = vi.fn()
@@ -149,6 +150,104 @@ async function chooseFromPicker(label: string): Promise<void> {
 }
 
 describe('NewTaskModal', () => {
+  it('keeps a prompt closed without starting, and gives it back next time with a way to clear it', async () => {
+    const first = renderModal()
+    await typePrompt('A long brief I do not want to lose')
+    await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+    expect(onClose).toHaveBeenCalled()
+    first.unmount()
+
+    renderModal()
+    expect(promptInput().value).toBe('A long brief I do not want to lose')
+    expect(screen.getByTestId('new-task-restored')).toBeTruthy()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear' })) })
+    expect(promptInput().value).toBe('')
+  })
+
+  it('never sends a kept prompt to another project: it comes back only where it was written', async () => {
+    // Written for p2 ("notes"), closed with Escape.
+    const inB = renderModal('p2')
+    await typePrompt('Only for the notes project')
+    await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+    inB.unmount()
+
+    // Opened from p1: empty, and nothing restored; sending creates the empty task in p1.
+    const inA = renderModal('p1')
+    expect(promptInput().value).toBe('')
+    expect(screen.queryByTestId('new-task-restored')).toBeNull()
+    await submit()
+    expect(onCreate).toHaveBeenLastCalledWith(expect.objectContaining({ target: inProject('p1') }))
+    expect(JSON.stringify(onCreate.mock.calls.at(-1))).not.toContain('Only for the notes project')
+    inA.unmount()
+
+    // Back in p2 the prompt is still there, and goes to p2.
+    onCreate.mockClear()
+    renderModal('p2')
+    expect(promptInput().value).toBe('Only for the notes project')
+    await submit()
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      target: inProject('p2'),
+      start: expect.objectContaining({ prompt: { text: 'Only for the notes project' } })
+    }))
+  })
+
+  it('moves a kept draft with the destination picked in the dialog', async () => {
+    const first = renderModal('p1')
+    await typePrompt('Meant for notes after all')
+    await chooseFromPicker('notes')
+    expect(destination()).toBe('notes')
+    await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+    first.unmount()
+
+    const fromP1 = renderModal('p1')
+    expect(promptInput().value).toBe('')
+    fromP1.unmount()
+    renderModal('p2')
+    expect(promptInput().value).toBe('Meant for notes after all')
+  })
+
+  it('keeps the whole draft: terminal versus agent, and attached pictures', async () => {
+    const first = renderModal('p1')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Terminal' })) })
+    await act(async () => { fireEvent.change(screen.getByLabelText('Start-up command'), { target: { value: 'npm run dev' } }) })
+    await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+    first.unmount()
+
+    const again = renderModal('p1')
+    expect((screen.getByLabelText('Start-up command') as HTMLTextAreaElement).value).toBe('npm run dev')
+    expect(screen.getByTestId('new-task-restored').textContent).toContain('command')
+    again.unmount()
+
+    resetUnsentPromptForTests()
+    const image = { id: 'img1', preview: 'data:image/png;base64,AAAA', mediaType: 'image/png', data: 'AAAA' } as unknown as NonNullable<React.ComponentProps<typeof NewTaskModal>['initialImages']>[number]
+    const withImage = render(
+      <TabStatusProvider>
+        <NewTaskModal projects={PROJECTS} defaultProjectId="p1" getProjectDir={(p) => p.directory} config={CONFIG} allTags={[]}
+          onEnsureTag={() => 't1'} onAddProject={onAddProject} onCreate={onCreate} onClose={onClose}
+          initialPrompt="Look at this" initialImages={[image]} />
+      </TabStatusProvider>
+    )
+    const imgCount = document.querySelectorAll('[role=dialog] img').length
+    await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+    withImage.unmount()
+    renderModal('p1')
+    expect(promptInput().value).toBe('Look at this')
+    expect(document.querySelectorAll('[role=dialog] img').length).toBe(imgCount)
+  })
+
+  it('forgets the kept prompt once a task is started from it', async () => {
+    const first = renderModal()
+    await typePrompt('Ship it')
+    await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+    first.unmount()
+    const second = renderModal()
+    await submit()
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ start: expect.objectContaining({ prompt: { text: 'Ship it' } }) }))
+    second.unmount()
+    renderModal()
+    expect(promptInput().value).toBe('')
+  })
+
   it('starts the remembered agent on the first prompt, in the pre-selected project', async () => {
     renderModal()
     expect(document.activeElement).toBe(promptInput())

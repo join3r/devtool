@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react'
+import { confirmAction } from '../../confirmAction'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import { isChatTabType, isEphemeralProject } from '../../../shared/types'
@@ -107,11 +108,11 @@ export function useDeskDone(fallback: (projectId: string, taskId: string) => Pro
     if (isTaskWorking(task, (tabId) => tabStatusStore.getStatus(tabId))) {
       const background = taskBackground(task, activitiesRef.current)
       if (background) {
-        if (!window.confirm(`"${task.name}" still has work running in the background (${background.label}). Stop it and ${verb}?`)) return
+        if (!await confirmAction(`"${task.name}" still has work running in the background (${background.label}).\n\nStop it and ${verb}?`, { confirmLabel: `Stop and ${verb}`, danger: verb === 'discard' })) return
         if (task.autopilot) endAutopilot(projectId, taskId)
         await stopInBackground(background)
       } else {
-        if (!window.confirm(`The agent in "${task.name}" is still working. Stop it and ${verb}?`)) return
+        if (!await confirmAction(`The agent in "${task.name}" is still working.\n\nStop it and ${verb}?`, { confirmLabel: `Stop and ${verb}`, danger: verb === 'discard' })) return
         if (task.autopilot) endAutopilot(projectId, taskId)
         if (!await stopAgents(task)) return
       }

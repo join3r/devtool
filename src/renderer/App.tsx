@@ -17,10 +17,11 @@ import DeskStatusBar from './components/desk/DeskStatusBar'
 import DeskCommandBar from './components/desk/DeskCommandBar'
 import { TokenUsageModal } from './components/TokenUsage'
 import FirstRunWorktreesPrompt from './components/FirstRunWorktreesPrompt'
+import ConfirmHost from './components/ConfirmHost'
 
 function AppInner(): React.ReactElement {
   const {
-    effectiveTheme, exportWindowViewState, toggleFileBrowser: toggleSidePanel, selectedTaskId, selectedProjectId
+    effectiveTheme, exportWindowViewState, toggleFileBrowser: toggleSidePanel, selectedTaskId, selectedProjectId, config
   } = useApp()
   // A task's Files are a Bench tab; the side panel serves a project's map.
   const toggleFileBrowser = useCallback(() => {
@@ -110,6 +111,10 @@ function AppInner(): React.ReactElement {
     document.documentElement.classList.toggle('theme-light', effectiveTheme === 'light')
   }, [effectiveTheme])
 
+  // Settings → Appearance → Interface size.
+  const uiScale = config?.uiScale ?? 1
+  useEffect(() => { window.api.setUiZoom?.(uiScale) }, [uiScale])
+
   // The desk's graphite tokens (styles.css) hang off <html>, for the same CSS-var readers.
   useLayoutEffect(() => {
     document.documentElement.classList.add('layout-desk')
@@ -131,6 +136,7 @@ function AppInner(): React.ReactElement {
       <EntityActionsHost />
       <ChildTasksCloseHost />
       {tokenUsageOpen && <TokenUsageModal onClose={() => setTokenUsageOpen(false)} />}
+      <ConfirmHost />
       <Toasts />
     </div>
   )

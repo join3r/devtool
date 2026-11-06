@@ -181,13 +181,13 @@ export default function TaskHeader({
 
   return (
     <>
-      <div className="content-toolbar flex items-center gap-2 h-11 shrink-0 pl-4 pr-2 border-b border-hair bg-bg [-webkit-app-region:drag]">
+      <div className="content-toolbar @container/hdr flex items-center gap-2 h-11 shrink-0 pl-4 pr-2 border-b border-hair bg-bg [-webkit-app-region:drag]">
         {showIcon && <ProjectTileBadge project={project} theme={effectiveTheme} size={16} />}
         <div className="flex-1 min-w-0 flex items-center gap-1.5 whitespace-nowrap text-sm text-text-muted" title={title}>
           {task ? (
             <button
               type="button"
-              className="bg-transparent border-0 px-1 -mx-1 rounded-md font-medium text-sm text-text-muted truncate shrink-0 max-w-[40%] cursor-pointer hover:text-text hover:bg-sel transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
+              className="bg-transparent border-0 px-1 -mx-1 rounded-md font-medium text-sm text-text-muted truncate shrink-[6] min-w-6 max-w-[40%] cursor-pointer hover:text-text hover:bg-sel transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
               title={`Open ${project.name} home`}
               onClick={() => setSelectedTaskId(null)}
               onContextMenu={menusOn ? (e) => { e.preventDefault(); openProjectMenu({ x: e.clientX, y: e.clientY }) } : undefined}
