@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ChevronDown, MoreHorizontal, Play } from 'lucide-react'
+import { ChevronDown, ChevronRight, MoreHorizontal, Play } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { agentOfTab, AI_TAB_META, chatTabTypeFor, isChatTabType, pinnedItemKey } from '../../shared/types'
 import type { PinnedItem, Project, Stream, Task } from '../../shared/types'
@@ -21,9 +21,9 @@ import { SidebarStreamRunBadge, taskHeaderRunMenu, taskRunMenuEntry } from './St
 import { useStreamRuns } from '../streamRuns'
 import { useMoveTask } from '../hooks/useTaskMenuActions'
 
-const iconBtnCls = 'bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
+const iconBtnCls = 'bg-transparent border-0 cursor-pointer size-[26px] rounded-[7px] leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
-const crumbMenuBtnCls = 'bg-transparent border-0 cursor-pointer size-5 -ml-1 rounded-sm shrink-0 inline-flex items-center justify-center text-text-subtle hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
+const crumbMenuBtnCls = 'bg-transparent border-0 cursor-pointer size-5 -ml-1 rounded-sm shrink-0 inline-flex items-center justify-center text-text-subtle hover:text-text hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
 /** Where a breadcrumb's dropdown opens: under it, at its left edge. */
 function belowAnchor(e: React.MouseEvent): MenuAnchor {
@@ -181,13 +181,13 @@ export default function TaskHeader({
 
   return (
     <>
-      <div className="content-toolbar flex items-center gap-2 h-[38px] shrink-0 pl-3 pr-1.5 border-b-[0.5px] border-border [-webkit-app-region:drag]">
+      <div className="content-toolbar flex items-center gap-2 h-11 shrink-0 pl-4 pr-2 border-b border-hair bg-bg [-webkit-app-region:drag]">
         {showIcon && <ProjectTileBadge project={project} theme={effectiveTheme} size={16} />}
         <div className="flex-1 min-w-0 flex items-center gap-1.5 whitespace-nowrap text-sm text-text-muted" title={title}>
           {task ? (
             <button
               type="button"
-              className="bg-transparent border-0 p-0 font-semibold text-sm text-text truncate shrink-0 max-w-[40%] cursor-pointer hover:underline [-webkit-app-region:no-drag]"
+              className="bg-transparent border-0 px-1 -mx-1 rounded-md font-medium text-sm text-text-muted truncate shrink-0 max-w-[40%] cursor-pointer hover:text-text hover:bg-sel transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
               title={`Open ${project.name} home`}
               onClick={() => setSelectedTaskId(null)}
               onContextMenu={menusOn ? (e) => { e.preventDefault(); openProjectMenu({ x: e.clientX, y: e.clientY }) } : undefined}
@@ -219,10 +219,10 @@ export default function TaskHeader({
           )}
           {showStream && (
             <>
-              <span className="text-text-subtle">›</span>
+              <ChevronRight size={13} className="text-text-subtle shrink-0" aria-hidden="true" />
               <button
                 type="button"
-                className="bg-transparent border-0 p-0 font-mono text-sm text-text truncate shrink-0 max-w-[30%] cursor-pointer hover:underline [-webkit-app-region:no-drag]"
+                className="bg-transparent border-0 px-1 -mx-1 rounded-md font-mono text-sm text-text-muted truncate shrink-0 max-w-[30%] cursor-pointer hover:text-text hover:bg-sel transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
                 aria-haspopup="menu"
                 aria-expanded={entityMenu?.kind === 'stream'}
                 title={`${stream.name}: stream actions`}
@@ -246,7 +246,7 @@ export default function TaskHeader({
               )}
             </>
           )}
-          {task && <span className="text-text-subtle">›</span>}
+          {task && <ChevronRight size={13} className="text-text-subtle shrink-0" aria-hidden="true" />}
           {task && (renaming !== null ? (
             <input
               ref={renameRef}
@@ -261,10 +261,10 @@ export default function TaskHeader({
               }}
             />
           ) : (
-            <span className="text-text truncate min-w-0" data-testid="task-header-name">{task.name}</span>
+            <span className="text-text text-md font-semibold tracking-[-0.005em] truncate min-w-0" data-testid="task-header-name">{task.name}</span>
           ))}
         </div>
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {tools}
           {task && stream && menusOn && !isShellCommandProject(project) && (
             <button

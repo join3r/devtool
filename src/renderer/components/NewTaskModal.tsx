@@ -375,7 +375,7 @@ export default function NewTaskModal({
 
   return (
     <>
-      <div data-modal className="fixed inset-0 z-(--z-modal) flex items-start justify-center pt-[14vh] bg-black/50" onClick={requestClose}>
+      <div data-modal className="ui-fade-in fixed inset-0 z-(--z-modal) flex items-start justify-center pt-[14vh] bg-black/45 backdrop-blur-[2px]" onClick={requestClose}>
         <div
           role="dialog"
           aria-label="New task"

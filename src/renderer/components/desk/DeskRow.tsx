@@ -87,7 +87,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
   return { text: lastActivityAt(entry.task) > 0 ? null : 'Not started yet.' }
 }
 
-const actionCls = 'px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong whitespace-nowrap'
+const actionCls = 'h-6 px-2 inline-flex items-center gap-1 rounded-md border-0 bg-transparent text-sm text-text cursor-pointer hover:bg-sel whitespace-nowrap transition-colors duration-(--motion-fast)'
 
 export default function DeskRow({
   entry, kind, agent, activity, background = null, diff, selected, jumpNumber, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onTogglePin, onHover, rename,
@@ -152,9 +152,9 @@ export default function DeskRow({
   return (
     <div
       className={[
-        'group relative flex gap-3 mx-2 px-3 py-2.5 rounded-[9px] items-start cursor-pointer',
+        'group relative flex gap-3 mx-2 px-3 py-2.5 rounded-[10px] items-start cursor-pointer',
         'transition-colors duration-(--motion-fast)',
-        checked ? 'bg-sel' : selected ? 'bg-row-sel' : 'hover:bg-row-hover',
+        checked ? 'bg-sel' : selected ? 'bg-row-sel shadow-[inset_0_0_0_0.5px_var(--color-border)]' : 'hover:bg-row-hover',
         offline ? 'opacity-55' : '',
         nested ? 'py-2' : ''
       ].join(' ')}
@@ -170,6 +170,9 @@ export default function DeskRow({
       data-checked={checked || undefined}
       data-depth={nested ? depth : undefined}
     >
+      {selected && !checked && (
+        <span className="absolute left-1 top-3 bottom-3 w-[3px] rounded-full bg-text" aria-hidden="true" />
+      )}
       {jumpNumber !== undefined && (
         <span
           className="absolute right-3 top-2 z-10 min-w-6 h-5 px-1 flex items-center justify-center rounded-md border border-border-strong bg-surface-3 text-2xs font-semibold text-text tabular-nums pointer-events-none invisible [body.meta-held_&]:visible"
@@ -208,7 +211,7 @@ export default function DeskRow({
             {nested
               ? !stream.isMain && <span className="font-mono">{stream.name}</span>
               : <>
-                <strong className="font-semibold text-body">{project.name}</strong>
+                <span className="font-medium text-text-muted">{project.name}</span>
                 {!stream.isMain && <> › <span className="font-mono">{stream.name}</span></>}
               </>}
           </span>
@@ -217,7 +220,7 @@ export default function DeskRow({
             {kind === 'working' && (inBackground
               ? <span className="w-[7px] h-[7px] rounded-full bg-status-working" aria-label="background" data-testid="desk-row-background" />
               : <span className="w-[7px] h-[7px] rounded-full bg-status-working desk-pulse" aria-label="working" />)}
-            {unread && <span className="w-[7px] h-[7px] rounded-full bg-answered" aria-label="unread" />}
+            {unread && <span className="w-[7px] h-[7px] rounded-full bg-answered shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-answered)_18%,transparent)]" aria-label="unread" />}
             {diff && (diff.added > 0 || diff.deleted > 0) && (
               <span className="font-mono" title={`${diff.added} lines added, ${diff.deleted} removed${diff.files ? ` in ${diff.files === 1 ? '1 file' : `${diff.files} files`}` : ''}`} data-testid="desk-row-diff">
                 <span className="text-running">+{formatLineCount(diff.added)}</span> <span className="text-crashed">−{formatLineCount(diff.deleted)}</span>
@@ -292,11 +295,11 @@ export default function DeskRow({
         )}
       </div>
       <div
-        className={`absolute right-2.5 top-2 hidden ${checking ? '' : 'group-hover:flex'} gap-1 pl-2 bg-row-sel`}
+        className={`ui-pop-in absolute right-2 top-1.5 hidden ${checking ? '' : 'group-hover:flex'} items-center gap-px p-0.5 rounded-lg bg-field border-[0.5px] border-border-strong shadow-pop`}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <button type="button" className={actionCls} title="Done: land the work and close (E)" onClick={onDone} data-testid="desk-row-done">✓ Done</button>
+        <button type="button" className={actionCls} title="Done: land the work and close (E)" onClick={onDone} data-testid="desk-row-done"><Check size={13} strokeWidth={2.5} />Done</button>
         {kind === 'snoozed'
           ? entry.task.queued
             ? <button type="button" className={actionCls} title="Start it now, alongside the other agents (W)" onClick={onWake} data-testid="desk-row-start-queued">Start now</button>

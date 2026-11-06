@@ -5,8 +5,8 @@ interface Props {
   isoTimestamps: string[]
 }
 
-// Intensity ramp as accent washes so it reads correctly in both themes
-const CELL_BG = ['bg-surface-2', 'bg-accent/25', 'bg-accent/45', 'bg-accent/70', 'bg-accent']
+// Intensity ramp as washes of the running green so it reads correctly in both themes
+const CELL_BG = ['bg-surface-3', 'bg-running/30', 'bg-running/55', 'bg-running/80', 'bg-running']
 const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 

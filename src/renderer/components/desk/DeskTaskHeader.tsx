@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ChevronDown, Clock, Pin } from 'lucide-react'
+import { Check, ChevronDown, Clock, Pin } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { pinnedItemKey, type PinnedItem, type Project, type Task } from '../../../shared/types'
 import { canLandTask, useLandingOp } from '../../taskLanding'
@@ -17,7 +17,7 @@ import DeskLoopPanel from './DeskLoopPanel'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import { childProgress, childProgressLine, delegationTree, statusFrom, waitingLine, waitingOnChildren } from '../../../shared/delegation'
 
-const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border-strong bg-transparent text-sm text-text cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
+const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border bg-field text-sm font-medium text-text cursor-pointer shadow-(--shadow-raise) hover:border-border-strong hover:bg-row-hover [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
 /**
  * Left of the task menu in the desk's task header: the Autopilot pill and
@@ -93,7 +93,7 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
       {pin && (
         <button
           type="button"
-          className={`shrink-0 mr-1.5 h-[26px] w-[28px] flex items-center justify-center rounded-[7px] border border-border-strong cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${pinned ? 'bg-sel text-accent' : 'bg-transparent text-text-muted hover:text-text'}`}
+          className={`shrink-0 mr-1 size-[26px] flex items-center justify-center rounded-[7px] border-0 cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${pinned ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text'}`}
           title={pinned ? 'Unpin: the task leaves the Inbox while its agent works' : 'Pin: the task stays in the Inbox while its agent works'}
           aria-label={pinned ? 'Unpin from Inbox' : 'Pin to Inbox'}
           aria-pressed={pinned}
@@ -145,7 +145,7 @@ export function DeskDoneButton({ project, task }: { project: Project; task: Task
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const lands = canLandTask(project, task)
   const stream = findStreamOfTask(project, task.id)
-  const fill = 'h-[26px] border-0 bg-accent text-accent-ink text-sm font-semibold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-default [-webkit-app-region:no-drag]'
+  const fill = 'h-[26px] inline-flex items-center gap-1 border-0 bg-accent text-accent-ink text-sm font-semibold cursor-pointer shadow-(--shadow-raise) transition-[filter] duration-(--motion-fast) hover:brightness-110 disabled:opacity-50 disabled:cursor-default [-webkit-app-region:no-drag]'
 
   return (
     <>
@@ -158,7 +158,7 @@ export function DeskDoneButton({ project, task }: { project: Project; task: Task
           onClick={() => { void done(project.id, task.id) }}
           data-testid="desk-task-done"
         >
-          {landing ? 'Landing…' : '✓ Done'}
+          {landing ? 'Landing…' : <><Check size={13} strokeWidth={2.75} />Done</>}
         </button>
         {lands && (
           <button
@@ -229,7 +229,7 @@ function DoneMenu({ anchor, streamName, onPick, onClose }: {
       ref={pos.ref}
       role="menu"
       aria-label="Done"
-      className="fixed z-(--z-menu) w-[240px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.5)]"
+      className="fixed z-(--z-menu) w-[240px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-pop ui-pop-in"
       style={pos.style}
       onMouseDown={(e) => e.stopPropagation()}
       data-testid="desk-done-menu"

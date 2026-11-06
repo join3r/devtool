@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUp } from 'lucide-react'
 import { isChatTabType, type AppConfig, type DeskScope, type Project } from '../../../shared/types'
 import ProjectTileBadge from '../ProjectTileBadge'
 import { PROMPT_BOX_AGENT_LABEL } from '../promptBox'
@@ -13,7 +14,7 @@ import { useAllTabStatuses } from '../../context/TabStatusContext'
 import SameFolderWarning from './SameFolderWarning'
 import { AttachmentStrip, toChatImages, useImageAttachments } from '../claude-chat/imageAttachments'
 
-const chipCls = 'flex items-center gap-1.5 bg-surface-3 border border-border rounded-full px-2.5 py-[3px] text-sm text-body cursor-pointer hover:border-border-strong min-w-0'
+const chipCls = 'flex items-center gap-1.5 h-6 bg-sel border-0 rounded-md px-2 text-sm text-body cursor-pointer hover:bg-row-sel hover:text-text transition-colors duration-(--motion-fast) min-w-0'
 
 /**
  * The desk's compose box: "Ask or give a task…" and a where chip (project ›
@@ -139,7 +140,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   const autopilotHint = canAutopilot ? ` · ⌘↵ on Autopilot${config.autopilotReview ? ' with a Codex review' : ''}` : ''
 
   return (
-    <div ref={boxRef} className="@container border border-line bg-row-hover rounded-[10px] px-3 py-2.5 flex flex-col gap-2 focus-within:border-border-strong" data-testid="desk-compose" {...attachments.dropProps}>
+    <div ref={boxRef} className="@container border border-border bg-field rounded-xl px-3 pt-2.5 pb-2 flex flex-col gap-2 shadow-(--shadow-raise) transition-[border-color,box-shadow] duration-(--motion-fast) hover:border-border-strong focus-within:border-border-focus/60 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-border-focus)_16%,transparent)]" data-testid="desk-compose" {...attachments.dropProps}>
       {images.length > 0 && (
         <div className="-mx-2.5 -mt-2.5">
           <AttachmentStrip images={images} onRemove={attachments.remove} />
@@ -151,7 +152,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
         aria-label="New task"
         placeholder="Ask or give a task… @ picks the project"
         title={`↵ starts the task${autopilotHint} · @ picks the project${takesImages ? ' · paste or drop images to send them' : ''} · ${formatShortcutForApp('CmdOrCtrl+N')} comes back here`}
-        className="bg-transparent border-0 outline-none text-text text-md resize-none leading-snug placeholder:text-text-muted"
+        className="bg-transparent border-0 outline-none text-text text-md resize-none leading-snug placeholder:text-text-subtle"
         value={text}
         onChange={(e) => edit(e.target.value, e.target.selectionStart)}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
@@ -213,9 +214,20 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
           data-testid="desk-compose-options"
         >Options…</button>
         {/* A narrow sidebar keeps the chip and drops the key hint (it is the textarea's tooltip too). */}
-        <span className="hidden @[440px]:inline font-mono text-xs text-text-muted whitespace-nowrap">
+        <span className="hidden @[440px]:inline font-mono text-xs text-text-subtle whitespace-nowrap">
           ↵ fire{canAutopilot && ' · ⌘↵ autopilot'}
         </span>
+        <button
+          type="button"
+          className="shrink-0 size-6 inline-flex items-center justify-center rounded-md border-0 bg-accent text-accent-ink cursor-pointer transition-[opacity,transform] duration-(--motion-fast) hover:brightness-110 active:scale-95 disabled:opacity-25 disabled:cursor-default disabled:active:scale-100"
+          disabled={!text.trim() || !target}
+          title={target ? `Start the task (↵)${canAutopilot ? ' · ⌘↵ on Autopilot' : ''}` : 'Pick a project first: type @'}
+          aria-label="Start the task"
+          onClick={() => fire(false)}
+          data-testid="desk-compose-send"
+        >
+          <ArrowUp size={14} strokeWidth={2.5} />
+        </button>
       </div>
       {target && text.trim() !== '' && (
         <SameFolderWarning
@@ -268,7 +280,7 @@ function WhereMenu({ anchor, options, cursor, filtered, theme, onHover, onPick, 
   return (
     <div
       ref={pos.ref}
-      className="fixed z-(--z-menu) w-[260px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.5)] overflow-y-auto"
+      className="fixed z-(--z-menu) w-[260px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-pop ui-pop-in overflow-y-auto"
       style={pos.style}
       // Keep focus (and the caret) in the textarea.
       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}

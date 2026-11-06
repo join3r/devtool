@@ -83,6 +83,7 @@
   --shadow-focus: 0 0 0 3px var(--color-sel);
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.18);
   --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 1px rgba(0, 0, 0, 0.12);
+  --shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.25);
 
   /* font */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -131,18 +132,18 @@
 }
 
 .layout-desk:not(.theme-light) {
-  --color-bg: #111214;
+  --color-bg: #0f1012;
   --color-surface: #141518;
-  --color-surface-2: #17181b;
-  --color-surface-3: #1e2024;
-  --color-field: #17181b;
+  --color-surface-2: #191a1e;
+  --color-surface-3: #202227;
+  --color-field: #1a1b1f;
   --color-text: #ececed;
   --color-text-muted: #9a9ca3;
   --color-text-subtle: #8a8d95;
   --color-border: #2a2c31;
-  --color-border-strong: #33363c;
+  --color-border-strong: #363940;
   --color-border-focus: #8cb2ff;
-  --color-hair: #212327;
+  --color-hair: #222428;
   --color-sel: rgba(236, 236, 237, 0.08);
   --color-accent: #ececed;
   --color-accent-ink: #111214;
@@ -160,17 +161,21 @@
   --color-running: #6cc58f;
   --color-crashed: #f0806e;
   --color-row-hover: #1a1b1f;
-  --color-row-sel: #1f2126;
+  --color-row-sel: #212329;
   --color-body: #d6d6d8;
   --color-line: #2f3237;
+  --shadow-pop: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 16px 40px -8px rgba(0, 0, 0, 0.6), 0 4px 12px -2px rgba(0, 0, 0, 0.35);
+  --shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --scroll-thumb: rgba(236, 236, 237, 0.14);
+  --scroll-thumb-hover: rgba(236, 236, 237, 0.26);
 }
 
 /* Graphite light: cool paper-white neutrals; state colours darkened to read on white. */
 .layout-desk.theme-light {
-  --color-bg: #fbfbfc;
-  --color-surface: #f4f4f6;
-  --color-surface-2: #eeeef1;
-  --color-surface-3: #e7e8eb;
+  --color-bg: #ffffff;
+  --color-surface: #f6f6f8;
+  --color-surface-2: #f0f0f3;
+  --color-surface-3: #e8e9ec;
   --color-field: #ffffff;
   --color-text: #17181b;
   --color-text-muted: #5f626a;
@@ -198,10 +203,14 @@
   --color-answered: #2f63d0;
   --color-running: #2f8a57;
   --color-crashed: #c4473a;
-  --color-row-hover: #ececef;
-  --color-row-sel: #e4e5e9;
+  --color-row-hover: #eeeef1;
+  --color-row-sel: #e6e7eb;
   --color-body: #2a2c31;
   --color-line: #d5d7dc;
+  --shadow-pop: 0 0 0 1px rgba(15, 16, 20, 0.06), 0 16px 40px -8px rgba(15, 16, 20, 0.18), 0 4px 12px -2px rgba(15, 16, 20, 0.08);
+  --shadow-raise: 0 1px 2px rgba(15, 16, 20, 0.06), 0 0 0 0.5px rgba(15, 16, 20, 0.04);
+  --scroll-thumb: rgba(23, 24, 27, 0.16);
+  --scroll-thumb-hover: rgba(23, 24, 27, 0.3);
 }
 
 /* Working pulses at 1 Hz (desk layout). */
@@ -242,11 +251,36 @@
     line-height: 1.5;
   }
 
-  *::-webkit-scrollbar { width: 5px; height: 5px; }
-  *::-webkit-scrollbar-track { background: transparent; }
-  *::-webkit-scrollbar-thumb { background: rgba(240, 236, 228, 0.18); border-radius: 3px; }
-  .theme-light *::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+  /* A 4px thumb inside an 8px gutter: easy to grab, quiet to look at. */
+  *::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb, rgba(240, 236, 228, 0.18));
+    border: 2px solid transparent; background-clip: padding-box; border-radius: 8px;
+  }
+  *::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover, rgba(240, 236, 228, 0.3)); }
+  .theme-light:not(.layout-desk) *::-webkit-scrollbar-thumb { background-color: rgba(0, 0, 0, 0.2); }
+
+  ::selection { background: color-mix(in srgb, var(--color-border-focus) 32%, transparent); }
+
+  /* Keyboard focus: one clear ring everywhere; the mouse doesn't get it. */
+  :where(button, a, [role="tab"], [role="menuitem"], [role="checkbox"], [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-border-focus) 70%, transparent);
+    outline-offset: 1px;
+  }
+  .xterm :focus-visible, .monaco-editor :focus-visible { outline: none; }
+
+  body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 }
+
+/* Entrances for floating surfaces: menus drop in, dialogs rise in. */
+@keyframes ui-pop-in { from { opacity: 0; transform: translateY(-3px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes ui-rise-in { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.ui-pop-in { animation: ui-pop-in 120ms cubic-bezier(0.2, 0.8, 0.2, 1); transform-origin: top; }
+.ui-rise-in { animation: ui-rise-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ui-fade-in { animation: ui-fade-in 140ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .ui-pop-in, .ui-rise-in, .ui-fade-in { animation: none; } }
 
 @layer utilities {
   .sidebar-hidden .content-toolbar { padding-left: 76px; background: var(--color-surface-2); border-bottom: none; }
@@ -449,6 +483,8 @@
   .chat-code:hover .chat-code-actions, .chat-code-actions:focus-within { opacity: 1; }
   .chat-code-btn:hover { color: var(--color-text); background: var(--color-surface-3); }
   .note-preview.chat-md code { font-size: 0.88em; padding: 1px 4px; }
+  /* Inline-code padding must not reach a fenced block: it would indent only the first line. */
+  .note-preview.chat-md pre code { padding: 0; font-size: 12px; }
   .note-preview.chat-md table { font-size: 12px; margin-bottom: 8px; }
   .note-preview.chat-md th, .note-preview.chat-md td { padding: 4px 8px; }
   .chat-streaming > *:last-child::after {

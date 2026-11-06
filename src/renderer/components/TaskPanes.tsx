@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
-import TabBar from './TabBar'
+import { X } from 'lucide-react'
+import TabBar, { TabStatusIndicator } from './TabBar'
+import NewTabMenu from './NewTabMenu'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 import TerminalTab from './TerminalTab'
 import BrowserTab from './BrowserTab'
 import AiToolTab from './AiToolTab'
@@ -36,7 +39,11 @@ export interface DeskPanesLayout {
   open: boolean
   height: number
   view: BenchView
-  strip: React.ReactNode
+  /**
+   * The strip, given what it carries at its right end: the lone Bench tab's
+   * "+" and close, when that tab's own bar is folded into the strip.
+   */
+  strip: (trailing: React.ReactNode) => React.ReactNode
   /** Files, Changes or Notes, shown in place of the panes when `view` is one of them. */
   panel: React.ReactNode
 }
@@ -79,7 +86,7 @@ function paneColumn(index: number): number {
  * node, so terminals keep their session and browser webviews don't reload.
  */
 export default function TaskPanes({ project, task, visible, projectDir, desk }: Props): React.ReactElement {
-  const { effectiveTheme, setPaneWidths, convertClaudeTab } = useApp()
+  const { effectiveTheme, setPaneWidths, convertClaudeTab, removeTab } = useApp()
   const focusedPane = useFocusedPane(task.id)
   const gridRef = useRef<HTMLDivElement | null>(null)
   const [dragWidths, setDragWidths] = useState<number[] | null>(null)
@@ -93,7 +100,11 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
   // Without a conversation the Bench is the whole task, always open.
   const benchOpen = !!desk && (!chatTabId || desk.open)
   const benchShowsPanes = benchOpen && desk?.view === 'panes'
-  const showBars = desk ? benchShowsPanes : showsTabBars(task)
+  // One Bench tab in one pane: its bar would only repeat the strip, so the strip carries its "+" and ×.
+  const shownBench = bench ? bench.filter(pane => !pane.hidden) : []
+  const soloTab = shownBench.length === 1 && shownBench[0].tabs.length === 1 ? shownBench[0].tabs[0] : null
+  const soloPane = soloTab ? task.panes.findIndex(pane => pane.tabs.some(tab => tab.id === soloTab.id)) : -1
+  const showBars = desk ? benchShowsPanes && !soloTab : showsTabBars(task)
   const barRow = desk ? 3 : 1
   const bodyRow = desk ? 4 : showBars ? 2 : 1
   const widths = dragWidths && dragWidths.length === task.panes.length ? dragWidths : task.panes.map(pane => pane.width)
@@ -240,7 +251,25 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
         />
       ))}
       {desk && task.panes.length > 0 && (
-        <div className="min-w-0" style={{ gridColumn: '1 / -1', gridRow: 2 }}>{desk.strip}</div>
+        <div className="min-w-0" style={{ gridColumn: '1 / -1', gridRow: 2 }}>
+          {desk.strip(benchShowsPanes && soloTab ? (
+            <span className="flex items-center gap-0.5" data-testid="bench-solo-tab">
+              <span className="px-1.5 flex items-center"><TabStatusIndicator tabId={soloTab.id} /></span>
+              {soloTab.id !== task.mainTabId && (
+                <button
+                  type="button"
+                  className="size-6 inline-flex items-center justify-center rounded-md bg-transparent border-0 text-text-muted cursor-pointer hover:text-text hover:bg-sel transition-colors duration-(--motion-fast)"
+                  title={`Close ${soloTab.title} (${formatShortcutForApp('CmdOrCtrl+W')})`}
+                  aria-label={`Close ${soloTab.title}`}
+                  onClick={() => { void removeTab(projectId, task.id, soloTab.id) }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+              <NewTabMenu projectId={projectId} taskId={task.id} pane={soloPane} />
+            </span>
+          ) : null)}
+        </div>
       )}
       {desk && benchOpen && desk.view !== 'panes' && (
         <div className="min-w-0 min-h-0 flex flex-col overflow-hidden bg-surface" style={{ gridColumn: '1 / -1', gridRow: `${barRow} / -1` }}>

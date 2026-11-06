@@ -207,7 +207,7 @@ export default function StreamRunLogs({ projectId, streamId, commandId, embedded
   )
   if (isEmbedded) return body
   return (
-    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" onClick={close} data-modal>
+    <div className="ui-fade-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/45 backdrop-blur-[2px]" onClick={close} data-modal>
       {body}
     </div>
   )

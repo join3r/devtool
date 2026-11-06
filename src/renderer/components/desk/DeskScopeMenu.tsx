@@ -47,7 +47,7 @@ export default function DeskScopeMenu({ anchor, projects, pinnedIds, pinnedStrea
     <div
       ref={pos.ref}
       role="menu"
-      className="fixed z-(--z-menu) w-[280px] max-h-[70vh] overflow-y-auto bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.5)]"
+      className="fixed z-(--z-menu) w-[280px] max-h-[70vh] overflow-y-auto bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-pop ui-pop-in"
       style={pos.style}
       onMouseDown={(e) => e.stopPropagation()}
       data-testid="desk-scope-menu"

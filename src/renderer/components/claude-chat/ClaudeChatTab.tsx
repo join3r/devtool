@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown, FolderOpen } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { AiTabType, SshConfig } from '../../../shared/types'
@@ -425,10 +425,19 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
           {/* Room for the pills so they never cover the first message. */}
           <div className={`max-w-[860px] mx-auto px-5 pb-3 ${hasPills ? 'pt-11' : 'pt-4'}`}>
             {empty ? (
-              <div className="pt-[18vh] text-center select-none">
-                <div className="text-2xl text-accent mb-2">&#10022;</div>
-                <div className="text-md text-text">{starting ? `Starting ${features.label}…` : `What should ${features.label} work on?`}</div>
-                <div className="text-sm text-text-subtle mt-1 font-mono truncate">{projectDir || sshConfig?.remoteDir || '~'}</div>
+              <div className="pt-[18vh] flex flex-col items-center text-center select-none">
+                <div className="ui-rise-in size-11 mb-4 rounded-2xl flex items-center justify-center bg-surface-2 border border-border text-xl text-text shadow-(--shadow-raise)" aria-hidden="true">&#10022;</div>
+                <div className="text-lg font-semibold tracking-[-0.01em] text-text">{starting ? `Starting ${features.label}…` : `What should ${features.label} work on?`}</div>
+                {(() => {
+                  const dir = projectDir || sshConfig?.remoteDir || '~'
+                  const name = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || dir
+                  return (
+                    <div className="mt-2.5 max-w-full inline-flex items-center gap-1.5 h-6 px-2 rounded-md bg-sel text-xs text-text-muted font-mono" title={dir}>
+                      <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
+                      <span className="truncate">{name}</span>
+                    </div>
+                  )
+                })()}
               </div>
             ) : (
               <Timeline

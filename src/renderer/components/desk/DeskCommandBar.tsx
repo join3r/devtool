@@ -245,12 +245,12 @@ export default function DeskCommandBar(): React.ReactElement | null {
   let index = 0
   return createPortal(
     <div
-      className="fixed inset-0 z-(--z-modal) bg-black/45 flex items-start justify-center pt-[12vh] px-4"
+      className="ui-fade-in fixed inset-0 z-(--z-modal) bg-black/45 backdrop-blur-[2px] flex items-start justify-center pt-[12vh] px-4"
       data-modal
       onMouseDown={e => { if (e.target === e.currentTarget) close() }}
       data-testid="command-bar"
     >
-      <div role="dialog" aria-label="Command bar" className="w-full max-w-[760px] bg-surface-2 text-text rounded-[14px] border border-line shadow-[0_30px_80px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col max-h-[76vh]">
+      <div role="dialog" aria-label="Command bar" className="w-full max-w-[760px] bg-surface-2 text-text rounded-[14px] ui-pop-in border border-line shadow-pop overflow-hidden flex flex-col max-h-[76vh]">
         <div className="px-[18px] py-4 flex flex-col gap-3 border-b border-hair">
           <div className="relative text-[16px] leading-[1.6]">
             <div ref={mirrorRef} aria-hidden className="absolute inset-0 overflow-hidden whitespace-pre-wrap break-words pointer-events-none text-text">

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Folder, GitBranch, StickyNote } from 'lucide-react'
+import { Folder, GitBranch, Inbox, Plus, Search, StickyNote } from 'lucide-react'
+import { deskEvents } from './desk/deskEvents'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { useApp } from '../context/AppContext'
 import { isTabJumpKey, jumpDigit, useMetaHeld } from '../hooks/useMetaHeld'
 import { buildWindowTitle } from '../hooks/useAppState'
@@ -452,7 +454,7 @@ export default function ContentArea(): React.ReactElement {
       )}
 
       {!hasProjectSelection && (
-        <div className="flex-1 flex items-center justify-center text-text-muted text-md">Select or create a task to get started</div>
+        <NothingOpen />
       )}
       {/* A project with no task selected shows its Project map (the scope menu, ⌘K or a row's tile lands here). */}
       {/* An archived task or stream opened from a Done row shows read-only in Home's place. */}
@@ -512,6 +514,57 @@ export default function ContentArea(): React.ReactElement {
           the surface the tabs it protects live on. */}
       <UnsavedChangesModal />
       <StateSyncErrorModal />
+    </div>
+  )
+}
+
+/** The content area with no project or task open: what to do next, and the keys for it. */
+function NothingOpen(): React.ReactElement {
+  const keys: Array<[string, string]> = [
+    [formatShortcutForApp('CmdOrCtrl+N'), 'New task'],
+    [formatShortcutForApp('CmdOrCtrl+K'), 'Jump to a task, project or command'],
+    [`${formatShortcutForApp('CmdOrCtrl+1')}–9`, 'Open an Inbox row'],
+    [formatShortcutForApp('CmdOrCtrl+E'), 'Done: land the work and close']
+  ]
+  return (
+    <div className="flex-1 min-h-0 flex flex-col" data-testid="content-empty">
+      {/* The window has no header here: keep a strip to drag it by. */}
+      <div className="h-11 shrink-0 [-webkit-app-region:drag]" />
+      <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center px-8 pb-11">
+        <div className="ui-rise-in w-full max-w-[380px] flex flex-col items-center text-center">
+          <span className="size-12 rounded-2xl flex items-center justify-center bg-surface-2 border border-border text-text-muted shadow-(--shadow-raise)" aria-hidden="true">
+            <Inbox size={22} strokeWidth={1.75} />
+          </span>
+          <h2 className="mt-5 text-lg font-semibold text-text tracking-[-0.01em]">Nothing open</h2>
+          <p className="mt-1.5 text-base text-text-muted text-balance">Pick a task from the Inbox, or give an agent something new to do.</p>
+          <div className="mt-5 flex items-center gap-2">
+            <button
+              type="button"
+              className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border-0 bg-accent text-accent-ink text-sm font-semibold cursor-pointer shadow-(--shadow-raise) hover:brightness-110 transition-[filter] duration-(--motion-fast)"
+              onClick={() => deskEvents.focusCompose()}
+              data-testid="content-empty-new"
+            >
+              <Plus size={14} strokeWidth={2.5} /> New task
+            </button>
+            <button
+              type="button"
+              className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-field text-sm font-medium text-text cursor-pointer shadow-(--shadow-raise) hover:border-border-strong hover:bg-row-hover transition-colors duration-(--motion-fast)"
+              onClick={() => paletteEvents.emit('palette-prefix-set', '')}
+            >
+              <Search size={14} /> Jump to…
+            </button>
+          </div>
+          <div className="mt-8 w-full h-px bg-hair" />
+          <dl className="mt-5 mx-auto grid grid-cols-[auto_auto] gap-x-3 gap-y-2 text-sm text-left">
+            {keys.map(([key, label]) => (
+              <React.Fragment key={label}>
+                <dt className="justify-self-end"><kbd className="font-mono text-xs text-text-muted bg-surface-2 border border-border rounded-md px-1.5 py-px">{key}</kbd></dt>
+                <dd className="text-text-muted">{label}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+        </div>
+      </div>
     </div>
   )
 }

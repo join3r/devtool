@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Folders, List, Search, X } from 'lucide-react'
+import { ChevronDown, Folders, Inbox, List, Search, X } from 'lucide-react'
 import type { DeskScope, DeskTab, Project } from '../../../shared/types'
 import { autopilotLanded } from '../../../shared/autopilot'
 import { useApp } from '../../context/AppContext'
@@ -49,9 +49,13 @@ function typingTarget(target: EventTarget | null): boolean {
 function GroupHead({ label, count, tone, hint }: { label: string; count: number; tone?: 'needs' | 'answered'; hint?: string }): React.ReactElement {
   const color = tone === 'needs' ? 'text-needs' : tone === 'answered' ? 'text-answered' : 'text-text-muted'
   return (
-    <div className="flex items-center justify-between px-[18px] pt-3.5 pb-1.5 text-xs font-semibold uppercase tracking-[0.07em]" data-testid="desk-group">
-      <span className={color}>{label} · {count}</span>
-      {hint && <span className="normal-case tracking-normal font-normal text-text-muted">{hint}</span>}
+    <div className="flex items-center justify-between px-[18px] pt-4 pb-1.5 text-2xs font-semibold uppercase tracking-[0.08em]" data-testid="desk-group">
+      <span className={`flex items-center gap-1.5 ${color}`}>
+        {tone && <span className={`size-1.5 rounded-full ${tone === 'needs' ? 'bg-needs' : 'bg-answered'}`} aria-hidden="true" />}
+        {label}
+        <span className="min-w-[18px] h-4 px-1 inline-flex items-center justify-center rounded-full bg-sel text-text-muted font-semibold tracking-normal tabular-nums">{count}</span>
+      </span>
+      {hint && <span className="normal-case tracking-normal font-normal text-text-subtle font-mono">{hint}</span>}
     </div>
   )
 }
@@ -61,13 +65,14 @@ function ProjectGroupHead({ project, count, theme, showTile, onScope }: { projec
   return (
     <button
       type="button"
-      className="flex w-full items-center gap-2 px-[18px] pt-3.5 pb-1.5 bg-transparent border-0 text-left text-xs font-semibold text-text-muted cursor-pointer hover:text-text"
+      className="flex w-full items-center gap-2 px-[18px] pt-4 pb-1.5 bg-transparent border-0 text-left text-xs font-semibold text-text-muted cursor-pointer hover:text-text transition-colors duration-(--motion-fast)"
       title={`Show only ${project.name}`}
       onClick={onScope}
       data-testid="desk-project-group"
     >
       {showTile && <ProjectTileBadge project={project} theme={theme} size={14} />}
-      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{project.name} · {count}</span>
+      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{project.name}</span>
+      <span className="min-w-[18px] h-4 px-1 inline-flex items-center justify-center rounded-full bg-sel text-2xs tabular-nums">{count}</span>
     </button>
   )
 }
@@ -505,7 +510,10 @@ export default function DeskColumn({
   }
 
   const empty = (text: string): React.ReactElement => (
-    <div className="px-6 py-10 text-center text-sm text-text-muted" data-testid="desk-empty">{text}</div>
+    <div className="px-6 py-12 flex flex-col items-center gap-3 text-center text-sm text-text-muted" data-testid="desk-empty">
+      <span className="size-10 rounded-full flex items-center justify-center bg-sel text-text-subtle" aria-hidden="true"><Inbox size={18} strokeWidth={1.75} /></span>
+      <span className="max-w-[220px]">{text}</span>
+    </div>
   )
 
   return (
@@ -520,7 +528,7 @@ export default function DeskColumn({
       <div className="h-11 shrink-0 flex items-center gap-2 pl-[78px] pr-3 border-b border-hair [-webkit-app-region:drag]">
         <button
           type="button"
-          className="flex items-center gap-1 min-w-0 px-2 py-1 rounded-md bg-transparent border-0 text-sm text-text cursor-pointer hover:bg-surface-3 [-webkit-app-region:no-drag]"
+          className="flex items-center gap-1.5 min-w-0 h-[26px] px-2 rounded-md bg-transparent border-0 text-sm font-semibold text-text cursor-pointer hover:bg-sel transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setScopeMenu(scopeMenu ? null : { x: r.left, y: r.bottom + 4 }) }}
           onMouseDown={(e) => e.stopPropagation()}
           data-testid="desk-scope"
@@ -535,12 +543,12 @@ export default function DeskColumn({
         <span className="flex-1" />
         <button
           type="button"
-          className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-row-hover border border-border text-sm text-text-muted cursor-pointer hover:text-text [-webkit-app-region:no-drag]"
+          className="flex items-center gap-2 h-[26px] pl-2 pr-1 rounded-lg bg-field border border-border text-sm text-text-muted cursor-pointer shadow-(--shadow-raise) hover:text-text hover:border-border-strong transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
           onClick={() => paletteEvents.emit('palette-prefix-set', '')}
           title="Jump, run a command or start a task"
         >
           <Search size={13} />
-          <span className="font-mono text-xs border border-line rounded px-1.5">{formatShortcutForApp('CmdOrCtrl+K')}</span>
+          <span className="font-mono text-2xs leading-4 bg-sel rounded px-1.5">{formatShortcutForApp('CmdOrCtrl+K')}</span>
         </button>
       </div>
 
@@ -560,7 +568,8 @@ export default function DeskColumn({
             onAll={() => setChecked(new Set(shown.map(entry => entry.task.id)))}
             onClear={clearChecked}
           />
-        ) : <div className="flex gap-1 items-center" role="tablist">
+        ) : <div className="flex gap-2 items-center">
+          <div className="flex gap-0.5 items-center p-0.5 rounded-lg bg-sel" role="tablist">
           {TABS.map(({ id, label }) => {
             const active = tab === id
             const count = counts[id]
@@ -571,20 +580,21 @@ export default function DeskColumn({
                 role="tab"
                 aria-selected={active}
                 className={[
-                  'rounded-full px-2.5 py-[3px] text-sm border cursor-pointer',
-                  active ? 'bg-border border-border-strong text-text font-semibold' : 'bg-transparent border-transparent text-text-muted hover:text-text'
+                  'h-6 rounded-md px-2.5 text-sm border-0 cursor-pointer flex items-center transition-[color,background-color,box-shadow] duration-(--motion-fast)',
+                  active ? 'bg-field text-text font-semibold shadow-(--shadow-raise)' : 'bg-transparent text-text-muted font-medium hover:text-text'
                 ].join(' ')}
                 onClick={() => updateDesk({ tab: id })}
                 data-testid={`desk-tab-${id}`}
               >
-                {label}{count ? <span className="ml-1 tabular-nums">{count}</span> : null}
+                {label}{count ? <span className={`ml-1.5 tabular-nums text-xs ${active ? 'text-text-muted' : 'text-text-subtle'}`}>{count}</span> : null}
               </button>
             )
           })}
+          </div>
           <span className="flex-1" />
           <button
             type="button"
-            className="flex items-center p-1 rounded-md bg-transparent border-0 text-text-muted cursor-pointer hover:text-text hover:bg-surface-3"
+            className={`size-7 flex items-center justify-center rounded-md border-0 cursor-pointer transition-colors duration-(--motion-fast) hover:text-text hover:bg-sel ${grouped ? 'bg-sel text-text' : 'bg-transparent text-text-muted'}`}
             onClick={() => updateConfig({ inboxLayout: grouped ? 'flat' : 'grouped' })}
             title={grouped ? 'Group by status' : 'Group by project'}
             aria-pressed={grouped}

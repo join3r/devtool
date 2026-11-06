@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { Bot, FileCode, GitCompare, Globe, NotebookPen, Sparkles, SquareTerminal, StickyNote } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
 import { isRenamableTab } from '../../shared/types'
@@ -31,16 +32,20 @@ interface Props {
 
 const DRAG_THRESHOLD = 5
 
-function tabIcon(type: TabType): string {
-  if (type === 'terminal') return '>'
-  if (type === 'browser') return '◉'
-  if (type === 'claude' || type === 'claude-chat') return '✦'
-  if (type === 'codex' || type === 'codex-chat') return '◫'
-  if (type === 'pi' || type === 'pi-chat') return 'π'
-  return '>'
+function tabIcon(type: TabType): React.ReactElement {
+  const props = { size: 13, strokeWidth: 2, 'aria-hidden': true } as const
+  if (type === 'browser') return <Globe {...props} />
+  if (type === 'claude' || type === 'claude-chat') return <Sparkles {...props} />
+  if (type === 'codex' || type === 'codex-chat') return <Bot {...props} />
+  if (type === 'pi' || type === 'pi-chat') return <span className="font-semibold leading-none" aria-hidden="true">π</span>
+  if (type === 'diff') return <GitCompare {...props} />
+  if (type === 'editor') return <FileCode {...props} />
+  if (type === 'notebook') return <NotebookPen {...props} />
+  if (type === 'note') return <StickyNote {...props} />
+  return <SquareTerminal {...props} />
 }
 
-function TabStatusIndicator({ tabId }: { tabId: string }): React.ReactElement | null {
+export function TabStatusIndicator({ tabId }: { tabId: string }): React.ReactElement | null {
   const status = useTabStatus(tabId)
   if (!status) return null
 
@@ -200,9 +205,9 @@ export default function TabBar({
             <div
               className={[
                 'tab',
-                'group relative flex items-center gap-1.5 h-full px-3 text-base cursor-pointer whitespace-nowrap text-text-muted min-w-0 select-none hover:text-text',
+                'group relative flex items-center gap-1.5 h-full px-3 text-sm font-medium cursor-pointer whitespace-nowrap text-text-muted min-w-0 select-none hover:text-text',
                 'transition-colors duration-(--motion-fast)',
-                'data-[active=true]:text-text data-[active=true]:bg-bg',
+                'data-[active=true]:text-text data-[active=true]:bg-bg data-[active=true]:shadow-[inset_0.5px_0_0_var(--color-border),inset_-0.5px_0_0_var(--color-border)]',
                 tabDragState?.tabId === tab.id ? 'opacity-[0.45]' : ''
               ].join(' ')}
               data-tab-id={tab.id}
@@ -219,11 +224,11 @@ export default function TabBar({
               }}
             >
               {focused && index < 9 && (
-                <span className="text-2xs text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.tabkey-held_&]:visible">
+                <span className="text-2xs text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 hidden [body.tabkey-held_&]:inline">
                   {formatShortcutForApp(`${desktopPlatform() === 'darwin' ? 'Ctrl' : 'Alt'}+${index + 1}`)}
                 </span>
               )}
-              <span className="text-xs shrink-0">{tabIcon(tab.type)}</span>
+              <span className="shrink-0 flex items-center opacity-80">{tabIcon(tab.type)}</span>
               <TabStatusIndicator tabId={tab.id} />
               {renamingTabId === tab.id ? (
                 <input

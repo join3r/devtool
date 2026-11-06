@@ -41,7 +41,7 @@ export default function DeskSnoozeMenu({ request, onSnooze, onClose }: {
       ref={pos.ref}
       role="menu"
       aria-label="Snooze until"
-      className="fixed z-(--z-menu) w-[230px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.5)]"
+      className="fixed z-(--z-menu) w-[230px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-pop ui-pop-in"
       style={pos.style}
       onMouseDown={(e) => e.stopPropagation()}
       data-testid="desk-snooze-menu"

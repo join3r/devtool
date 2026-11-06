@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react'
-import { ChevronDown, ChevronUp, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, FolderOpen, GitCompare, Globe, SquareTerminal, StickyNote, X } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import type { Project, Task } from '../../../shared/types'
 import { findTabLocation } from '../../../shared/panes'
@@ -29,6 +29,14 @@ const ITEM_LABEL: Record<BenchItem, string> = {
   files: 'Files',
   changes: 'Changes',
   notes: 'Notes'
+}
+
+const ITEM_ICON: Record<BenchItem, typeof Globe> = {
+  terminal: SquareTerminal,
+  browser: Globe,
+  files: FolderOpen,
+  changes: GitCompare,
+  notes: StickyNote
 }
 
 /**
@@ -103,8 +111,9 @@ export default function DeskTaskBody({ project, task, visible, projectDir }: {
         open: bench.open,
         height: bench.height,
         view,
-        strip: (
+        strip: (trailing) => (
           <BenchStrip
+            trailing={trailing}
             taskId={task.id}
             collapsible={!!chatTabId}
             open={open}
@@ -148,7 +157,7 @@ export default function DeskTaskBody({ project, task, visible, projectDir }: {
 }
 
 /** The Bench's strip: chevron, the items, the shortcut. Its top edge resizes the open drawer. */
-function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, run, runShown, onRun, onCloseRun }: {
+function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, run, runShown, onRun, onCloseRun, trailing }: {
   taskId: string
   collapsible: boolean
   open: boolean
@@ -161,6 +170,8 @@ function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, 
   runShown: boolean
   onRun: () => void
   onCloseRun: () => void
+  /** At the right end: the lone Bench tab's "+" and ×, when its bar is folded in here. */
+  trailing?: React.ReactNode
 }): React.ReactElement {
   const shortcut = formatShortcutForApp('Ctrl+`')
   const counts = { terminal: 0, browser: 0 }
@@ -195,7 +206,7 @@ function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, 
 
   return (
     <div
-      className="relative flex items-center gap-0.5 h-[32px] px-2 bg-surface border-t-[0.5px] border-border text-sm select-none"
+      className={`relative flex items-center gap-0.5 h-[34px] px-2 bg-surface border-b-[0.5px] border-border text-sm select-none ${collapsible ? 'border-t-[0.5px]' : ''}`}
       data-testid="desk-bench-strip"
     >
       {collapsible && open && (
@@ -218,13 +229,14 @@ function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, 
           <button
             key={item}
             type="button"
-            className={`h-6 px-2 rounded-md border-0 cursor-pointer text-sm transition-colors duration-(--motion-fast) ${item === current ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text'}`}
+            className={`h-6 px-2 inline-flex items-center gap-1.5 rounded-md border-0 cursor-pointer text-sm font-medium transition-colors duration-(--motion-fast) ${item === current ? 'bg-field text-text shadow-(--shadow-raise)' : 'bg-transparent text-text-muted hover:text-text hover:bg-sel'}`}
             aria-pressed={item === current}
             title={item === 'terminal' || item === 'browser'
               ? count > 0 ? `Show the ${ITEM_LABEL[item].toLowerCase()}` : `Open a ${ITEM_LABEL[item].toLowerCase()} in the Bench`
               : `${ITEM_LABEL[item]} in the Bench`}
             onClick={() => onPick(item)}
           >
+            {React.createElement(ITEM_ICON[item], { size: 13, 'aria-hidden': true, className: 'opacity-80' })}
             {ITEM_LABEL[item]}
             {count > 1 && <span className="ml-1 font-mono text-xs text-text-subtle">{count}</span>}
           </button>
@@ -232,7 +244,8 @@ function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, 
       })}
       {run && <BenchRunItem run={run} shown={runShown} onShow={onRun} onClose={onCloseRun} />}
       <span className="flex-1" />
-      {collapsible && <span className="font-mono text-xs text-text-subtle">{shortcut}</span>}
+      {collapsible && <span className="font-mono text-xs text-text-subtle px-1">{shortcut}</span>}
+      {trailing}
     </div>
   )
 }

@@ -711,8 +711,8 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
   }
 
   return (
-    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" data-modal>
-      <div className="w-[860px] max-w-[92vw] h-[640px] max-h-[88vh] rounded-xl border border-border bg-surface shadow-pop flex overflow-hidden">
+    <div className="ui-fade-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/45 backdrop-blur-[2px]" data-modal>
+      <div className="w-[860px] max-w-[92vw] h-[640px] max-h-[88vh] ui-rise-in rounded-2xl border border-border bg-surface shadow-pop flex overflow-hidden">
         {/* left rail */}
         <nav className="w-48 shrink-0 bg-surface-2 border-r border-hair flex flex-col px-2 pb-3 overflow-y-auto" aria-label="Settings pages">
           <h2 className="m-0 px-2.5 pt-4 pb-3 text-md font-semibold text-text">Settings</h2>
