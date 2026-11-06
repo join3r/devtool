@@ -12,6 +12,7 @@ import {
   nextNeedsYou,
   rowChord,
   pinnedFirst,
+  pinnedWorking,
   scopeLabel,
   scopeSources,
   shownRows,
@@ -255,6 +256,13 @@ describe('pins, grouping and row keys', () => {
   it('puts pinned tasks first and keeps the rest in order', () => {
     expect(pinnedFirst(entries(), new Set(['b1', 'a2'])).map(e => e.task.id)).toEqual(['a2', 'b1', 'a1'])
     expect(pinnedFirst(entries(), new Set()).map(e => e.task.id)).toEqual(['a1', 'a2', 'b1'])
+  })
+
+  it('keeps pinned working tasks for the Inbox tab, and only those', () => {
+    const rows = entries()
+    const lists = { needsYou: [], answered: [], waiting: [], working: rows, snoozed: [] }
+    expect(pinnedWorking(lists, new Set(['a2'])).map(e => e.task.id)).toEqual(['a2'])
+    expect(pinnedWorking(lists, new Set())).toEqual([])
   })
 
   it('steps through the rows from the selection, starting at an end without one', () => {

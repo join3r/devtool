@@ -21,7 +21,7 @@ import DeskScopeMenu from './DeskScopeMenu'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
 import { deskEvents } from './deskEvents'
 import {
-  DONE_WINDOW_MS, checkRows, checkedRows, deskLists, deskTabCounts, doneEntries, keyTarget, liveScope, rowChord, nextNeedsYou, pinnedFirst, scopeLabel, scopeSources, shownRows, stepRow, taskBackground,
+  DONE_WINDOW_MS, checkRows, checkedRows, deskLists, deskTabCounts, doneEntries, keyTarget, liveScope, rowChord, nextNeedsYou, pinnedFirst, pinnedWorking, scopeLabel, scopeSources, shownRows, stepRow, taskBackground,
   childrenExpanded, nestDeskLists, nestedUnder, withChildren,
   type DeskLists, type DoneEntry, type InboxRename, type RowKey
 } from './deskInbox'
@@ -115,6 +115,7 @@ function BulkBar({ entries, total, onDone, onSnooze, onWake, onRead, onRemove, o
 /** Which list an entry of the Inbox tab came from, for its row's preview and actions. */
 function inboxKind(lists: DeskLists, entry: InboxEntry): DeskRowKind {
   if (lists.needsYou.includes(entry)) return 'needsYou'
+  if (lists.working.includes(entry)) return 'working'
   if (lists.answered.includes(entry)) return 'answered'
   return 'waiting'
 }
@@ -159,7 +160,7 @@ export default function DeskColumn({
 }): React.ReactElement {
   const {
     config, updateConfig, desk, updateDesk, selectedTaskId, setSelectedProjectId, selectProjectHome, effectiveTheme,
-    snoozeTask, unsnoozeTask, markTaskUnread, markTaskVisited, showArchived, reopenTask
+    snoozeTask, unsnoozeTask, markTaskUnread, markTaskVisited, showArchived, reopenTask, togglePinnedItem
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const statusSince = useAllTabStatusSince()
@@ -266,8 +267,10 @@ export default function DeskColumn({
     if (next) selectProjectHome(next.projectId)
   }
 
+  // Pinned tasks stay in the Inbox while their agent works, so a conversation keeps its row.
+  const keptWorking = pinnedWorking(lists, pinnedTaskIds)
   const listed: InboxEntry[] = tab === 'inbox'
-    ? [...lists.needsYou, ...lists.answered, ...lists.waiting]
+    ? [...lists.needsYou, ...keptWorking, ...lists.answered, ...lists.waiting]
     : tab === 'working' ? lists.working : tab === 'snoozed' ? lists.snoozed : []
 
   const openSnooze = (targets: readonly Target[], at: MenuAnchor): void => {
@@ -464,6 +467,7 @@ export default function DeskColumn({
         checked={checked.has(entry.task.id)}
         checking={checking}
         pinned={pinnedTaskIds.has(entry.task.id)}
+        onTogglePin={() => togglePinnedItem({ type: 'task', projectId: entry.project.id, streamId: entry.stream.id, taskId: entry.task.id })}
         offline={offlineIds.has(entry.project.id)}
         showTile={showTiles}
         now={now}
@@ -599,11 +603,13 @@ export default function DeskColumn({
             </React.Fragment>
           )))}
         {!grouped && tab === 'inbox' && (
-          lists.needsYou.length + lists.answered.length + lists.waiting.length === 0
+          lists.needsYou.length + keptWorking.length + lists.answered.length + lists.waiting.length === 0
             ? empty(scope ? 'Nothing here. Ask something above.' : 'Inbox zero. Ask something above.')
             : <>
               {lists.needsYou.length > 0 && <GroupHead label="Needs you" count={lists.needsYou.length} tone="needs" />}
               {drawn(lists.needsYou).map(row => renderRow(row.entry, row.kind ?? 'needsYou', row.depth))}
+              {keptWorking.length > 0 && <GroupHead label="Pinned · working" count={keptWorking.length} />}
+              {drawn(keptWorking).map(row => renderRow(row.entry, row.kind ?? 'working', row.depth))}
               {lists.answered.length > 0 && <GroupHead label="Answered" count={lists.answered.length} tone="answered" hint={`${formatShortcutForApp('CmdOrCtrl+E')} done · ${formatShortcutForApp('CmdOrCtrl+Shift+S')} snooze`} />}
               {drawn(lists.answered).map(row => renderRow(row.entry, row.kind ?? 'answered', row.depth))}
               {lists.waiting.length > 0 && <GroupHead label="Waiting on you" count={lists.waiting.length} />}

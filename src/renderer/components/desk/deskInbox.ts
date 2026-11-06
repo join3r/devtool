@@ -212,6 +212,15 @@ export function pinnedFirst(entries: readonly InboxEntry[], pinnedTaskIds: Reado
 }
 
 /**
+ * Working tasks that are pinned: the Inbox tab keeps them (under Needs you) so a
+ * task you are talking with does not leave the list each time its agent runs.
+ */
+export function pinnedWorking(lists: DeskLists, pinnedTaskIds: ReadonlySet<string>): InboxEntry[] {
+  if (pinnedTaskIds.size === 0) return []
+  return lists.working.filter(entry => pinnedTaskIds.has(entry.task.id))
+}
+
+/**
  * The rows in the order the column draws them, for ⌥↓ / ⌥↑: grouped by project
  * (pinned projects first) the list reads project by project, not status by status.
  */

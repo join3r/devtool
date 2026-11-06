@@ -1,5 +1,5 @@
 import React from 'react'
-import { Check, ChevronDown, ChevronRight, Folder, GitBranch, MoreHorizontal, Pin } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Folder, GitBranch, MoreHorizontal, Pin, PinOff } from 'lucide-react'
 import type { GitDiffSummary, Project } from '../../../shared/types'
 import { formatLineCount } from '../../hooks/useTaskDiffSummaries'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
@@ -89,7 +89,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
 const actionCls = 'px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong whitespace-nowrap'
 
 export default function DeskRow({
-  entry, kind, agent, activity, background = null, diff, selected, jumpNumber, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename,
+  entry, kind, agent, activity, background = null, diff, selected, jumpNumber, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onTogglePin, onHover, rename,
   depth = 0, childLine, bubbled
 }: {
   entry: InboxEntry
@@ -128,6 +128,8 @@ export default function DeskRow({
   /** ■ Stop on a Background row: ends the work still running. */
   onStopBackground?: () => void
   onHover: (taskId: string | null) => void
+  /** The hover pin: a pinned task stays in the Inbox while its agent works. */
+  onTogglePin?: () => void
   rename?: InboxRename
   /** A task started by the task above it: how many levels in. Nested rows drop the tile and the project. */
   depth?: number
@@ -299,6 +301,19 @@ export default function DeskRow({
             ? <button type="button" className={actionCls} title="Start it now, alongside the other agents (W)" onClick={onWake} data-testid="desk-row-start-queued">Start now</button>
             : <button type="button" className={actionCls} title="Wake now (W)" onClick={onWake}>Wake</button>
           : <button type="button" className={actionCls} title="Snooze (S)" onClick={onSnooze} data-testid="desk-row-snooze">Snooze</button>}
+        {onTogglePin && (
+          <button
+            type="button"
+            className={actionCls}
+            title={pinned ? 'Unpin' : 'Pin: stays in the Inbox while the agent works'}
+            aria-label={pinned ? 'Unpin from Inbox' : 'Pin to Inbox'}
+            aria-pressed={pinned}
+            onClick={onTogglePin}
+            data-testid="desk-row-pin"
+          >
+            {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+          </button>
+        )}
         <button type="button" className={actionCls} aria-label="More" onClick={(e) => onContextMenu(e)}><MoreHorizontal size={13} /></button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { ChevronDown, Clock } from 'lucide-react'
+import { ChevronDown, Clock, Pin } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
-import type { Project, Task } from '../../../shared/types'
+import { pinnedItemKey, type PinnedItem, type Project, type Task } from '../../../shared/types'
 import { canLandTask, useLandingOp } from '../../taskLanding'
 import { useTaskLandingActions } from '../useTaskLandingActions'
 import { findStreamOfTask } from '../../../shared/streams'
@@ -23,7 +23,10 @@ const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border-st
  * Snooze (Wake while snoozed). Lines changed live on the sidebar row only.
  */
 export function DeskTaskTools({ project, task }: { project: Project; task: Task }): React.ReactElement {
-  const { snoozeTask, unsnoozeTask, endAutopilot, switchToTask } = useApp()
+  const { snoozeTask, unsnoozeTask, endAutopilot, switchToTask, pinnedItems, togglePinnedItem } = useApp()
+  const stream = findStreamOfTask(project, task.id)
+  const pin: PinnedItem | null = stream ? { type: 'task', projectId: project.id, streamId: stream.id, taskId: task.id } : null
+  const pinned = !!pin && (pinnedItems ?? []).some(item => pinnedItemKey(item) === pinnedItemKey(pin))
   const [snoozeAt, setSnoozeAt] = useState<DeskSnoozeRequest | null>(null)
   const [editSchedule, setEditSchedule] = useState(false)
   const snoozed = isSnoozed(task, Date.now())
@@ -84,6 +87,19 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
             data-testid="desk-task-autopilot-off"
           >×</button>
         </span>
+      )}
+      {pin && (
+        <button
+          type="button"
+          className={`shrink-0 mr-1.5 h-[26px] w-[28px] flex items-center justify-center rounded-[7px] border border-border-strong cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${pinned ? 'bg-sel text-accent' : 'bg-transparent text-text-muted hover:text-text'}`}
+          title={pinned ? 'Unpin: the task leaves the Inbox while its agent works' : 'Pin: the task stays in the Inbox while its agent works'}
+          aria-label={pinned ? 'Unpin from Inbox' : 'Pin to Inbox'}
+          aria-pressed={pinned}
+          onClick={() => togglePinnedItem(pin)}
+          data-testid="desk-task-pin"
+        >
+          <Pin size={13} className={pinned ? 'fill-current' : ''} />
+        </button>
       )}
       {snoozed ? (
         <button type="button" className={ghostCls} onClick={() => unsnoozeTask(project.id, task.id)} title={`Back to the Inbox now (${formatShortcutForApp('CmdOrCtrl+Shift+W')})`}>Wake</button>
