@@ -7,14 +7,43 @@ import { availablePromptAgents, pickPromptAgent } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
 import { autopilotSupported } from '../../../shared/autopilot'
 import { fuzzyMatch } from '../../palette/fuzzy'
+import { LOOP_DEFAULT_ROUNDS, LOOP_DEFAULT_TARGET, LOOP_JUDGES, normalizeLoopSettings, type LoopSettings } from '../../../shared/loop'
 
-/** The Autopilot chip: off by default every time (decision 7), "+ Codex review" inside it. */
+/** The Autopilot chip: off by default every time (decision 7), "+ Codex review" or "Loop" inside it. */
 export interface DeskAutopilot {
   on: boolean
   review: boolean
+  /** An Autopilot loop (`shared/loop.ts`) instead of one review: its settings. */
+  loop?: LoopSettings | null
 }
 
 export const AUTOPILOT_OFF: DeskAutopilot = { on: false, review: false }
+
+/**
+ * Whether a task in `stream` can run as a loop: it needs a worktree of its own
+ * (checkpoints are commits, resets are hard), from its stream or asked for on `main`.
+ */
+export function loopAvailable(project: Project | undefined, stream: Stream | undefined): boolean {
+  if (!project) return false
+  const target = stream ?? findMainStream(project)
+  return startsInOwnWorktree(project, target) || canStartInOwnWorktree(project, target)
+}
+
+const LOOP_SETTINGS_KEY = 'devtool.desk.loopSettings'
+
+/** The loop settings last fired with: the next loop starts from them. */
+export function readLoopSettings(): LoopSettings {
+  try {
+    const raw = window.localStorage.getItem(LOOP_SETTINGS_KEY)
+    const parsed = raw ? normalizeLoopSettings(JSON.parse(raw) as Partial<LoopSettings>) : null
+    if (parsed) return parsed
+  } catch { /* storage blocked or junk: the defaults */ }
+  return { target: LOOP_DEFAULT_TARGET, rounds: LOOP_DEFAULT_ROUNDS, judges: [...LOOP_JUDGES] }
+}
+
+export function writeLoopSettings(settings: LoopSettings): void {
+  try { window.localStorage.setItem(LOOP_SETTINGS_KEY, JSON.stringify(settings)) } catch { /* storage blocked */ }
+}
 
 /** Whether the chip can be offered for this start. */
 export function autopilotAvailable(project: Project | undefined, agent: PromptBoxAgent | null): boolean {
@@ -80,10 +109,12 @@ export function deskSubmission(
   // Any chat takes pictures and Autopilot; the mode picker is Claude's.
   const anyChat = !!agent && agent.endsWith('-chat')
   const onAutopilot = !!autopilot?.on && anyChat && autopilotSupported(project)
+  const loop = onAutopilot && autopilot?.loop && loopAvailable(project, stream) ? normalizeLoopSettings(autopilot.loop) : null
   return {
     target: { kind: 'project', projectId: project.id },
     ...(stream ? { streamId: stream.id } : {}),
-    ...(onAutopilot ? { autopilot: { review: autopilot!.review } } : {}),
+    ...(onAutopilot ? { autopilot: { review: !loop && autopilot!.review, ...(loop ? { loop } : {}) } } : {}),
+    ...(loop && !startsInOwnWorktree(project, stream ?? findMainStream(project)) ? { ownWorktree: true } : {}),
     ...(agent
       ? { start: { agent, prompt: {
           text: prompt,

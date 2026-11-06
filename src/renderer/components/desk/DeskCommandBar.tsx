@@ -21,7 +21,7 @@ import { createTab } from '../newTaskTabs'
 import { inboxApps } from '../inbox'
 import { openBench } from './benchState'
 import { openRunLog } from './DeskRunDock'
-import { AUTOPILOT_OFF, autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, loopAvailable, busyChoices, busyInSameFolder, canQueueStart, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
 import AutopilotChips from './AutopilotChips'
 import {
   barSections, completeToken, resolveBar, targetLabel,
@@ -298,7 +298,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
               <span className="bg-surface-3 border border-border rounded-full px-2.5 py-[3px] text-body">{agentLabel(agent)}</span>
             ) : null}
             {bar.mode === 'plain' && autopilotAvailable(bar.target?.project, agent) && (
-              <AutopilotChips value={autopilot} onChange={(next) => { setAutopilot(next); inputRef.current?.focus() }} />
+              <AutopilotChips value={autopilot} onChange={(next) => { setAutopilot(next); inputRef.current?.focus() }} loop={loopAvailable(bar.target?.project, bar.target?.stream)} codex={!!config?.enableCodex} />
             )}
             {bar.allProjects && <span className="rounded-full px-2.5 py-[3px] border border-border text-text-muted">All projects</span>}
           </div>

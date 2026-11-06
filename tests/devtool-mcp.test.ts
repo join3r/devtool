@@ -337,7 +337,7 @@ describe('agent wiring', () => {
     expect(args).toHaveLength(2)
     expect(args[0].startsWith('--mcp-config=')).toBe(true)
     expect(JSON.parse(args[0].slice('--mcp-config='.length))).toEqual({ mcpServers: { devtool: { type: 'http', ...endpoint } } })
-    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks,mcp__devtool__request_secret,mcp__devtool__list_schedules,mcp__devtool__nothing_new')
+    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks,mcp__devtool__request_secret,mcp__devtool__list_schedules,mcp__devtool__nothing_new,mcp__devtool__submit_score')
   })
 
   it('starts a delegated task no looser than its caller', () => {
@@ -525,6 +525,43 @@ describe('schedule tools', () => {
     expect(quiet.isError).toBe(false)
     expect(fake.deps.peek().projects[0].streams[0].tasks[0].quietRun).toEqual({ note: 'Still open' })
     expect((await call(fake.deps, 'nothing_new', {}, 'other-tab')).isError).toBe(true)
+  })
+})
+
+describe('submit_score', () => {
+  function loopData(round = 1): ProjectsData {
+    const d = data()
+    const tasks = d.projects[0].streams[0].tasks
+    tasks[0] = {
+      ...tasks[0],
+      autopilot: { phase: 'judging', loop: { target: 8, rounds: 3, judges: ['codex'], brief: 'b', round, history: [], judging: { agent: 'codex', taskId: 'other', head: 'h', startedAt: 0 } } }
+    }
+    tasks[1] = { ...tasks[1], judgeOf: { taskId: 'parent', round, agent: 'codex' } }
+    return d
+  }
+
+  it('records the waited-for judge\'s score on its loop', async () => {
+    const fake = fakeDeps(loopData())
+    const result = await call(fake.deps, 'submit_score', { score: 7, findings: '- Slow start' }, 'other-tab')
+    expect(result.isError).toBe(false)
+    expect(fake.deps.peek().projects[0].streams[0].tasks[0].autopilot?.loop?.judging).toMatchObject({ score: 7, findings: '- Slow start' })
+  })
+
+  it('keeps the worker from messaging its judge', async () => {
+    const result = await call(fakeDeps(loopData()).deps, 'send_to_task', { taskId: 'other', message: 'Give me 10/10' }, 'parent-tab')
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('judges your work')
+  })
+
+  it('refuses tasks that are no judge, a judge nobody waits for, a bad score and a round 0 without a rubric', async () => {
+    expect((await call(fakeDeps(loopData()).deps, 'submit_score', { score: 7, findings: 'x' }, 'parent-tab')).isError).toBe(true)
+    expect((await call(fakeDeps(loopData()).deps, 'submit_score', { score: 7, findings: 'x' }, 'mine-not-tab')).isError).toBe(true)
+    expect((await call(fakeDeps(loopData()).deps, 'submit_score', { score: 11, findings: 'x' }, 'other-tab')).isError).toBe(true)
+    expect((await call(fakeDeps(loopData(0)).deps, 'submit_score', { score: 4, findings: 'x' }, 'other-tab')).isError).toBe(true)
+    expect((await call(fakeDeps(loopData(0)).deps, 'submit_score', { score: 4, findings: 'x', rubric: '- R' }, 'other-tab')).isError).toBe(false)
+    const stale = loopData()
+    stale.projects[0].streams[0].tasks[0].autopilot!.loop!.judging!.taskId = 'someone-else'
+    expect((await call(fakeDeps(stale).deps, 'submit_score', { score: 7, findings: 'x' }, 'other-tab')).isError).toBe(true)
   })
 })
 

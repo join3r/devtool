@@ -36,13 +36,13 @@ export interface SharedLink {
 export interface AgentContextInput {
   project: Pick<Project, 'name' | 'directory'>
   stream: Pick<Stream, 'name' | 'isMain' | 'workspace'>
-  task: Pick<Task, 'name' | 'workspace' | 'scheduledFrom'>
+  task: Pick<Task, 'name' | 'workspace' | 'scheduledFrom' | 'judgeOf'>
   /** The folder the agent runs in. */
   dir: string
   hook?: AgentContextHook
   links?: SharedLink[]
   /** The task runs on Autopilot and this is the chat it follows: what Autopilot does when the turn ends. */
-  autopilot?: { review: boolean }
+  autopilot?: { review: boolean; loop?: boolean }
   /** The agent has DevTool's MCP tools (`devtool-mcp.ts`). */
   mcp?: boolean
 }
@@ -84,6 +84,12 @@ export function buildAgentContext(input: AgentContextInput): string {
     `- Project "${project.name}", stream "${stream.name}", task "${task.name}". Your folder: ${code(dir)}.`
   ]
 
+  if (task.judgeOf) {
+    lines.push(...judgeLines(!!input.mcp))
+    lines.push(...sharedLines(input.links ?? []))
+    return lines.join('\n')
+  }
+
   if (own) {
     const target = own.baseBranch
     const where = stream.isMain ? `the project folder ${code(project.directory)}` : stream.workspace ? `the stream's worktree ${code(stream.workspace.worktreePath)}` : code(project.directory)
@@ -117,7 +123,7 @@ export function buildAgentContext(input: AgentContextInput): string {
 
   lines.push(...sharedLines(input.links ?? []))
   if (input.mcp) lines.push(...mcpLines(!!own))
-  if (input.autopilot) lines.push(...autopilotLines(input.autopilot.review))
+  if (input.autopilot) lines.push(...autopilotLines(input.autopilot.review, !!input.autopilot.loop))
   if (task.scheduledFrom) lines.push(...scheduledRunLines(task.scheduledFrom.name, !!input.mcp))
   return lines.join('\n')
 }
@@ -141,8 +147,10 @@ function mcpLines(ownWorktree: boolean): string[] {
  * the turn waiting on the user, a closing question included. The note is fixed
  * for the session, so it has to stay true after the user takes over.
  */
-function autopilotLines(review: boolean): string[] {
-  const after = review
+function autopilotLines(review: boolean, loop = false): string[] {
+  const after = loop
+    ? 'commits your changes as a checkpoint and has independent judges score the round; below the target their findings come back to you as the next round, and once every judge is satisfied DevTool lands the task'
+    : review
     ? 'checks that files changed, has Codex review the diff (any findings come back to you once to fix), then lands the task'
     : 'checks that files changed, then lands the task'
   return [
@@ -152,6 +160,17 @@ function autopilotLines(review: boolean): string[] {
       'So make reasonable calls yourself, finish the whole task in this turn, check it works, and end with a short summary of what you did and anything left open, not a question. ' +
       'If you really cannot go on without the user, say what you need and stop.',
     '- Once the user writes to you, they are back: the usual rules apply from then on.'
+  ]
+}
+
+/** A judge of an Autopilot loop (`main/autopilot-loop.ts`): it works in another task's folder and only looks. */
+function judgeLines(mcp: boolean): string[] {
+  return [
+    '- You are a judge in an Autopilot loop: this folder belongs to another task, whose agent waits while you judge its work. Nobody is watching; don\'t ask questions.',
+    '- Build, run, test and measure as much as you need, but change, add, commit or delete no file here and touch no branch: DevTool checks afterwards and puts back anything you changed.',
+    mcp
+      ? '- When you are done, report your score with the `devtool` MCP tool `submit_score`, then end your turn. DevTool closes this task. Don\'t use the other DevTool tools.'
+      : '- When you are done, end your reply with a line `SCORE: n/10`. DevTool closes this task.'
   ]
 }
 
@@ -213,7 +232,7 @@ export function agentContextForTab(
         mcp: hasMcpTools(taskTabs(task).find(tab => tab.id === tabId)?.type),
         // Only the chat Autopilot follows (`autopilotTab`).
         ...(task.autopilot && autopilotActive(task) && autopilotSupported(project) && autopilotTab(task)?.id === tabId
-          ? { autopilot: { review: !!task.autopilot.review } }
+          ? { autopilot: { review: !!task.autopilot.review, ...(task.autopilot.loop ? { loop: true } : {}) } }
           : {})
       })
     }

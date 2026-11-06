@@ -6,6 +6,7 @@ import { mapTaskInProject, needsTaskWorktree, streamTakesLandings, taskDirectory
 import type { Project, ProjectsData, Stream, Tab, TabStatusValue, Task, TaskAutopilot, TaskLandingIntent, TaskLandingResult } from '../shared/types'
 import { codexFindingsPrompt, codexReviewPrompt, type CodexReview } from './codex-review'
 import type { GitRunner } from './git-runner'
+import { LoopDriver, type LoopDeps } from './autopilot-loop'
 import type { TaskLandingManager } from './task-landing'
 
 /**
@@ -63,6 +64,8 @@ export interface AutopilotDeps {
    * Autopilot moves on when that turn ends with none left working.
    */
   waitingOnChildren?(taskId: string): boolean
+  /** What an Autopilot loop (`TaskAutopilot.loop`) needs besides the above; absent, a loop stops. */
+  loop?: Omit<LoopDeps, 'peek' | 'statusOf' | 'activityOf' | 'subscribe' | 'subscribeProjects' | 'runner' | 'sendToAgent' | 'log' | 'now' | 'settleMs'>
   log(message: string): void
   now?(): number
   settleMs?: number
@@ -127,8 +130,30 @@ export class AutopilotRunner {
   /** Tasks whose `base` is being read. */
   private readonly basing = new Set<string>()
   private unsubscribe: (() => void)[] = []
+  private readonly loop: LoopDriver | null
 
-  constructor(private readonly deps: AutopilotDeps) {}
+  constructor(private readonly deps: AutopilotDeps) {
+    this.loop = deps.loop
+      ? new LoopDriver({
+        ...deps.loop,
+        peek: deps.peek,
+        statusOf: deps.statusOf,
+        activityOf: deps.activityOf,
+        subscribe: deps.subscribe,
+        subscribeProjects: deps.subscribeProjects,
+        runner: deps.runner,
+        sendToAgent: deps.sendToAgent,
+        log: deps.log,
+        ...(deps.now ? { now: deps.now } : {}),
+        ...(deps.settleMs !== undefined ? { settleMs: deps.settleMs } : {})
+      }, {
+        find: taskId => this.find(taskId),
+        update: (taskId, fn) => this.update(taskId, fn),
+        stop: (taskId, reason) => this.stop(taskId, reason),
+        land: (taskId, projectId, summary) => this.land(taskId, projectId, summary)
+      })
+      : null
+  }
 
   start(): void {
     if (this.unsubscribe.length > 0) return
@@ -140,9 +165,11 @@ export class AutopilotRunner {
       this.deps.subscribeProjects(() => this.projectsChanged())
     ]
     this.projectsChanged()
+    this.loop?.start()
   }
 
   dispose(): void {
+    this.loop?.dispose()
     for (const stop of this.unsubscribe) stop()
     this.unsubscribe = []
     for (const timer of this.timers.values()) clearTimeout(timer)
@@ -249,6 +276,11 @@ export class AutopilotRunner {
 
   private async advance(found: Found): Promise<void> {
     const { project, task, autopilot, tab } = found
+    if (autopilot.loop) {
+      if (!this.loop) this.stop(task.id, 'Loops run only in the desktop app')
+      else await this.loop.roundEnded(found, this.deps.activityOf(tab.id)?.lastAnswer)
+      return
+    }
     const diff = await this.diffOf(found)
     if (!diff) {
       this.stop(task.id, 'Couldn\'t read what the task changed')

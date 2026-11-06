@@ -5,6 +5,7 @@ import { terminalTaskName, type NewTaskSubmission } from '../components/newTask'
 import { setPendingCommand } from '../components/terminalStartup'
 import { createTab } from '../components/newTaskTabs'
 import { agentTakesMode, setPendingPrompt, taskNameFromPrompt } from '../components/promptBox'
+import { newLoop } from '../../shared/loop'
 
 /**
  * File what a composer asked for (the New task dialog, the desk's compose box,
@@ -35,6 +36,16 @@ export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
       if (terminal.command) setPendingCommand(tab.id, terminal.command)
       tabs = [tab]
       name = terminalTaskName(terminal.command)
+    } else if (start && autopilot?.loop && target.kind === 'project' && isChatTabType(start.agent)) {
+      // A loop's worker waits for the rubric: main sends its first prompt then (`main/autopilot-loop.ts`).
+      const tab = createTab(start.agent)
+      const name = taskNameFromPrompt(start.prompt.text)
+      const task = addTask(target.projectId, name, [tab], streamId, {
+        autopilot: { phase: 'judging', loop: newLoop(autopilot.loop, start.prompt.text, start.prompt.mode) },
+        ...(ownWorktree ? { ownWorktree: true } : {})
+      })
+      titleTaskFromPrompt(task.id, name, start.prompt.text)
+      return task
     } else if (start) {
       const tab = createTab(start.agent)
       setPendingPrompt(tab.id, start.prompt)

@@ -6,6 +6,7 @@
 
 import { fuzzyMatch } from '../palette/fuzzy'
 import type { PromptBoxAgent } from '../../shared/types'
+import type { LoopSettings } from '../../shared/loop'
 import type { PendingPrompt } from './promptBox'
 import { branchSlug, defaultBaseBranch } from '../../shared/branch-name'
 
@@ -32,8 +33,8 @@ export interface NewTaskSubmission {
   start?: { agent: PromptBoxAgent; prompt: PendingPrompt }
   /** A terminal task, with the command to type into it once it starts (if any). */
   terminal?: { command?: string }
-  /** Autopilot (desk only, a Claude chat start): main takes the task to Done by itself. */
-  autopilot?: { review: boolean }
+  /** Autopilot (desk only, a Claude chat start): main takes the task to Done by itself; `loop`: as a scored loop. */
+  autopilot?: { review: boolean; loop?: LoopSettings }
   /**
    * Queue it (same-folder warning): a chat `start` waits, snoozed, until no other
    * agent works in its folder, and main sends the prompt then (`Task.queued`).

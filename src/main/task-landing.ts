@@ -238,6 +238,49 @@ export function conflictPrompt(options: { streamBranch: string; taskBranch: stri
   ].join('\n')
 }
 
+/**
+ * `add -A` and a commit `subject` in a task's worktree `root`, without
+ * DevTool's hooks file, what setup commands left behind or new links out of
+ * the worktree. False when there was nothing (else) to commit. Used by
+ * landing and by an Autopilot loop's checkpoints.
+ */
+export async function commitWorktreeChanges(runner: GitRunner, root: string, subject: string): Promise<boolean> {
+  const git = (args: string[], timeoutMs?: number): Promise<string> => gitOutput(runner, args, { cwd: root, timeoutMs })
+  if (!(await git(['status', '--porcelain=v1', '-z']))) return false
+  await git(['add', '-A'], LONG_GIT_MS)
+  const staged = splitNul(await git(['diff', '--cached', '--name-only', '-z']))
+  const added = new Set(splitNul(await git(['diff', '--cached', '--name-only', '--diff-filter=A', '-z'])))
+  const artifacts = readSetupArtifacts(await absoluteGitDir(runner, root))
+  const keepOut = new Set<string>()
+  for (const file of staged) {
+    if (isHookFile(file)) keepOut.add(file)
+    if (added.has(file) && isLinkOutOfWorktree(root, file)) keepOut.add(file)
+    const artifact = artifacts.find(entry => file === entry || file.startsWith(`${entry}/`))
+    if (artifact) keepOut.add(artifact)
+  }
+  if (keepOut.size > 0) await git(['reset', '-q', '--', ...[...keepOut].map(literal)])
+  const quiet: GitResult = await runner.run(['diff', '--cached', '--quiet'], { cwd: root })
+  if (quiet.code === 0) return false
+  if (quiet.code !== 1) throw new Error(gitErrorText(['diff', '--cached'], quiet))
+  await git([...NO_HOOKS, 'commit', '-q', '-m', subject], LONG_GIT_MS)
+  return true
+}
+
+/**
+ * What in `root` differs from its last commit besides DevTool's hooks file,
+ * setup leftovers and links out of the worktree: the paths an Autopilot loop's
+ * judge must not have touched.
+ */
+export async function worktreeChanges(runner: GitRunner, root: string): Promise<string[]> {
+  const status = await gitOutput(runner, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: root })
+  const artifacts = readSetupArtifacts(await absoluteGitDir(runner, root))
+  return porcelainEntries(status)
+    .map(entry => entry.path)
+    .filter(file => !isHookFile(file)
+      && !artifacts.some(entry => file === entry || file.startsWith(`${entry}/`))
+      && !isLinkOutOfWorktree(root, file.replace(/\/$/, '')))
+}
+
 export class TaskLandingManager {
   /** The tail of each stream's queue (by stream id). */
   private readonly queues = new Map<string, Promise<void>>()
@@ -517,23 +560,7 @@ export class TaskLandingManager {
    * (else) to commit.
    */
   private async autoCommit(at: Located): Promise<boolean> {
-    const root = at.own.worktreePath
-    if (!(await this.git(root, ['status', '--porcelain=v1', '-z']))) return false
-    await this.git(root, ['add', '-A'], LONG_GIT_MS)
-    const staged = splitNul(await this.git(root, ['diff', '--cached', '--name-only', '-z']))
-    const added = new Set(splitNul(await this.git(root, ['diff', '--cached', '--name-only', '--diff-filter=A', '-z'])))
-    const artifacts = readSetupArtifacts(await absoluteGitDir(this.deps.runner, root))
-    const keepOut = new Set<string>()
-    for (const file of staged) {
-      if (isHookFile(file)) keepOut.add(file)
-      if (added.has(file) && isLinkOutOfWorktree(root, file)) keepOut.add(file)
-      const artifact = artifacts.find(entry => file === entry || file.startsWith(`${entry}/`))
-      if (artifact) keepOut.add(artifact)
-    }
-    if (keepOut.size > 0) await this.git(root, ['reset', '-q', '--', ...[...keepOut].map(literal)])
-    if (!(await this.hasStaged(root))) return false
-    await this.commit(root, commitSubject(at.task))
-    return true
+    return commitWorktreeChanges(this.deps.runner, at.own.worktreePath, commitSubject(at.task))
   }
 
   /**

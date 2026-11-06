@@ -95,6 +95,8 @@ import { applyScheduleOp, scheduleRequestToOp, scheduleStreamId, type ScheduleRu
 import { PromptQueueRunner } from '../prompt-queue-runner'
 import { QueuedTaskRunner } from '../queued-task-runner'
 import { AutopilotRunner } from '../autopilot'
+import type { StartJudgeInput } from '../autopilot-loop'
+import { JUDGE_LABEL } from '../../shared/loop'
 import { runCodexReview } from '../codex-review'
 import { findAgentCli } from '../agent-clis'
 import { featureUnavailableReason } from '../../shared/project-features'
@@ -117,7 +119,7 @@ import { SecretRequests, type SecretOutcome } from '../secrets/secret-requests'
 import { checkSecretFile, writeSecretFile } from '../secrets/secret-file'
 import { registerSecretHandlers } from '../ipc/secrets'
 import { redactDeep, redactSecrets } from '../../shared/secrets'
-import { agentModeFor, callerClaudeMode, handleMcpMessage, liveTaskState, unrestrictedCaller, lastReplyFromTranscript, type RequestSecretInput, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
+import { agentModeFor, callerClaudeMode, delegatedMode, handleMcpMessage, liveTaskState, unrestrictedCaller, lastReplyFromTranscript, type RequestSecretInput, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
 import { autopilotActive, autopilotSupported, stoppedAutopilot } from '../../shared/autopilot'
 import { statusTabs, taskStatus } from '../../shared/inbox-state'
 import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../../shared/hook-protocol'
@@ -474,6 +476,20 @@ export class HostServices {
           if (task) return waitingOnChildren(delegationTree([project]), task, (tabId) => this.activityRegistry.getStatus(tabId)) > 0
         }
         return false
+      },
+      loop: {
+        ensureWorktree: async (projectId, taskId) => {
+          const result = await this.taskWorktrees.ensureTaskWorktree(projectId, taskId)
+          return result.status === 'failed' ? { ok: false, error: result.error } : { ok: true }
+        },
+        startJudge: (input) => this.startLoopJudge(input),
+        closeJudge: (project, judge) => this.archiveTaskFromMain(project, judge),
+        sendFirstPrompt: (projectId, taskId, tabId, prompt, mode) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt, mode),
+        lastReply: async (project, task, tab) => {
+          const live = this.activityRegistry.getActivity(tab.id)?.lastAnswer ?? null
+          if (tab.type !== 'claude-chat' || !tab.sessionId) return live
+          return lastReplyFromTranscript(await readLocalTranscript(tab.sessionId, taskDirectory(project, task))) ?? live
+        }
       },
       log: (message) => this.logDebug(message)
     })
@@ -1440,6 +1456,8 @@ export class HostServices {
     decorate?: (task: Task) => Task
     /** The project as committed with the new task (`taskId`): what else changes with it. */
     decorateProject?: (project: Project, taskId: string) => Project
+    /** Start in the task's folder whoever works there (a loop's judge, which takes turns with its worker). */
+    here?: boolean
     log: string
   }): Promise<{ ok: true; taskId: string; queued: boolean; ownWorktree: boolean } | { ok: false; error: string }> {
     const data = this.projectsStore.peek()
@@ -1454,7 +1472,7 @@ export class HostServices {
 
     const now = Date.now()
     let extra: NewTaskExtra | undefined
-    if (!(streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project))) {
+    if (!opts.here && !(streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project))) {
       const dir = streamDirectory(project, stream)
       const busy = project.streams.flatMap(s => s.tasks).some(task => {
         if (taskDirectory(project, task) !== dir) return false
@@ -1501,6 +1519,34 @@ export class HostServices {
       this.logDebug(`${opts.log} start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
     }
     return result
+  }
+
+  /**
+   * A judge of an Autopilot loop (`autopilot-loop.ts`): a chat task under the
+   * loop's task, working in its folder. Nobody is there to answer its
+   * questions, so it works without asking, but never with more rights than the
+   * worker: Claude in the worker's mode, Codex in its sandboxed auto preset.
+   */
+  private async startLoopJudge(input: StartJudgeInput): Promise<{ ok: true; taskId: string } | { ok: false; error: string }> {
+    const { project, worker, agent, round, prompt } = input
+    const label = JUDGE_LABEL[agent]
+    const started = await this.startChatTaskFromMain({
+      project,
+      streamId: findStreamOfTask(project, worker.id)?.id,
+      prompt,
+      agent: agent === 'codex' ? 'codex' : 'claude',
+      // Never looser than the worker: Claude in the worker's mode, Codex in its sandboxed auto preset.
+      mode: agent === 'codex' ? 'auto' : delegatedMode(worker.autopilot?.loop?.mode ?? 'auto'),
+      name: round === 0 ? `${label} writes the rubric` : `${label} judges round ${round}`,
+      here: true,
+      decorate: task => ({
+        ...task,
+        judgeOf: { taskId: worker.id, round, agent },
+        delegatedFrom: { taskId: worker.id, name: worker.name }
+      }),
+      log: `loopJudge worker=${worker.id} agent=${agent} round=${round}`
+    })
+    return started.ok ? { ok: true, taskId: started.taskId } : started
   }
 
   /** Why an agent can't start a `agent` chat task in `project`, or null. */

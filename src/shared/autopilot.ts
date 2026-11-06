@@ -1,3 +1,4 @@
+import { loopLine } from './loop'
 import { taskTabs } from './streams'
 import { isChatTabType, type Project, type Tab, type Task, type TaskAutopilot } from './types'
 
@@ -17,7 +18,7 @@ export function autopilotNeedsYou(task: Task): boolean {
 /** Main is at work on the task with no agent turn to show it (Codex reviewing, landing): it sits in Working. */
 export function autopilotBusy(task: Task): boolean {
   const phase = task.autopilot?.phase
-  return phase === 'reviewing' || phase === 'landing'
+  return phase === 'reviewing' || phase === 'judging' || phase === 'landing'
 }
 
 /** The tab Autopilot follows: the task's main chat (Claude, Codex or Pi), else its first. */
@@ -33,6 +34,7 @@ export function autopilotActive(task: Task): boolean {
 
 /** The row's line for a run still going, or null (`working` reads as the agent's own line). */
 export function autopilotLine(autopilot: TaskAutopilot | undefined): string | null {
+  if (autopilot?.loop && autopilot.phase !== 'stopped') return loopLine(autopilot)
   switch (autopilot?.phase) {
     case 'reviewing': return 'Autopilot · Codex reviewing'
     case 'fixing': return 'Autopilot · fixing Codex’s findings'

@@ -50,7 +50,8 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
   const landing = landingStatusLabel(entry.task.landing, entry.stream.name)
   // In Needs you only for a task it started: name that task.
   if (kind === 'needsYou' && bubbled) return { lead: 'Needs you:', text: `its task “${bubbled.task.name}”` }
-  if (kind === 'working' && entry.waitingOn) {
+  // A loop waiting on its judge says where the loop is, not "Waiting on 1 task".
+  if (kind === 'working' && entry.waitingOn && !entry.task.autopilot?.loop) {
     const elapsed = entry.since !== null ? ` · ${formatWaitTime(now - entry.since)}` : ''
     return { text: `${waitingLine(entry.waitingOn)}${elapsed}` }
   }

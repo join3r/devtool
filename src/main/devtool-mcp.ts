@@ -21,6 +21,7 @@ import { resolveModel, type AgentModel } from './agent-models'
 import { DEFAULT_SECRET_FILE, SECRET_REASON_MAX, isDotenvFile, safeSecretFile, validSecretName } from '../shared/secrets'
 import type { SecretOutcome } from './secrets/secret-requests'
 import { childProgress, childProgressLine, delegationTree, waitingOnChildren } from '../shared/delegation'
+import { validScore } from '../shared/loop'
 
 /**
  * DevTool's MCP server: tools an agent DevTool started uses to run DevTool
@@ -47,7 +48,7 @@ export interface DevtoolMcpEndpoint {
  * messaging one go through the tab's own permission mode (in auto mode Claude's
  * classifier decides, so an Autopilot run isn't stopped by them).
  */
-export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
+export const MCP_ALLOW_RULES = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
 
 /** The server as Claude's MCP config (`--mcp-config`, the Agent SDK's `mcpServers`) names it. */
 export function claudeMcpServers(endpoint: DevtoolMcpEndpoint): Record<string, { type: 'http'; url: string; headers: Record<string, string> }> {
@@ -599,6 +600,22 @@ export const TOOLS: ToolDef[] = [
     annotations: { destructiveHint: true }
   },
   {
+    name: 'submit_score',
+    title: 'Score an Autopilot loop round',
+    description:
+      'Only in a judge task of an Autopilot loop (your first message says so): your score for the round you judged. DevTool closes this task once your turn ends. Call it once, then end your turn.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        score: { type: 'number', minimum: 0, maximum: 10, description: 'Your score from 1 to 10 against the rubric.' },
+        findings: { type: 'string', description: 'What keeps it from 10, most important first, each one concrete: where, what is wrong, what to do. Markdown.' },
+        rubric: { type: 'string', description: 'Round 0 only: the rubric as Markdown (3-5 criteria, and for each what you check and how).' }
+      },
+      required: ['score', 'findings'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'nothing_new',
     title: 'End a scheduled run quietly',
     description:
@@ -764,6 +781,8 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       if (found.kind === 'closed') throw new ToolError('That task is closed.')
       // Only your own: another task's agent is the user's to direct.
       if (found.task.delegatedFrom?.taskId !== me.task.id) throw new ToolError('You can message only tasks you started.')
+      // A loop's judges are DevTool's, not their worker's: it mustn't sway its own score.
+      if (found.task.judgeOf) throw new ToolError('That task judges your work for DevTool; you can\'t message it.')
       if (found.task.queued) throw new ToolError('That task has not started yet (it is queued). Wait for it first.')
       const tab = conversationTab(found.task)
       if (!tab) throw new ToolError('That task has no agent to send to.')
@@ -870,6 +889,28 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       if (!projectSchedules(project).some(s => s.id === scheduleId)) throw new ToolError('No such schedule in your project. list_schedules names them.')
       deps.commit(mapProjectIn(deps.peek(), project.id, p => applyScheduleOp(p, { op: 'remove', id: scheduleId })))
       return { deleted: true, scheduleId }
+    }
+
+    case 'submit_score': {
+      const judgeOf = me.task.judgeOf
+      if (!judgeOf) throw new ToolError('Only a judge task of an Autopilot loop scores rounds.')
+      const worker = findLiveTask(data, judgeOf.taskId)
+      const judging = worker?.task.autopilot?.loop?.judging
+      if (!worker || worker.project.id !== project.id || judging?.taskId !== me.task.id) {
+        throw new ToolError('The loop isn\'t waiting for your score any more. End your turn.')
+      }
+      const score = args.score
+      if (!validScore(score)) throw new ToolError('`score` must be a number from 0 to 10.')
+      const findings = str(args, 'findings', true).trim()
+      const rubric = str(args, 'rubric')?.trim()
+      if (judgeOf.round === 0 && !rubric) throw new ToolError('Round 0 needs the `rubric` too.')
+      if (findings.length > PROMPT_LIMIT || (rubric?.length ?? 0) > PROMPT_LIMIT) throw new ToolError(`Keep \`findings\` and \`rubric\` under ${PROMPT_LIMIT} characters.`)
+      deps.commit(mapProjectIn(deps.peek(), project.id, p => mapTaskInProject(p, worker.task.id, task => {
+        const loop = task.autopilot?.loop
+        if (!task.autopilot || !loop?.judging || loop.judging.taskId !== me.task.id) return task
+        return { ...task, autopilot: { ...task.autopilot, loop: { ...loop, judging: { ...loop.judging, score, findings, ...(rubric ? { rubric } : {}) } } } }
+      })))
+      return { recorded: true, score, note: 'DevTool closes this task once your turn ends. End your turn now with one short line.' }
     }
 
     case 'nothing_new': {

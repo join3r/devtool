@@ -61,6 +61,9 @@ export function streamDirectory(project: Project, stream: Stream | undefined): s
  * (an archived one) gets the project's own directory.
  */
 export function taskDirectory(project: Project, task: Task): string {
+  // A loop's judge works in the folder of the task it judges.
+  const judged = task.judgeOf ? findTaskInProject(project, task.judgeOf.taskId) : undefined
+  if (judged && judged.id !== task.id && !judged.judgeOf) return taskDirectory(project, judged)
   if (task.workspace) return joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath)
   return streamDirectory(project, findStreamOfTask(project, task.id))
 }
@@ -140,6 +143,7 @@ export function taskGetsOwnWorktree(stream: Stream | undefined, task: Task): boo
  */
 export function needsTaskWorktree(project: Project, stream: Stream, task: Task): boolean {
   return taskGetsOwnWorktree(stream, task)
+    && !task.judgeOf
     && taskWorktreesSupported(project)
     && !task.workspace
     && !task.sharesStreamWorktree

@@ -175,7 +175,8 @@ export class DelegationDelivery {
       const tree = delegationTree([project])
       for (const task of tree.tasks.values()) {
         const parentId = task.delegatedFrom?.taskId
-        if (!parentId) continue
+        // A loop's judges report to the loop (`autopilot-loop.ts`), not to its agent.
+        if (!parentId || task.judgeOf) continue
         open.add(task.id)
         const { state, detail } = liveTaskState(task, this.deps, now, waitingOf(project, task, this.deps))
         const before = this.seen.get(task.id)

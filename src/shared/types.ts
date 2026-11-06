@@ -265,6 +265,12 @@ export interface Task {
   queued?: TaskQueuedStart
   /** Started by another task's agent through DevTool's MCP tools (`main/devtool-mcp.ts`): that task, as it was named then. */
   delegatedFrom?: { taskId: string; name: string }
+  /**
+   * A judge of another task's Autopilot loop (`shared/loop.ts`): it works in
+   * that task's folder (never a worktree of its own), scores the round through
+   * MCP `submit_score`, and main closes it once it has.
+   */
+  judgeOf?: TaskJudgeOf
   /** A run of one of the project's schedules (`shared/schedules.ts`): that schedule, as it was named then. */
   scheduledFrom?: { scheduleId: string; name: string }
   /**
@@ -299,13 +305,16 @@ export interface TaskQueuedStart {
  *  - `working`: Claude's first turn, in auto mode.
  *  - `reviewing`: headless Codex reviews the task's diff (`review` only).
  *  - `fixing`: Claude works on Codex's findings; another review follows.
+ *  - `judging`: a loop's judge task scores the round (`loop` only).
  *  - `landing`: landing like ✓ Done (a conflict goes to the agent first). The
  *    archived task keeps this phase: that is the Done tab's "autopilot" mark.
  *  - `stopped`: handed to you (`reason`); the task sits in Needs you until you
  *    write to it. Autopilot doesn't pick it up again.
  */
 export interface TaskAutopilot {
-  phase: 'working' | 'reviewing' | 'fixing' | 'landing' | 'stopped'
+  phase: 'working' | 'reviewing' | 'fixing' | 'judging' | 'landing' | 'stopped'
+  /** A scored improvement loop instead of one Codex review (`shared/loop.ts`). */
+  loop?: TaskLoop
   /** "+ Codex review": one review of the diff, its findings sent back to Claude once. */
   review?: boolean
   /** Codex reviews run so far. */
@@ -316,6 +325,81 @@ export interface TaskAutopilot {
   reason?: string
   /** `stopped`: when. Writing to the task after it takes it out of Needs you. */
   stoppedAt?: number
+}
+
+/** An agent that scores an Autopilot loop's rounds. */
+export type LoopJudge = 'codex' | 'claude'
+
+/** What a judge task judges (`Task.judgeOf`). */
+export interface TaskJudgeOf {
+  /** The loop's task: the judge works in its folder. */
+  taskId: string
+  round: number
+  agent: LoopJudge
+}
+
+/** One judge's score of one round. */
+export interface LoopScore {
+  judge: LoopJudge
+  score: number
+  findings: string
+  /** It changed files in the worker's folder; DevTool put them back. */
+  tampered?: true
+}
+
+/** One round of a loop: the worker's changes (checkpoint) and the scores they got. */
+export interface LoopRound {
+  round: number
+  /** The checkpoint commit (none for round 0, the original state). */
+  commit?: string
+  scores: LoopScore[]
+  /** Scored below the best round: the folder went back to that round's checkpoint. */
+  reverted?: true
+}
+
+/** The judge at work right now. */
+export interface LoopJudging {
+  agent: LoopJudge
+  taskId: string
+  /** What the folder was when it began (the round's checkpoint, or the base for round 0). */
+  head: string
+  startedAt: number
+  /** Set by `submit_score`. */
+  score?: number
+  findings?: string
+  rubric?: string
+  /** It ended a turn without a score and was asked once more. */
+  reminded?: true
+}
+
+/**
+ * An Autopilot loop (`shared/loop.ts`, `main/autopilot-loop.ts`): round 0 a
+ * judge writes the rubric and scores the original state; then each round the
+ * worker improves, DevTool commits a checkpoint, and the judges score it in
+ * order until every one gives at least `target`, or `rounds` run out.
+ */
+export interface TaskLoop {
+  /** The score every judge must give (1-10). */
+  target: number
+  /** Most worker rounds (round 0 not counted). */
+  rounds: number
+  /** In order: a judge is asked only once the one before it gave `target`. */
+  judges: LoopJudge[]
+  /** What the user asked: the worker's first prompt waits for the rubric. */
+  brief: string
+  /** The worker's permission mode for that first prompt. */
+  mode?: string
+  /** 0 while the rubric is written, then the worker's round. */
+  round: number
+  /** The original state's commit (set when round 0 begins): what the judges diff against. */
+  base?: string
+  /** The commit the folder is at between rounds: the last checkpoint, or where a reset put it. */
+  head?: string
+  rubric?: string
+  judging?: LoopJudging
+  history: LoopRound[]
+  /** The best round so far (by its first judge's score): where a worse round goes back to. */
+  best?: { round: number; score: number; commit: string }
 }
 
 /**

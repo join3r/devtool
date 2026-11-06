@@ -13,6 +13,7 @@ import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { useDeskDone } from './useDeskDone'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
 import { ScheduleModal } from './DeskSchedules'
+import DeskLoopPanel from './DeskLoopPanel'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import { childProgress, childProgressLine, delegationTree, statusFrom, waitingLine, waitingOnChildren } from '../../../shared/delegation'
 
@@ -71,6 +72,7 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
           data-testid="desk-task-children"
         >{waitingOn > 0 ? `${waitingLine(waitingOn)} · ${childProgressLine(progress)}` : childProgressLine(progress)}</span>
       )}
+      <DeskLoopPanel task={task} />
       {autopilotActive(task) && (
         <span
           className="shrink-0 mr-1.5 flex items-center gap-1 h-[22px] pl-2 pr-1 rounded-full border border-border text-xs text-text-muted"

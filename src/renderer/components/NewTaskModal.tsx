@@ -12,7 +12,8 @@ import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickProm
 import { currentStreamId } from '../../shared/streams'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
 import AutopilotChips from './desk/AutopilotChips'
-import { AUTOPILOT_OFF, autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, type DeskAutopilot } from './desk/deskStart'
+import { normalizeLoopSettings } from '../../shared/loop'
+import { AUTOPILOT_OFF, autopilotAvailable, loopAvailable, startsInOwnWorktree, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, type DeskAutopilot } from './desk/deskStart'
 import SameFolderWarning from './desk/SameFolderWarning'
 import { useAllTabStatuses } from '../context/TabStatusContext'
 
@@ -173,6 +174,7 @@ export default function NewTaskModal({
   const agent = terminal ? undefined : pickPromptAgent(picked ?? config.promptBoxAgent, agents)
   const takesMode = !!agent && agentTakesMode(agent)
   const canAutopilot = autopilotAvailable(project ?? undefined, agent ?? null)
+  const canLoop = canAutopilot && target?.kind === 'project' && loopAvailable(project ?? undefined, stream)
   // Without an agent to hand it to, there is no prompt — the task opens blank.
   const promptText = agent || takesCommand ? prompt.trim() : ''
   // Only the chat view takes images; switching away hides them rather than dropping them.
@@ -285,10 +287,12 @@ export default function NewTaskModal({
           }
         }
       : undefined
+    const loopSettings = run && start && run.loop && canLoop ? normalizeLoopSettings(run.loop) : null
     onCreate({
       target, ...where, start,
-      ...(run && start ? { autopilot: { review: run.review } } : {}),
-      ...(choice === 'worktree' ? { ownWorktree: true } : {})
+      ...(run && start ? { autopilot: { review: !loopSettings && run.review, ...(loopSettings ? { loop: loopSettings } : {}) } } : {}),
+      // A loop's checkpoints and resets need a worktree of its own.
+      ...(choice === 'worktree' || (loopSettings && project && !startsInOwnWorktree(project, stream)) ? { ownWorktree: true } : {})
     })
   }
 
@@ -523,7 +527,7 @@ export default function NewTaskModal({
                 )}
                 {canAutopilot && (
                   <span className="ml-1 flex items-center gap-1">
-                    <AutopilotChips value={autopilot} onChange={(next) => { setAutopilot(next); focusPrompt() }} />
+                    <AutopilotChips value={autopilot} onChange={(next) => { setAutopilot(next); focusPrompt() }} loop={canLoop} codex={config.enableCodex} />
                   </span>
                 )}
               </div>
