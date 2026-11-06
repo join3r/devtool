@@ -15,6 +15,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 import { loadClaudeSdk } from './sdk'
 import {
+  bypassAllows,
   isChatPermissionMode,
   promptKindFor,
   type ChatEvent,
@@ -402,6 +403,12 @@ export class ChatSession {
   private query: Query | null = null
   private readonly held = new Map<string, HeldPrompt>()
   private closedByUs = false
+  /**
+   * The mode the CLI runs in, only as the CLI reported it (init/status) or acknowledged
+   * a switch to it. Never set ahead of the CLI: Bypass here answers asks without a card,
+   * so a CLI that refused Bypass (a managed policy) must not be answered for.
+   */
+  private mode: string | undefined
   private stderrTail = ''
   private ended = false
   private running = false
@@ -509,6 +516,7 @@ export class ChatSession {
         if ((message as { type?: string }).type === 'system' && (message as { subtype?: string }).subtype === 'init') {
           this.markRunning()
         }
+        this.noteMode(message as { type?: string; subtype?: string; permissionMode?: unknown })
         if (isDisplayRelevant(message)) this.options.onEvent({ t: 'sdk', m: message, at: Date.now() })
         const started = sessionStartInput(message)
         if (started) this.onSessionStart(started)
@@ -734,7 +742,16 @@ export class ChatSession {
     }
   }
 
+  private noteMode(message: { type?: string; subtype?: string; permissionMode?: unknown }): void {
+    if (message.type !== 'system' || (message.subtype !== 'init' && message.subtype !== 'status')) return
+    if (typeof message.permissionMode === 'string') this.mode = message.permissionMode
+  }
+
   private readonly canUseTool: CanUseTool = (toolName, input, options) => {
+    if (bypassAllows(this.mode, toolName)) {
+      this.options.log(`chatBypassAllow tool=${toolName} reason=${JSON.stringify(options.decisionReason ?? options.title ?? '')}`)
+      return Promise.resolve({ behavior: 'allow', updatedInput: input })
+    }
     const prompt: ChatPrompt = {
       id: options.requestId || randomUUID(),
       kind: promptKindFor(toolName),
@@ -901,8 +918,19 @@ export class ChatSession {
   }
 
   async setPermissionMode(mode: string): Promise<void> {
-    await this.query?.setPermissionMode(mode as PermissionMode)
+    if (!this.query) {
+      // Not started yet: the CLI reports the mode it starts in.
+      this.options.onEvent({ t: 'meta', info: { permissionMode: mode } })
+      return
+    }
+    // Throws when the CLI refuses the mode; then nothing below runs.
+    await this.query.setPermissionMode(mode as PermissionMode)
+    this.mode = mode
     this.options.onEvent({ t: 'meta', info: { permissionMode: mode } })
+    // Switching to Bypass while a card is open is asking to go ahead with it too.
+    for (const [id, held] of [...this.held]) {
+      if (bypassAllows(mode, held.prompt.toolName)) this.respond(id, { behavior: 'allow' })
+    }
   }
 
   async setEffort(effort: string | undefined): Promise<void> {

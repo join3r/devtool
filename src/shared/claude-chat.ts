@@ -1733,6 +1733,16 @@ export function promptKindFor(toolName: string): ChatPromptKind {
   return 'permission'
 }
 
+/**
+ * Whether a permission request is answered "allow" without showing a card. In Bypass
+ * the CLI still asks for its own built-in checks (`cd` plus a redirect or `git` in one
+ * command, and the like), in every mode. The picker promises Bypass never asks, so the
+ * tab allows those itself. Questions and plans still need the user.
+ */
+export function bypassAllows(mode: string | undefined, toolName: string): boolean {
+  return mode === 'bypassPermissions' && promptKindFor(toolName) === 'permission'
+}
+
 /** The composer's effort levels when the model doesn't list its own. */
 export const CHAT_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 
