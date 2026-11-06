@@ -302,9 +302,15 @@ const LIST_KINDS: ReadonlyArray<[keyof DeskLists, DeskRowKind]> = [
  * A task whose parent isn't listed (closed, or outside the scope) stays a row
  * of its own, so nothing is lost. A row whose task needs nothing but has a
  * task under it that does moves to Needs you, so that question is never
- * buried under a quiet parent.
+ * buried under a quiet parent. A pinned task (`topLevel`) keeps its own row,
+ * so it stays in the Inbox while it works however busy its parent is.
  */
-export function nestDeskLists(lists: DeskLists, tree: DelegationTree): DeskNesting {
+export function nestDeskLists(
+  lists: DeskLists,
+  tree: DelegationTree,
+  /** Tasks that keep a row of their own (pinned ones), even with their parent listed. */
+  topLevel: ReadonlySet<string> = new Set()
+): DeskNesting {
   const kindOf = new Map<string, DeskRowKind>()
   const byId = new Map<string, InboxEntry>()
   for (const [list, kind] of LIST_KINDS) {
@@ -320,7 +326,7 @@ export function nestDeskLists(lists: DeskLists, tree: DelegationTree): DeskNesti
     const rows: NestedChild[] = []
     for (const childId of childIds) {
       const entry = byId.get(childId)
-      if (!entry) continue
+      if (!entry || topLevel.has(childId)) continue
       rows.push({ entry, kind: kindOf.get(childId)! })
       nested.add(childId)
     }
@@ -413,4 +419,43 @@ export function childrenExpanded(
   const choice = toggled.get(taskId)
   if (choice !== undefined) return choice
   return nestedUnder(nesting, taskId).some(child => child.kind === 'needsYou' || child.entry.task.id === selectedTaskId)
+}
+
+/** A task a row's agent started that is not drawn under it: closed (in the archive), or open but listed elsewhere. */
+export type StartedElsewhere =
+  | { kind: 'open'; project: Project; task: Task }
+  | { kind: 'closed'; done: DoneEntry }
+
+/**
+ * The tasks `task` started that its expanded row can't show as rows of their
+ * own: closed ones (from the loaded archives), and open ones in another
+ * project or pinned to a row of their own. In the order they were started.
+ */
+export function startedElsewhere(
+  task: Task,
+  nesting: Pick<DeskNesting, 'children'>,
+  projects: readonly Project[],
+  archives: ReadonlyMap<string, ProjectArchive>
+): StartedElsewhere[] {
+  const ids = (task.startedTaskIds ?? []).filter(id => id !== task.id)
+  if (ids.length === 0) return []
+  const drawn = new Set(nestedUnder(nesting, task.id).map(child => child.entry.task.id))
+  const open = new Map<string, { project: Project; task: Task }>()
+  for (const project of projects) {
+    for (const stream of project.streams) for (const candidate of stream.tasks) open.set(candidate.id, { project, task: candidate })
+  }
+  let closed: Map<string, DoneEntry> | null = null
+  const out: StartedElsewhere[] = []
+  for (const id of new Set(ids)) {
+    if (drawn.has(id)) continue
+    const live = open.get(id)
+    if (live) {
+      out.push({ kind: 'open', ...live })
+      continue
+    }
+    closed = closed ?? new Map(doneEntries(projects, archives, null, null).map(done => [done.entry.task.id, done]))
+    const done = closed.get(id)
+    if (done) out.push({ kind: 'closed', done })
+  }
+  return out
 }

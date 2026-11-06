@@ -3,7 +3,7 @@ import {
   childProgress, childProgressLine, delegationTree, openDescendants, rootOf, statusFrom, waitingOnChildren, workingDescendants
 } from '../src/shared/delegation'
 import { partitionInbox, inboxSources } from '../src/renderer/components/inbox'
-import { childrenExpanded, deskLists, nestDeskLists, withChildren } from '../src/renderer/components/desk/deskInbox'
+import { childrenExpanded, deskLists, nestDeskLists, pinnedWorking, startedElsewhere, withChildren } from '../src/renderer/components/desk/deskInbox'
 import { DelegationDelivery, deliveryMessage, type DelegationDeliveryDeps } from '../src/main/delegation-delivery'
 import { buildInbox } from '../src/main/mobile/inbox'
 import { closeTask } from '../src/main/mobile/close-task'
@@ -126,6 +126,33 @@ describe('desk inbox nesting', () => {
     const quiet = lists(project(), {}).nest
     expect(childrenExpanded('parent', quiet, new Map(), null)).toBe(false)
     expect(childrenExpanded('parent', quiet, new Map(), 'b')).toBe(true)
+  })
+
+  it('keeps a pinned child as a row of its own, so the Inbox keeps it while it works', () => {
+    const p = project()
+    const allStatuses = { 'a-tab': 'working' as const }
+    const tree = delegationTree([p])
+    const raw = deskLists(partitionInbox(inboxSources([p]), allStatuses, {}, 1000, t => waitingOnChildren(tree, t, statusFrom(allStatuses))))
+    const pinned = new Set(['a'])
+    const nest = nestDeskLists(raw, tree, pinned)
+    expect(nest.children.get('parent')?.map(c => c.entry.task.id)).toEqual(['b'])
+    expect(nest.lists.working.map(e => e.task.id)).toContain('a')
+    expect(pinnedWorking(nest.lists, pinned).map(e => e.task.id)).toEqual(['a'])
+    // Its own children still go under it.
+    expect(nest.children.get('a')?.map(c => c.entry.task.id)).toEqual(['a1'])
+  })
+
+  it('lists the started tasks an expanded row cannot draw: closed ones from the archive, open ones elsewhere', () => {
+    const p = project()
+    const parent = p.streams[0].tasks.find(t => t.id === 'parent')!
+    parent.startedTaskIds = ['a', 'b', 'gone', 'missing', 'solo']
+    const { nest } = lists(p, {})
+    const closed = { task: { id: 'gone', name: 'Gone', panes: [] }, streamId: p.streams[0].id, streamName: 'main', dir: '/tmp', archivedAt: 5 }
+    const archives = new Map<string, ProjectArchive>([['p1', { ...emptyArchive(), tasks: [closed] }]])
+    const out = startedElsewhere(parent, nest, [p], archives)
+    expect(out.map(item => item.kind === 'open' ? `open:${item.task.id}` : `closed:${item.done.entry.task.id}`)).toEqual(['closed:gone', 'open:solo'])
+    // Before the archive loads only the open one shows.
+    expect(startedElsewhere(parent, nest, [p], new Map()).length).toBe(1)
   })
 })
 

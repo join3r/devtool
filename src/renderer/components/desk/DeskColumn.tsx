@@ -23,8 +23,8 @@ import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
 import { deskEvents } from './deskEvents'
 import {
   DONE_WINDOW_MS, checkRows, checkedRows, deskLists, deskTabCounts, doneEntries, keyTarget, liveScope, rowChord, nextNeedsYou, pinnedFirst, pinnedWorking, scopeLabel, scopeSources, shownRows, stepRow, taskBackground,
-  childrenExpanded, nestDeskLists, nestedUnder, withChildren,
-  type DeskLists, type DoneEntry, type InboxRename, type RowKey
+  childrenExpanded, nestDeskLists, nestedUnder, startedElsewhere, withChildren,
+  type DeskLists, type StartedElsewhere, type DoneEntry, type InboxRename, type RowKey
 } from './deskInbox'
 import { childProgress, childProgressLine, delegationTree, rootOf, statusFrom, waitingOnChildren } from '../../../shared/delegation'
 import { stopBackground } from './useDeskDone'
@@ -201,7 +201,8 @@ export default function DeskColumn({
     const statusOf = statusFrom(allStatuses)
     const raw = deskLists(partitionInbox(scopeSources(inboxSources([...projects]), scope), allStatuses, statusSince, now, task => waitingOnChildren(tree, task, statusOf)))
     // Started tasks go under the task that started them (`nestDeskLists`).
-    const nest = nestDeskLists(raw, tree)
+    // Pinned tasks keep rows of their own, so the Inbox can keep them while they work.
+    const nest = nestDeskLists(raw, tree, pinnedTaskIds)
     const top = nest.lists
     return {
       lists: {
@@ -269,6 +270,12 @@ export default function DeskColumn({
     [projects]
   )
   const archives = useProjectArchives(archiveIds, tab === 'done')
+  // An expanded row lists the tasks it started that closed: their projects' archives load.
+  const treeTasks = tree.tasks
+  const startedArchiveIds = [...new Set(allRows
+    .filter(entry => entry.task.startedTaskIds?.some(id => !treeTasks.has(id)) && expanded(entry.task.id))
+    .map(entry => entry.project.id))]
+  const startedArchives = useProjectArchives(startedArchiveIds, startedArchiveIds.length > 0)
   const done = useMemo(
     () => (tab === 'done' ? doneEntries(projects, archives, scope, showOlder ? null : now - DONE_WINDOW_MS) : []),
     [tab, projects, archives, scope, showOlder, now]
@@ -465,16 +472,17 @@ export default function DeskColumn({
   const renderRow = (entry: InboxEntry, kind: DeskRowKind, depth = 0, inGroup = false): React.ReactElement => {
     const background = kind === 'working' ? taskBackground(entry.task, activities) : null
     const progress = nesting.children.has(entry.task.id) || entry.task.startedTaskIds?.length ? childProgress(tree, entry.task, statusOf) : null
-    const hasNested = nesting.children.has(entry.task.id)
+    const open = expanded(entry.task.id)
+    const elsewhere = progress && open ? startedElsewhere(entry.task, nesting, projects, startedArchives) : []
     return (
+      <React.Fragment key={entry.task.id}>
       <DeskRow
-        key={entry.task.id}
         entry={entry}
         kind={kind}
         depth={depth}
         bubbled={depth === 0 ? nesting.bubbled.get(entry.task.id) : undefined}
         childLine={progress
-          ? { text: childProgressLine(progress), expanded: hasNested && expanded(entry.task.id), onToggle: () => { if (hasNested) toggle(entry.task.id) } }
+          ? { text: childProgressLine(progress), expanded: open, onToggle: () => toggle(entry.task.id) }
           : undefined}
         agent={taskActivity(entry.task, allStatuses, activities)}
         activity={bestActivity(entry, activities)}
@@ -508,6 +516,18 @@ export default function DeskColumn({
         onHover={(id) => { hovered.current = id }}
         rename={rename?.taskId === entry.task.id ? rename : undefined}
       />
+      {elsewhere.map(item => (
+        <StartedRow
+          key={item.kind === 'open' ? item.task.id : item.done.entry.task.id}
+          item={item}
+          depth={depth + 1}
+          pinned={item.kind === 'open' && pinnedTaskIds.has(item.task.id)}
+          onOpen={() => item.kind === 'open'
+            ? onSelectTask(item.project.id, item.task.id)
+            : showArchived({ projectId: item.done.project.id, kind: 'task', id: item.done.entry.task.id })}
+        />
+      ))}
+      </React.Fragment>
     )
   }
 
@@ -691,6 +711,25 @@ export default function DeskColumn({
         onMouseDown={resize.onMouseDown}
       />
     </nav>
+  )
+}
+
+/** A task a row started that isn't drawn under it (closed, or listed elsewhere): opens it, read-only when closed. */
+function StartedRow({ item, depth, pinned, onOpen }: { item: StartedElsewhere; depth: number; pinned: boolean; onOpen: () => void }): React.ReactElement {
+  const name = item.kind === 'open' ? item.task.name : item.done.entry.task.name
+  const note = item.kind === 'closed' ? 'Done' : pinned ? 'Pinned' : item.project.name
+  return (
+    <button
+      type="button"
+      className="flex items-baseline gap-2 mx-2 px-3 py-1.5 rounded-[10px] border-0 bg-transparent text-left cursor-pointer hover:bg-row-hover min-w-0"
+      style={{ marginLeft: 8 + depth * 22, width: `calc(100% - ${16 + depth * 22}px)` }}
+      onClick={onOpen}
+      title={item.kind === 'open' ? `Open ${name}` : `Open ${name} (closed, read-only)`}
+      data-testid="desk-started-row"
+    >
+      <span className="min-w-0 flex-1 text-base text-text-muted overflow-hidden text-ellipsis whitespace-nowrap">{name}</span>
+      <span className="shrink-0 text-xs text-text-subtle">{note}</span>
+    </button>
   )
 }
 
