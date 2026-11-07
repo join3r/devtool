@@ -168,6 +168,18 @@ export default function DeskRow({
       )}
     </span>
   )
+  // The project tile sits at the right end of the top line, not in a column of its own.
+  const tile = showTile && !nested && !checking && (
+    <button
+      type="button"
+      className={`shrink-0 flex p-0 border-0 bg-transparent cursor-pointer rounded-[5px] ${bareMeta ? 'self-center' : ''} group-hover:invisible group-has-[:focus-visible]:invisible ${jumpNumber !== undefined ? '[body.meta-held_&]:invisible' : ''}`}
+      title={`Show only ${project.name}`}
+      onClick={(e) => { e.stopPropagation(); onScopeProject(project) }}
+      data-testid="desk-row-tile"
+    >
+      <ProjectTileBadge project={project} theme={theme} size={16} />
+    </button>
+  )
   return (
     <div
       className={[
@@ -208,9 +220,6 @@ export default function DeskRow({
           data-testid="desk-row-open"
         />
       )}
-      {selected && !checked && (
-        <span className="absolute left-1 top-3 bottom-3 w-[3px] rounded-full bg-text" aria-hidden="true" />
-      )}
       {jumpNumber !== undefined && (
         <span
           className="absolute right-3 top-2 z-10 min-w-6 h-5 px-1 flex items-center justify-center rounded-md border border-border-strong bg-surface-3 text-2xs font-semibold text-text tabular-nums pointer-events-none invisible [body.meta-held_&]:visible"
@@ -233,16 +242,7 @@ export default function DeskRow({
         >
           <Check size={14} strokeWidth={3} />
         </button>
-      ) : showTile && !nested && (
-        <button
-          type="button"
-          className="relative z-[1] shrink-0 p-0 border-0 bg-transparent cursor-pointer rounded-md"
-          title={`Show only ${project.name}`}
-          onClick={(e) => { e.stopPropagation(); onScopeProject(project) }}
-        >
-          <ProjectTileBadge project={project} theme={theme} size={24} />
-        </button>
-      )}
+      ) : null}
       {/* Clicks fall through the text to the row's button; the controls inside stay clickable. */}
       <div className={`relative z-[1] flex-1 min-w-0 flex flex-col gap-[3px] ${rename ? '' : 'pointer-events-none [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_a]:pointer-events-auto [&_[data-usage]]:pointer-events-auto'}`}>
         {!bareMeta && <div className="flex justify-between gap-2 text-xs text-text-muted">
@@ -254,7 +254,7 @@ export default function DeskRow({
                 {!stream.isMain && <> › <span className="font-mono">{stream.name}</span></>}
               </>}
           </span>
-          {marks}
+          <span className="shrink-0 flex items-center gap-1.5">{marks}{tile}</span>
         </div>}
         {rename ? (
           <input
@@ -283,6 +283,7 @@ export default function DeskRow({
             {/* Under the hover actions, which cover the line above: the chart stays reachable. */}
             {!offline && <span data-usage className={`${bareMeta ? '' : 'ml-auto'} self-end shrink-0 pl-1`}><TaskUsagePills task={task} /></span>}
             {bareMeta && marks}
+            {bareMeta && tile}
           </span>
         )}
         {inBackground && background ? (
