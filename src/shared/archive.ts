@@ -46,10 +46,27 @@ export interface ArchivedStream {
   archivedAt: number
 }
 
+/**
+ * A closed stream someone deleted for good: all that is left of it, so the
+ * project map can still say when it went.
+ */
+export interface DeletedStream {
+  streamId: string
+  streamName: string
+  /** Its branch and the one it was cut from, when it had a worktree. */
+  branchName?: string
+  baseBranch?: string
+  /** When it was closed, and when it was deleted. */
+  closedAt: number
+  deletedAt: number
+}
+
 export interface ProjectArchive {
   version: typeof ARCHIVE_VERSION
   tasks: ArchivedTask[]
   streams: ArchivedStream[]
+  /** Streams deleted for good, oldest first. Absent in files written before. */
+  deletedStreams?: DeletedStream[]
 }
 
 export function emptyArchive(): ProjectArchive {
@@ -87,13 +104,27 @@ function normalizeArchivedStream(raw: unknown): ArchivedStream | null {
   }
 }
 
+function normalizeDeletedStream(raw: unknown): DeletedStream | null {
+  if (!isRecord(raw) || typeof raw.streamId !== 'string' || typeof raw.deletedAt !== 'number') return null
+  return {
+    streamId: raw.streamId,
+    streamName: typeof raw.streamName === 'string' ? raw.streamName : '',
+    ...(typeof raw.branchName === 'string' ? { branchName: raw.branchName } : {}),
+    ...(typeof raw.baseBranch === 'string' ? { baseBranch: raw.baseBranch } : {}),
+    closedAt: typeof raw.closedAt === 'number' ? raw.closedAt : 0,
+    deletedAt: raw.deletedAt
+  }
+}
+
 /** Whatever was read off disk, as a well-formed archive (bad entries dropped). */
 export function normalizeArchive(raw: unknown): ProjectArchive {
   if (!isRecord(raw)) return emptyArchive()
+  const deleted = (Array.isArray(raw.deletedStreams) ? raw.deletedStreams : []).map(normalizeDeletedStream).filter((d): d is DeletedStream => !!d)
   return {
     version: ARCHIVE_VERSION,
     tasks: (Array.isArray(raw.tasks) ? raw.tasks : []).map(normalizeArchivedTask).filter((t): t is ArchivedTask => !!t),
-    streams: (Array.isArray(raw.streams) ? raw.streams : []).map(normalizeArchivedStream).filter((s): s is ArchivedStream => !!s)
+    streams: (Array.isArray(raw.streams) ? raw.streams : []).map(normalizeArchivedStream).filter((s): s is ArchivedStream => !!s),
+    ...(deleted.length > 0 ? { deletedStreams: deleted } : {})
   }
 }
 
@@ -122,15 +153,30 @@ export function withArchivedStream(archive: ProjectArchive, entry: ArchivedStrea
   }
 }
 
-/** Drop archived tasks and streams by id (reopened, or deleted for good). */
-export function withoutArchived(archive: ProjectArchive, ids: { tasks?: readonly string[]; streams?: readonly string[] }): ProjectArchive {
+/**
+ * Drop archived tasks and streams by id (reopened, or deleted for good). With
+ * `deletedAt` they were deleted: each stream dropped is remembered in
+ * `deletedStreams`.
+ */
+export function withoutArchived(archive: ProjectArchive, ids: { tasks?: readonly string[]; streams?: readonly string[] }, deletedAt?: number): ProjectArchive {
   const tasks = new Set(ids.tasks ?? [])
   const streams = new Set(ids.streams ?? [])
-  return {
+  const gone: DeletedStream[] = deletedAt === undefined
+    ? []
+    : archive.streams.filter(entry => streams.has(entry.stream.id)).map(entry => ({
+        streamId: entry.stream.id,
+        streamName: entry.stream.name,
+        ...(entry.stream.workspace ? { branchName: entry.stream.workspace.branchName, baseBranch: entry.stream.workspace.baseBranch } : {}),
+        closedAt: entry.archivedAt,
+        deletedAt
+      }))
+  const next: ProjectArchive = {
     ...archive,
     tasks: archive.tasks.filter(entry => !tasks.has(entry.task.id)),
     streams: archive.streams.filter(entry => !streams.has(entry.stream.id))
   }
+  if (gone.length > 0) next.deletedStreams = [...(archive.deletedStreams ?? []), ...gone]
+  return next
 }
 
 /**
@@ -165,7 +211,13 @@ export function pruneArchive(archive: ProjectArchive, cutoff: number): ProjectAr
       streams.push({ ...entry, doneTasks })
     }
   }
-  return changed ? { ...archive, tasks, streams } : archive
+  const deletedStreams = archive.deletedStreams?.filter(entry => entry.deletedAt >= cutoff)
+  if (deletedStreams && deletedStreams.length !== archive.deletedStreams?.length) changed = true
+  if (!changed) return archive
+  const next: ProjectArchive = { ...archive, tasks, streams }
+  if (deletedStreams && deletedStreams.length > 0) next.deletedStreams = deletedStreams
+  else delete next.deletedStreams
+  return next
 }
 
 /**

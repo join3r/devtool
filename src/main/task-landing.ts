@@ -546,6 +546,8 @@ export class TaskLandingManager {
         return { status: 'blocked', files: ff.files, message: ff.message }
       }
       this.deps.log?.(`task landing task=${at.task.id} landed into ${at.target.branchName}`)
+      const landed = await this.streamTip(at).catch(() => '')
+      if (landed) this.mapTask(at.task.id, task => task.landedCommits?.includes(landed) ? task : { ...task, landedCommits: [...(task.landedCommits ?? []), landed] })
       if (intent === 'close') await this.remove(at, { keepBranch: false, archive: true })
       else this.setLanding(at.task.id, null)
       return { status: 'landed' }

@@ -467,7 +467,7 @@ export function useTasks(
         ...entry.doneTasks.flatMap(done => taskTabIds(done.task))
       ])
     ]
-    const next = await window.api.archiveRemove(projectId, ids)
+    const next = await window.api.archiveRemove(projectId, ids, true)
     adoptArchive(projectId, next)
     mutateProjects(prev => syncArchiveCounts(prev, projectId, next))
     if (tabIds.length > 0) await window.api.archiveDeleteTabs(tabIds).catch(() => {})

@@ -1,14 +1,14 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { childProgress, childProgressLine, delegationTree, statusFrom, waitingOnChildren, type DelegationTree } from '../../../shared/delegation'
-import { Cog, MoreHorizontal, Plus } from 'lucide-react'
+import { Check, Cog, MoreHorizontal, Plus, X } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince } from '../../context/TabStatusContext'
 import { isRemoteProject, isShellCommandProject, type GitBranchGraph, type GitDiffSummary, type GitPostureResult, type Project, type Stream, type Task, type TabStatusValue } from '../../../shared/types'
 import { featureAvailable } from '../../../shared/project-features'
 import { findMainStream, projectTasks, streamDirectory } from '../../../shared/streams'
-import { archivedTasksOf, visibleArchive } from '../../../shared/archive'
+import { archivedTasksOf, visibleArchive, type ArchivedTask } from '../../../shared/archive'
 import { runsOfStream, streamOwnRunCommands, streamRunCommands, streamRunCrashed, streamRunTask, type StreamRunState } from '../../../shared/stream-run'
-import { projectSwatch, projectTile } from '../../../shared/project-label'
+import { PROJECT_TILE_PALETTE, projectSwatch, projectTile } from '../../../shared/project-label'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { controlStreamRun, openStreamRunLogs, useAllStreamRuns } from '../../streamRuns'
 import { serverName } from '../../serversState'
@@ -29,7 +29,7 @@ import { StreamRunButtons } from '../StreamRunControls'
 import { bucketByDay, formatRelativeTime, quartileBins } from '../projectStats'
 import { taskAgentLabel, taskStatusChip, type TaskChipTone } from '../taskHeaderState'
 import { projectHomeSummary } from '../projectHomeState'
-import { aheadBehindLine, laneTrack, plural, projectHostLabel, quietFor, recentWeeks, type LaneTrack } from './projectMap'
+import { aheadBehindLine, LANE_GEOMETRY, laneGeometry, plural, projectHostLabel, projectLanes, quietFor, recentWeeks, type CommitNote, type LaneTrack, type TrackItem } from './projectMap'
 
 const GRAPH_LIMIT = 150
 const HEAT_WEEKS = 16
@@ -51,13 +51,20 @@ const TIP: Record<TaskChipTone, { card: string; dot: string; text: string }> = {
   quiet: { card: 'border-border bg-field', dot: 'border border-border-strong', text: 'text-text-subtle' }
 }
 
-/** A lane's horizontal track, kept scrolled to its newest end as it changes. */
-function useScrolledToEnd(dep: unknown): React.RefObject<HTMLDivElement | null> {
+/** A lane's horizontal track, kept scrolled to its newest end whenever what it draws grows or shrinks. */
+function useScrolledToEnd(): React.RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const el = ref.current
-    if (el) el.scrollLeft = el.scrollWidth
-  }, [dep])
+    const content = el?.firstElementChild
+    if (!el || !content) return
+    const toEnd = () => { el.scrollLeft = el.scrollWidth }
+    toEnd()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(toEnd)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
   return ref
 }
 
@@ -82,7 +89,7 @@ function TaskTip({ project, task, statuses, statusSince, now, diffs, tree, neste
   const tip = <TipCard project={project} task={task} statuses={statuses} statusSince={statusSince} now={now} diff={diffs.get(task.id)} waitingOn={waitingOnChildren(tree, task, statusOf)} progress={progress ? childProgressLine(progress) : null} />
   if (nested.length === 0) return tip
   return (
-    <div className="relative z-[1] flex-[0_1_180px] min-w-[128px] flex flex-col gap-1">
+    <div className="relative z-[1] w-full flex flex-col gap-1">
       {tip}
       {nested.map(child => (
         <div key={child.id} className="ml-3 flex flex-col" data-testid={`map-child-${child.id}`}>
@@ -114,7 +121,7 @@ function TipCard({ project, task, statuses, statusSince, now, diff, waitingOn, p
   return (
     <button
       type="button"
-      className={`relative z-[1] ${small ? 'px-2 py-1' : 'flex-[0_1_180px] min-w-[128px] px-2.5 py-2'} flex flex-col gap-[3px] rounded-[9px] border text-left cursor-pointer hover:brightness-110 ${TIP[tone].card}`}
+      className={`relative z-[1] ${small ? 'px-2 py-1' : 'w-full px-2.5 py-2'} flex flex-col gap-[3px] rounded-[9px] border text-left cursor-pointer hover:brightness-110 ${TIP[tone].card}`}
       title={`${task.name} · ${label}`}
       onClick={() => switchToTask(project.id, task.id)}
       data-testid={`map-task-${task.id}`}
@@ -203,15 +210,253 @@ function LaneEnd({ project, stream, runs }: {
 }
 
 /**
+ * A stream's rail colour: main takes the project's own colour; the other
+ * streams step around the palette from it, so neighbours differ.
+ */
+function streamColor(project: Project, stream: Stream, theme: 'light' | 'dark'): string {
+  const tile = projectTile(project)
+  const others = project.streams.filter(s => !s.isMain)
+  const step = stream.isMain ? 0 : 3 * (others.indexOf(stream) + 1)
+  return PROJECT_TILE_PALETTE[(tile.hue + step) % PROJECT_TILE_PALETTE.length][theme].fg
+}
+
+/** How a lane's rail begins: main's history runs in from the left, a worktree curves in from its base, a folder stream shares main's. */
+type LaneFork = 'history' | 'shared' | { base: string; color: string }
+
+/**
+ * A lane's branch graph (`laneGeometry`): the rail with its commits older →
+ * newer, the newest one ringed as the head, and each open task hanging below
+ * on a stem from the commit it forked from. A done task's commit carries a
+ * check; a merge commit shows the branch it took in curving into it; marks
+ * on the rail say when a task closed without landing, or a stream closed or
+ * was deleted. The "+ Task" node sits where the next commit would.
+ */
+function LaneGraph({ items, notes, color, colorOf, fork, now, addTitle, onAdd, after, renderTask }: {
+  items: readonly TrackItem[]
+  notes: ReadonlyMap<string, CommitNote>
+  color: string
+  /** The rail colour of a live stream by name, for a merge it made. */
+  colorOf: (streamName: string) => string | undefined
+  fork: LaneFork
+  now: number
+  addTitle: string
+  onAdd: () => void
+  /** Drawn after the "+ Task" node: the quiet line, the done chips. */
+  after: React.ReactNode
+  renderTask: (task: Task) => React.ReactNode
+}): React.ReactElement {
+  const g = LANE_GEOMETRY
+  const ago = (iso: string) => formatRelativeTime(new Date(iso).getTime(), now)
+  const rail = items.filter(item => item.kind !== 'task')
+  const commitsIn = items.flatMap(item => item.kind === 'commit' ? [item.commit] : [])
+  const headHash = commitsIn[commitsIn.length - 1]?.hash
+  const oldestHash = commitsIn.length >= 4 ? commitsIn[0].hash : undefined
+  const labelOf = (item: TrackItem): string | null => {
+    if (item.kind === 'mark') return item.mark.label
+    if (item.kind !== 'commit') return null
+    const note = notes.get(item.commit.hash)
+    const text = note?.kind === 'merged' ? `${note.name} merged${note.closed ? ' · closed' : ''}` : note?.kind === 'base' ? `${note.name} merged in` : null
+    const time = item.commit.hash === headHash || item.commit.hash === oldestHash ? ago(item.commit.isoDate) : null
+    return text && time && item.commit.hash === headHash ? `${text} · ${time}` : text ?? time
+  }
+  const geo = laneGeometry(items, labelOf)
+  const fadeId = `lane-fade-${useId().replace(/:/g, '')}`
+  const y = g.railY
+  const owned = rail.length > 0
+  const subtle = 'var(--color-text-subtle)'
+  let cardRight = 0
+
+  return (
+    <div className="relative" style={{ width: geo.width, minHeight: geo.tasks.length > 0 ? undefined : y + 30 }}>
+      <svg aria-hidden className="absolute left-0 top-0 overflow-visible pointer-events-none" width={geo.width} height={g.cardTop}>
+        <defs>
+          <linearGradient id={fadeId} x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stopColor={color} stopOpacity="0" />
+            <stop offset="1" stopColor={color} stopOpacity="0.9" />
+          </linearGradient>
+        </defs>
+        {fork === 'history' && <line x1={0} y1={y} x2={geo.railStart} y2={y} stroke={`url(#${fadeId})`} strokeWidth={2} />}
+        {fork !== 'history' && (
+          <path
+            d={`M14 0 L14 ${y - 12} Q14 ${y} 26 ${y} L${geo.railStart} ${y}`}
+            fill="none"
+            stroke={typeof fork === 'object' ? fork.color : color}
+            strokeWidth={2}
+            strokeDasharray={fork === 'shared' ? '3 4' : undefined}
+            opacity={0.9}
+          />
+        )}
+        {owned
+          ? <line x1={geo.railStart} y1={y} x2={geo.railEnd} y2={y} stroke={color} strokeWidth={2} opacity={0.9} />
+          : <line x1={geo.railStart} y1={y} x2={geo.addX} y2={y} stroke={color} strokeWidth={2} strokeDasharray="3 4" opacity={0.6} />}
+        {owned && <line x1={geo.railEnd} y1={y} x2={geo.addX} y2={y} stroke={color} strokeWidth={1.5} strokeDasharray="2 4" opacity={0.5} />}
+        {geo.commits.map(({ commit, x }) => {
+          const note = notes.get(commit.hash)
+          if (note?.kind === 'merged') {
+            // The branch it took in, rising into it from below.
+            const c = colorOf(note.name) ?? subtle
+            return <g key={commit.hash}><path d={`M${x - 16} ${y + 13} Q${x} ${y + 13} ${x} ${y}`} fill="none" stroke={c} strokeWidth={2} /><circle cx={x - 16} cy={y + 13} r={2} fill={c} /></g>
+          }
+          if (note?.kind === 'base') {
+            const c = typeof fork === 'object' ? fork.color : subtle
+            return <g key={commit.hash}><path d={`M${x - 16} ${y - 11} Q${x} ${y - 11} ${x} ${y}`} fill="none" stroke={c} strokeWidth={2} /><circle cx={x - 16} cy={y - 11} r={2} fill={c} /></g>
+          }
+          return null
+        })}
+        {geo.tasks.map(({ task, forkX, x }) => {
+          // Down from the fork, along under the rail, then down into the card.
+          const sx = x + g.stemInset
+          const mid = (y + g.cardTop) / 2 + 2
+          const r = Math.min(8, Math.abs(sx - forkX) / 2)
+          const d = r < 1
+            ? `M${forkX} ${y} V${g.cardTop}`
+            : `M${forkX} ${y} V${mid - r} Q${forkX} ${mid} ${forkX + r} ${mid} H${sx - r} Q${sx} ${mid} ${sx} ${mid + r} V${g.cardTop}`
+          return (
+            <g key={task.id}>
+              <path d={d} fill="none" stroke={color} strokeWidth={1.5} opacity={0.7} />
+              {!geo.commits.some(c => c.x === forkX) && <circle cx={forkX} cy={y} r={2.5} fill={color} />}
+            </g>
+          )
+        })}
+      </svg>
+
+      {/* Commits and marks get real elements for their tooltips. */}
+      {geo.commits.map(({ commit, x }) => {
+        const note = notes.get(commit.hash)
+        const isHead = commit.hash === headHash
+        const tip = `${commit.subject}\n${commit.hash.slice(0, 7)} · ${commit.author} · ${ago(commit.isoDate)}`
+        if (note?.kind === 'task') {
+          return (
+            <span
+              key={commit.hash}
+              className="absolute flex items-center justify-center rounded-full cursor-default box-border"
+              style={{ left: x, top: y, width: 15, height: 15, transform: 'translate(-50%, -50%)', background: color, border: isHead ? '2px solid var(--color-bg)' : undefined, boxShadow: isHead ? `0 0 0 1.5px ${color}` : undefined }}
+              title={`✓ Done: ${note.name}\n${tip}`}
+              data-testid={`map-commit-${commit.hash}`}
+              data-done
+            >
+              <Check size={10} strokeWidth={3} color="var(--color-bg)" />
+            </span>
+          )
+        }
+        return (
+          <span
+            key={commit.hash}
+            className="absolute rounded-full cursor-default box-border"
+            style={{
+              left: x,
+              top: y,
+              width: isHead ? 12 : 10,
+              height: isHead ? 12 : 10,
+              transform: 'translate(-50%, -50%)',
+              background: isHead ? 'var(--color-bg)' : color,
+              border: isHead ? `2.5px solid ${color}` : '2px solid var(--color-bg)'
+            }}
+            title={note?.kind === 'merged' ? `${note.name} merged into this stream${note.closed ? ', then closed' : ''}\n${tip}` : note?.kind === 'base' ? `${note.name} merged into this stream\n${tip}` : tip}
+            data-testid={`map-commit-${commit.hash}`}
+          />
+        )
+      })}
+      {geo.marks.map(({ mark, x }) => (
+        <span
+          key={mark.key}
+          className={`absolute flex items-center justify-center cursor-default box-border bg-bg text-text-subtle ${mark.kind === 'closed' ? 'rounded-[3px] border-[1.5px] border-text-subtle' : `rounded-full border-[1.5px] border-text-subtle ${mark.kind === 'deleted' ? 'border-dashed' : ''}`}`}
+          style={{ left: x, top: y, width: mark.kind === 'closed' ? 10 : 13, height: mark.kind === 'closed' ? 10 : 13, transform: 'translate(-50%, -50%)' }}
+          title={mark.title}
+          data-testid={`map-mark-${mark.key}`}
+        >
+          {mark.kind === 'done' && <Check size={8} strokeWidth={3} />}
+          {mark.kind === 'deleted' && <X size={8} strokeWidth={3} />}
+        </span>
+      ))}
+      {geo.labels.map(label => (
+        <span
+          key={label.key}
+          className={`absolute text-2xs whitespace-nowrap -translate-x-1/2 pointer-events-none ${label.key === headHash ? 'text-text-muted' : 'text-text-subtle'}`}
+          style={{ left: label.x, top: y - 25 }}
+        >
+          {label.text}
+        </span>
+      ))}
+      {typeof fork === 'object' && !geo.tasks.some(t => t.x < 96) && (
+        <span className="absolute text-2xs text-text-subtle whitespace-nowrap pointer-events-none" style={{ left: 20, top: y + 6 }}>from <span className="font-mono">{fork.base}</span></span>
+      )}
+
+      <div className="absolute flex items-center gap-3 whitespace-nowrap -translate-y-1/2" style={{ left: geo.addX, top: y }}>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 h-6 px-2 rounded-full border border-dashed border-border-strong bg-bg text-xs text-text-subtle cursor-pointer hover:text-text hover:border-text-subtle"
+          title={addTitle}
+          onClick={onAdd}
+        >
+          <Plus size={12} /> Task
+        </button>
+        {after}
+      </div>
+
+      {geo.tasks.length > 0 && (
+        <div className="flex items-start pb-4" style={{ paddingTop: g.cardTop }}>
+          {geo.tasks.map(({ task, x }) => {
+            const gap = x - cardRight
+            cardRight = x + g.cardWidth
+            return (
+              <div key={task.id} className="shrink-0" style={{ marginLeft: gap, width: g.cardWidth }}>
+                {renderTask(task)}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** How many of a lane's latest done tasks show as chips after its "+ Task". */
+const DONE_CHIPS = 3
+
+/** The lane's latest done tasks as ✓ chips, then "+N more"; any of them opens the stream's Done list. */
+function DoneChips({ done, total, now, onOpen }: {
+  done: readonly ArchivedTask[]
+  total: number
+  now: number
+  onOpen: () => void
+}): React.ReactElement | null {
+  if (done.length === 0) return null
+  const more = Math.max(0, total - done.length)
+  return (
+    <span className="flex items-center gap-1.5 min-w-0 px-3 pb-3 overflow-hidden" data-testid="map-done-chips">
+      {done.map(entry => (
+        <button
+          key={entry.task.id}
+          type="button"
+          className="inline-flex items-center gap-1 h-6 max-w-[180px] min-w-0 px-2 rounded-full border border-border bg-field text-xs text-text-muted cursor-pointer hover:text-text hover:border-border-strong"
+          title={`✓ Done: ${entry.task.name}${entry.archivedAt > 0 ? ` · ${formatRelativeTime(entry.archivedAt, now)}` : ''}`}
+          onClick={onOpen}
+        >
+          <Check size={11} strokeWidth={2.5} className="shrink-0 text-running" />
+          <span className="truncate">{entry.task.name}</span>
+        </button>
+      ))}
+      {more > 0 && <button type="button" className={`${linkCls} shrink-0`} onClick={onOpen}>+{more} done</button>}
+    </span>
+  )
+}
+
+/**
  * One stream as a lane (board Project.dc.html): the head names it, its branch
  * and where it lives, and how it stands against its base; the track draws its
  * commits older → newer with its open tasks as tips; the end runs its commands.
  */
-function StreamLane({ project, stream, graph, track, local, folderPosture, statuses, statusSince, now, diffs, runs }: {
+function StreamLane({ project, stream, color, colorOf, graph, track, notes, local, folderPosture, statuses, statusSince, now, diffs, runs }: {
   project: Project
   stream: Stream
+  /** The lane's rail colour. */
+  color: string
+  /** A live stream's rail colour by name. */
+  colorOf: (streamName: string) => string | undefined
   graph: GitBranchGraph | null
   track: LaneTrack
+  notes: ReadonlyMap<string, CommitNote>
   local: boolean
   folderPosture: GitPostureResult | null
   statuses: Record<string, TabStatusValue>
@@ -222,15 +467,15 @@ function StreamLane({ project, stream, graph, track, local, folderPosture, statu
 }): React.ReactElement {
   const [menu, setMenu] = useState<EntityMenuTarget | null>(null)
   const [doneOpen, setDoneOpen] = useState(false)
-  const archive = useProjectArchive(project.id, doneOpen)
+  const archive = useProjectArchive(project.id, true)
   const ownPosture = useGitPosture(local && stream.workspace ? streamDirectory(project, stream) : '', local && !!stream.workspace, project.id)
   const posture = stream.workspace ? ownPosture : folderPosture
-  const trackRef = useScrolledToEnd(track.items.length)
+  const trackRef = useScrolledToEnd()
   const openMenu = (x: number, y: number) => setMenu({ x, y, kind: 'stream', projectId: project.id, streamId: stream.id })
   const doneCount = stream.archivedTaskCount ?? 0
   const doneTasks = archive ? archivedTasksOf(visibleArchive(archive, project), stream.id) : []
-  const swatch = projectSwatch(projectTile(project), 'dark')
-  const rail = stream.isMain ? swatch.bg : stream.workspace ? 'var(--color-text-subtle)' : 'var(--color-border-strong)'
+  const recentDone = doneTasks.slice(0, DONE_CHIPS)
+  const baseStreamName = project.streams.find(s => s.workspace ? s.workspace.branchName === stream.workspace?.baseBranch : s.isMain)?.name ?? ''
   const quiet = stream.tasks.length === 0
   // Started tasks sit under the task that started them when both are in this lane.
   const tree = useMemo(() => delegationTree([project]), [project])
@@ -299,35 +544,22 @@ function StreamLane({ project, stream, graph, track, local, folderPosture, statu
           <EntityMenuPopup menu={menu} onClose={() => setMenu(null)} />
         </div>
 
-        <div className="flex-1 min-w-0 relative flex items-center">
-          <span aria-hidden className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2" style={{ background: rail, opacity: stream.isMain || stream.workspace ? 0.9 : 0.6 }} />
-          <div ref={trackRef} className="relative flex-1 min-w-0 flex items-center gap-6 px-6 py-3 overflow-x-auto [scrollbar-width:none] [mask-image:linear-gradient(to_right,transparent,black_24px,black_calc(100%-24px),transparent)]">
-            {track.items.map(item => item.kind === 'commit'
-              ? (
-                  <span
-                    key={item.commit.hash}
-                    className="relative z-[1] shrink-0 w-[9px] h-[9px] rounded-full"
-                    style={{ background: rail }}
-                    title={`${item.commit.subject}\n${item.commit.hash.slice(0, 7)} · ${item.commit.author} · ${formatRelativeTime(new Date(item.commit.isoDate).getTime(), now)}`}
-                  />
-                )
-              : nestedInLane.has(item.task.id)
-                ? null
-                : <TaskTip key={item.task.id} project={project} task={item.task} statuses={statuses} statusSince={statusSince} now={now} diffs={diffs} tree={tree} nested={laneChildren(item.task.id)} />)}
-            {quietLine && (
-              <span className="relative z-[1] shrink-0 px-2 bg-bg text-xs text-text-muted">
-                {quietLine}{doneCount > 0 ? ` · Done ${doneCount}` : ''}
-              </span>
-            )}
-            <button
-              type="button"
-              className="relative z-[1] shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-[9px] border border-dashed border-border-strong bg-bg text-xs text-text-subtle cursor-pointer hover:text-text hover:border-text-subtle"
-              title={`New task in ${stream.name}`}
-              onClick={() => paletteEvents.emit('open-new-task-in', { projectId: project.id, streamId: stream.id })}
-            >
-              <Plus size={12} /> Task
-            </button>
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div ref={trackRef} className="min-w-0 overflow-x-auto [scrollbar-width:none]" data-testid={`map-track-${stream.id}`}>
+            <LaneGraph
+              items={track.items.filter(item => item.kind !== 'task' || !nestedInLane.has(item.task.id))}
+              notes={notes}
+              color={color}
+              colorOf={colorOf}
+              fork={stream.isMain ? 'history' : stream.workspace ? { base: stream.workspace.baseBranch, color: colorOf(baseStreamName) ?? 'var(--color-text-subtle)' } : 'shared'}
+              now={now}
+              addTitle={`New task in ${stream.name}`}
+              onAdd={() => paletteEvents.emit('open-new-task-in', { projectId: project.id, streamId: stream.id })}
+              after={quietLine && <span className="text-xs text-text-muted">{quietLine}</span>}
+              renderTask={task => <TaskTip project={project} task={task} statuses={statuses} statusSince={statusSince} now={now} diffs={diffs} tree={tree} nested={laneChildren(task.id)} />}
+            />
           </div>
+          <DoneChips done={recentDone} total={doneCount} now={now} onOpen={() => setDoneOpen(true)} />
         </div>
 
         <LaneEnd project={project} stream={stream} runs={runs} />
@@ -391,6 +623,7 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
   const allRuns = useAllStreamRuns(project ? [project.id] : [])
   const [now, setNow] = useState(() => Date.now())
   const [history, setHistory] = useState(false)
+  const archive = useProjectArchive(project?.id ?? null, !!project)
   // "Needs you · 4m" counts up while the page stays open.
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 30_000)
@@ -401,7 +634,9 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
 
   if (!project) return null
 
-  const tracks = new Map(project.streams.map(stream => [stream.id, laneTrack(local ? graph : null, stream)]))
+  const lanes = projectLanes(project, local ? graph : null, archive ? visibleArchive(archive, project) : null)
+  const colors = new Map(project.streams.map(stream => [stream.name, streamColor(project, stream, effectiveTheme)]))
+  const colorOf = (name: string) => colors.get(name)
   const runsByStream = new Map(project.streams.map(stream => [stream.id, runsOfStream(allRuns, stream.id)]))
   const running = [...runsByStream.values()].flat().filter(run => run.status === 'running').length
   const tasks = projectTasks(project)
@@ -452,7 +687,7 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
 
       <div className="hidden @min-[860px]:flex py-2.5 border-b border-hair">
         <span className={`${headCls} flex-[0_0_220px] px-5 box-border`}>Stream</span>
-        <span className={`${headCls} flex-1 px-6`}>Older ← commits and live tasks → newer</span>
+        <span className={`${headCls} flex-1 px-3`}>Branch · older → newer</span>
         <span className={`${headCls} flex-[0_0_260px] px-5 box-border`}>Apps</span>
       </div>
 
@@ -461,8 +696,11 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
           key={stream.id}
           project={project}
           stream={stream}
+          color={colors.get(stream.name) ?? streamColor(project, stream, effectiveTheme)}
+          colorOf={colorOf}
           graph={local ? graph : null}
-          track={tracks.get(stream.id)!}
+          track={lanes.get(stream.id)!.track}
+          notes={lanes.get(stream.id)!.notes}
           local={local}
           folderPosture={posture}
           statuses={statuses}

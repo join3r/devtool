@@ -255,6 +255,12 @@ export interface Task {
    */
   ownWorktree?: true
   landing?: TaskLanding
+  /**
+   * The commits its landings put on its stream, oldest first (each one the
+   * squashed commit the stream was fast-forwarded to). The project map marks
+   * them as this task's once it is done.
+   */
+  landedCommits?: string[]
   /** Autopilot (desk redesign decision 7): main takes the task from its first turn to Done by itself. */
   autopilot?: TaskAutopilot
   /**

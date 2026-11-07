@@ -44,8 +44,8 @@ export function registerArchiveHandlers(ipc: IpcRegistrar, deps: ArchiveDeps): v
 
   const ids = v.object({ tasks: v.optional(v.array(v.string(), { max: 1000 })), streams: v.optional(v.array(v.string(), { max: 1000 })) })
 
-  ipc.handle('archive-remove', [safeId, ids], (_event, projectId, which) =>
-    change(projectId, archive => withoutArchived(archive, which)))
+  ipc.handle('archive-remove', [safeId, ids, v.optional(v.literal(true))], (_event, projectId, which, deleted) =>
+    change(projectId, archive => withoutArchived(archive, which, deleted ? Date.now() : undefined)))
 
   ipc.handle('archive-delete-tabs', [v.array(safeId, { max: 5000 })], (_event, tabIds) => {
     for (const tabId of tabIds) deps.deleteScrollback(tabId)

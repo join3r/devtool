@@ -642,8 +642,9 @@ const api = {
     ipcRenderer.invoke('archive-add-tasks', projectId, entries),
   archiveAddStream: (projectId: string, entry: ArchivedStream): Promise<ProjectArchive> =>
     ipcRenderer.invoke('archive-add-stream', projectId, entry),
-  archiveRemove: (projectId: string, ids: { tasks?: string[]; streams?: string[] }): Promise<ProjectArchive> =>
-    ipcRenderer.invoke('archive-remove', projectId, ids),
+  /** `deleted`: they are gone for good (deleted streams are remembered), not reopened. */
+  archiveRemove: (projectId: string, ids: { tasks?: string[]; streams?: string[] }, deleted?: true): Promise<ProjectArchive> =>
+    ipcRenderer.invoke('archive-remove', projectId, ids, deleted),
   /** Scrollback of archived tabs deleted for good. */
   archiveDeleteTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('archive-delete-tabs', tabIds),
   /** A Claude session's messages (the SDK's), for an archived task's read-only view. */
