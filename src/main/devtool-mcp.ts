@@ -4,7 +4,7 @@ import type { ArchivedTask, ProjectArchive } from '../shared/archive'
 import { autopilotActive, autopilotBusy, autopilotLine, autopilotNeedsYou, autopilotTab } from '../shared/autopilot'
 import { landingNeedsYou, statusTabs, taskStatus } from '../shared/inbox-state'
 import { mapTaskInProject, taskDirectory, taskTabs } from '../shared/streams'
-import { AI_TAB_META, AI_TAB_TYPES, type AiTabType, type Project, type ProjectsData, type Schedule, type ScheduleUnit, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
+import { AI_TAB_META, AI_TAB_TYPES, isShellCommandProject, type AiTabType, type RunCommand, type Project, type ProjectsData, type Schedule, type ScheduleUnit, type Stream, type Tab, type TabStatusValue, type Task } from '../shared/types'
 import {
   applyScheduleOp,
   cadenceError,
@@ -22,6 +22,8 @@ import { DEFAULT_SECRET_FILE, SECRET_REASON_MAX, isDotenvFile, safeSecretFile, v
 import type { SecretOutcome } from './secrets/secret-requests'
 import { childProgress, childProgressLine, delegationTree, waitingOnChildren } from '../shared/delegation'
 import { validScore } from '../shared/loop'
+import { newRunCommandId, projectRunCommands, streamOwnRunCommands, streamRunCommands, withProjectRunCommands, withStreamRunCommands } from '../shared/stream-run'
+import { ChatLimits } from '../../protocol/ts/index.ts'
 
 /**
  * DevTool's MCP server: tools an agent DevTool started uses to run DevTool
@@ -48,7 +50,7 @@ export interface DevtoolMcpEndpoint {
  * messaging one go through the tab's own permission mode (in auto mode Claude's
  * classifier decides, so an Autopilot run isn't stopped by them).
  */
-export const MCP_ALLOWED_TOOLS = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score'] as const
+export const MCP_ALLOWED_TOOLS = ['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score', 'list_commands'] as const
 export const MCP_ALLOW_RULES = MCP_ALLOWED_TOOLS.map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`)
 
 /** The server as Claude's MCP config (`--mcp-config`, the Agent SDK's `mcpServers`) names it. */
@@ -611,6 +613,46 @@ export const TOOLS: ToolDef[] = [
     annotations: { destructiveHint: true }
   },
   {
+    name: 'list_commands',
+    title: 'List DevTool commands',
+    description:
+      'Your project\'s named commands (install, run, test...) that the user starts from the stream\'s menu in DevTool, each in a terminal of its own: the project\'s list, and per stream its own commands and the list it runs (a stream command replaces the project\'s command of the same name).',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true }
+  },
+  {
+    name: 'set_command',
+    title: 'Add or change a DevTool command',
+    description:
+      'Add a named command to your project (or to one stream), or change the command line of the one with that name (names ignore case). The user then starts it from the stream\'s menu in DevTool, on the desktop or the phone. ' +
+      'Use it when the user asks you to add a command, or to set up how to run, install or test the app. The command runs in a shell in the stream\'s folder (or a task\'s worktree).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: `Short name shown in DevTool, e.g. "run", "install", "test", "run (staging)". At most ${ChatLimits.commandName} characters.` },
+        command: { type: 'string', description: 'The shell command line, e.g. "npm run dev".' },
+        streamId: { type: 'string', description: 'A stream from list_tasks: the command is that stream\'s only. Default: the project\'s, for all streams.' }
+      },
+      required: ['name', 'command'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'remove_command',
+    title: 'Remove a DevTool command',
+    description: 'Remove a named command from your project (or from one stream\'s own commands). list_commands names them.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        streamId: { type: 'string', description: 'A stream from list_tasks. Default: the project\'s list.' }
+      },
+      required: ['name'],
+      additionalProperties: false
+    },
+    annotations: { destructiveHint: true }
+  },
+  {
     name: 'land_task',
     title: 'Land this DevTool task',
     description:
@@ -682,6 +724,54 @@ function describeSchedule(project: Project, schedule: Schedule): Record<string, 
       : {}),
     ...(schedule.createdBy ? { createdBy: `${schedule.createdBy.name} (${schedule.createdBy.taskId})` } : {})
   }
+}
+
+/** What an agent sees of a project's commands. */
+function describeCommands(project: Project): Record<string, unknown> {
+  const strip = (list: RunCommand[]) => list.map(c => ({ name: c.name, command: c.command }))
+  return {
+    project: project.name,
+    commands: strip(projectRunCommands(project)),
+    streams: project.streams.map(stream => {
+      const own = streamOwnRunCommands(project, stream)
+      return {
+        streamId: stream.id,
+        name: stream.name,
+        ...(own.length > 0 ? { ownCommands: strip(own) } : {}),
+        runs: strip(streamRunCommands(project, stream))
+      }
+    })
+  }
+}
+
+/** The project and, when `streamId` names one, the stream whose own command list a command tool edits. */
+function commandsPlace(project: Project, streamId: string | undefined): { stream?: Stream; list: RunCommand[] } {
+  if (isShellCommandProject(project)) throw new ToolError('This project runs one shell command, not named commands.')
+  if (streamId === undefined) return { list: projectRunCommands(project) }
+  const stream = project.streams.find(s => s.id === streamId)
+  if (!stream) throw new ToolError('No such stream in your project. list_tasks names them.')
+  return { stream, list: streamOwnRunCommands(project, stream) }
+}
+
+function withCommands(project: Project, stream: Stream | undefined, list: RunCommand[]): Project {
+  return stream
+    ? { ...project, streams: project.streams.map(s => (s.id === stream.id ? withStreamRunCommands(s, list) : s)) }
+    : withProjectRunCommands(project, list)
+}
+
+/**
+ * Only a task the user started changes commands: a scheduled run, a delegated
+ * task or a judge works with nobody watching, and the user runs a command later
+ * without reading it again.
+ */
+function assertMayEditCommands(task: Task): void {
+  if (task.scheduledFrom || task.delegatedFrom || task.judgeOf) {
+    throw new ToolError('Only a task the user started can change commands. Tell the user what command to add instead.')
+  }
+}
+
+function sameCommandName(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
 function mapProjectIn(data: ProjectsData, projectId: string, fn: (project: Project) => Project): ProjectsData {
@@ -913,6 +1003,48 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       return { ...describeSchedule(project, schedule), permissionMode: mode }
     }
 
+    case 'list_commands':
+      return describeCommands(project)
+
+    case 'set_command': {
+      assertMayEditCommands(me.task)
+      const commandName = str(args, 'name', true).trim()
+      const line = str(args, 'command', true).trim()
+      if (!commandName) throw new ToolError('`name` is empty.')
+      if (!line) throw new ToolError('`command` is empty.')
+      if (commandName.length > ChatLimits.commandName) throw new ToolError(`\`name\` is longer than ${ChatLimits.commandName} characters.`)
+      if (line.length > ChatLimits.commandLine) throw new ToolError(`\`command\` is longer than ${ChatLimits.commandLine} characters.`)
+      const streamId = str(args, 'streamId')
+      const current = deps.peek().projects.find(p => p.id === project.id) ?? project
+      const { stream, list } = commandsPlace(current, streamId)
+      const old = list.find(c => sameCommandName(c.name, commandName))
+      if (!old && list.length >= ChatLimits.streamCommands) throw new ToolError(`A list has at most ${ChatLimits.streamCommands} commands.`)
+      const next = old
+        ? list.map(c => (c === old ? { ...c, name: commandName, command: line } : c))
+        : [...list, { id: newRunCommandId(), name: commandName, command: line }]
+      deps.commit(mapProjectIn(deps.peek(), project.id, p => withCommands(p, stream, next)))
+      return {
+        [old ? 'changed' : 'added']: true,
+        name: commandName,
+        command: line,
+        ...(stream ? { streamId: stream.id } : {}),
+        note: 'The user starts it from the stream\'s menu in DevTool.'
+      }
+    }
+
+    case 'remove_command': {
+      assertMayEditCommands(me.task)
+      const commandName = str(args, 'name', true)
+      const streamId = str(args, 'streamId')
+      const current = deps.peek().projects.find(p => p.id === project.id) ?? project
+      const { stream, list } = commandsPlace(current, streamId)
+      if (!list.some(c => sameCommandName(c.name, commandName))) {
+        throw new ToolError(stream ? 'That stream has no command of its own with that name. list_commands names them.' : 'Your project has no command with that name. list_commands names them.')
+      }
+      deps.commit(mapProjectIn(deps.peek(), project.id, p => withCommands(p, stream, list.filter(c => !sameCommandName(c.name, commandName)))))
+      return { removed: true, name: commandName.trim(), ...(stream ? { streamId: stream.id } : {}) }
+    }
+
     case 'list_schedules':
       return { project: project.name, schedules: projectSchedules(project).map(s => describeSchedule(project, s)) }
 
@@ -1064,7 +1196,8 @@ async function handleOne(message: unknown, caller: Caller, deps: DevtoolMcpDeps,
           'DevTool is the app that runs you. These tools start, follow and message other DevTool tasks (each one its own agent), ' +
           'so you can hand off self-contained work or run several pieces in parallel and collect their results. ' +
           'When you need a secret (API key, token, password), ask with request_secret instead of asking the user to paste it into the chat. ' +
-          'Schedules (schedule_task, list_schedules, cancel_schedule) run a prompt again every hour, day or week as a new task, for work the user wants done or checked regularly.'
+          'Schedules (schedule_task, list_schedules, cancel_schedule) run a prompt again every hour, day or week as a new task, for work the user wants done or checked regularly. ' +
+          'Commands (list_commands, set_command, remove_command) are the project\'s named commands (run, install, test...) the user starts from the stream\'s menu in DevTool.'
       })
     }
     case 'ping':

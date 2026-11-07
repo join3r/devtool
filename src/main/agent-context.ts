@@ -152,6 +152,8 @@ function mcpLines(ownWorktree: boolean): string[] {
       'Use them when the user asks you to hand work off or to work on several things in parallel; a new agent knows nothing of this conversation, so give it a complete brief.',
     '- schedule_task, list_schedules and cancel_schedule (same server) manage the project\'s schedules: a prompt DevTool runs again every hour/day/week as a new task. ' +
       'Use them when the user asks for something to be done or checked regularly ("check weekly whether X is fixed"); write the prompt as a complete brief that says what is worth reporting.',
+    '- list_commands, set_command and remove_command (same server) manage the project\'s named commands (run, install, test...), which the user starts from the stream\'s menu in DevTool. ' +
+      'Use them when the user asks you to add a command or to set up how to run the app.',
     '- A task you start runs in your permission mode or a stricter one. In auto mode it works unattended (unless you pass `autopilot: false`): when it finishes DevTool lands its work into its stream as one commit and closes it. ' +
       (ownWorktree
         ? 'Its commits are not in your worktree until you update this task from its stream (the `/hook/update` call above, or the `update_task` tool).'

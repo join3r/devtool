@@ -337,7 +337,7 @@ describe('agent wiring', () => {
     expect(args).toHaveLength(2)
     expect(args[0].startsWith('--mcp-config=')).toBe(true)
     expect(JSON.parse(args[0].slice('--mcp-config='.length))).toEqual({ mcpServers: { devtool: { type: 'http', ...endpoint } } })
-    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks,mcp__devtool__request_secret,mcp__devtool__list_schedules,mcp__devtool__nothing_new,mcp__devtool__submit_score')
+    expect(args[1]).toBe('--allowedTools=mcp__devtool__list_tasks,mcp__devtool__get_task,mcp__devtool__wait_for_tasks,mcp__devtool__request_secret,mcp__devtool__list_schedules,mcp__devtool__nothing_new,mcp__devtool__submit_score,mcp__devtool__list_commands')
   })
 
   it('starts a delegated task no looser than its caller', () => {
@@ -372,7 +372,7 @@ describe('agent wiring', () => {
       '-c', 'mcp_servers.devtool.url="http://127.0.0.1:5/mcp"',
       '-c', 'mcp_servers.devtool.http_headers={ "X-Tab-Id" = "t1", "X-Devtool-Token" = "tok" }',
       '-c', 'mcp_servers.devtool.tool_timeout_sec=3660',
-      ...['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score']
+      ...['list_tasks', 'get_task', 'wait_for_tasks', 'request_secret', 'list_schedules', 'nothing_new', 'submit_score', 'list_commands']
         .flatMap(tool => ['-c', `mcp_servers.devtool.tools.${tool}.approval_mode="approve"`])
     ])
   })
@@ -494,6 +494,48 @@ describe('request_secret', () => {
     deps.redact = (text) => text.split('sk-live-123456789').join('[secret KEY]')
     const result = await call(deps, 'get_task', { taskId: 'other' })
     expect(result.json.lastReply).toBe('I used [secret KEY] to call it.')
+  })
+})
+
+describe('command tools', () => {
+  it('set_command adds a project command, changes it by name, and remove_command removes it', async () => {
+    const fake = fakeDeps(data())
+    const added = await call(fake.deps, 'set_command', { name: ' run ', command: ' npm run dev ' })
+    expect(added.json).toMatchObject({ added: true, name: 'run', command: 'npm run dev' })
+    const project = () => fake.deps.peek().projects.find(p => p.id === 'p1')!
+    const id = project().runCommands![0].id
+    const changed = await call(fake.deps, 'set_command', { name: 'RUN', command: 'npm start' })
+    expect(changed.json).toMatchObject({ changed: true })
+    expect(project().runCommands).toEqual([{ id, name: 'RUN', command: 'npm start' }])
+    const listed = await call(fake.deps, 'list_commands', {})
+    expect(listed.json.commands).toEqual([{ name: 'RUN', command: 'npm start' }])
+    expect((await call(fake.deps, 'remove_command', { name: 'nope' })).isError).toBe(true)
+    expect((await call(fake.deps, 'remove_command', { name: 'run' })).json).toMatchObject({ removed: true })
+    expect(project().runCommands).toBeUndefined()
+  })
+
+  it('a stream command overrides the project\'s of the same name in that stream only', async () => {
+    const fake = fakeDeps(data())
+    const streamId = fake.deps.peek().projects[0].streams[0].id
+    await call(fake.deps, 'set_command', { name: 'run', command: 'npm run dev' })
+    const own = await call(fake.deps, 'set_command', { name: 'run', command: 'npm run dev:staging', streamId })
+    expect(own.json).toMatchObject({ added: true, streamId })
+    const listed = await call(fake.deps, 'list_commands', {})
+    expect(listed.json.commands).toEqual([{ name: 'run', command: 'npm run dev' }])
+    expect(listed.json.streams[0]).toMatchObject({ ownCommands: [{ name: 'run', command: 'npm run dev:staging' }], runs: [{ name: 'run', command: 'npm run dev:staging' }] })
+    expect((await call(fake.deps, 'set_command', { name: 'x', command: 'y', streamId: 'no-such' })).isError).toBe(true)
+  })
+
+  it('refuses a delegated task: nobody watches it', async () => {
+    const { deps } = fakeDeps(data())
+    expect((await call(deps, 'set_command', { name: 'run', command: 'npm start' }, 'other-tab')).isError).toBe(true)
+    expect((await call(deps, 'list_commands', {}, 'other-tab')).isError).toBe(false)
+  })
+
+  it('refuses an empty or a too long command', async () => {
+    const { deps } = fakeDeps(data())
+    expect((await call(deps, 'set_command', { name: 'run', command: '  ' })).isError).toBe(true)
+    expect((await call(deps, 'set_command', { name: 'x'.repeat(61), command: 'y' })).isError).toBe(true)
   })
 })
 
