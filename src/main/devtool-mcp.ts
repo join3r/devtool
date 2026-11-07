@@ -130,6 +130,13 @@ export interface DevtoolMcpDeps {
   requestSecret?(input: RequestSecretInput, signal?: AbortSignal): Promise<SecretOutcome | { status: 'error'; error: string }>
   /** Known secret values out of a reply an agent reads. */
   redact?(text: string): string
+  /**
+   * Lands the caller's task into its stream (`land`, task kept open on the new
+   * tip) or rebases it onto the stream (`update`), as the note's `/hook/land`
+   * and `/hook/update` do; the answer is a line for the agent. Absent: the tools
+   * say they aren't available.
+   */
+  landTask?(tabId: string, endpoint: 'land' | 'update', summary?: string): Promise<string>
   /** Saves the projects (schedules, a quiet run's flag). */
   commit(data: ProjectsData): void
   /** The permission mode the agent in `tabId` runs in; null when main can't see it (a terminal tab). */
@@ -604,6 +611,27 @@ export const TOOLS: ToolDef[] = [
     annotations: { destructiveHint: true }
   },
   {
+    name: 'land_task',
+    title: 'Land this DevTool task',
+    description:
+      'Land your own task into its stream when the user asks to merge or land it: DevTool commits anything uncommitted, squashes your branch into one commit, rebases it onto the stream and fast-forwards the stream. ' +
+      'Your task and worktree stay open, on the new tip. Same as the `/hook/land` call in DevTool\'s context, and works when that call is refused (DevTool restarted since your session began). ' +
+      'If it reports conflicts, resolve them in your worktree (edit, `git add`, `GIT_EDITOR=true git rebase --continue`) and call it again; never abort the rebase.',
+    inputSchema: {
+      type: 'object',
+      properties: { summary: { type: 'string', description: 'What this task changed, one short paragraph: the landed commit\'s message.' } },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'update_task',
+    title: 'Update this DevTool task from its stream',
+    description:
+      'Rebase your own task\'s branch onto the tip of its stream, to take in what landed there since the task started (instead of git pull or merge). Same as the `/hook/update` call in DevTool\'s context. ' +
+      'If it reports conflicts, resolve them in your worktree and call it again; never abort the rebase.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
     name: 'submit_score',
     title: 'Score an Autopilot loop round',
     description:
@@ -915,6 +943,13 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
         return { ...task, autopilot: { ...task.autopilot, loop: { ...loop, judging: { ...loop.judging, score, findings, ...(rubric ? { rubric } : {}) } } } }
       })))
       return { recorded: true, score, note: 'DevTool closes this task once your turn ends. End your turn now with one short line.' }
+    }
+
+    case 'land_task':
+    case 'update_task': {
+      if (!deps.landTask) throw new ToolError('DevTool can\'t land tasks from here.')
+      const summary = name === 'land_task' ? str(args, 'summary')?.trim() || undefined : undefined
+      return { result: await deps.landTask(caller.tabId, name === 'land_task' ? 'land' : 'update', summary) }
     }
 
     case 'nothing_new': {

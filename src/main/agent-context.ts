@@ -138,13 +138,14 @@ export function buildAgentContext(input: AgentContextInput): string {
 /** What DevTool's MCP tools are for, and what a task they start does with its work. */
 function mcpLines(ownWorktree: boolean): string[] {
   return [
+    ...(ownWorktree ? ['- The same server\'s land_task and update_task tools do what the `/hook/land` and `/hook/update` calls above do. Use them if a call is refused.'] : []),
     '- DevTool\'s MCP tools (server `devtool`: start_task, list_tasks, get_task, send_to_task, wait_for_tasks) start and follow other DevTool tasks in this project, each one its own agent that the user also sees in DevTool. ' +
       'Use them when the user asks you to hand work off or to work on several things in parallel; a new agent knows nothing of this conversation, so give it a complete brief.',
     '- schedule_task, list_schedules and cancel_schedule (same server) manage the project\'s schedules: a prompt DevTool runs again every hour/day/week as a new task. ' +
       'Use them when the user asks for something to be done or checked regularly ("check weekly whether X is fixed"); write the prompt as a complete brief that says what is worth reporting.',
     '- A task you start runs in your permission mode or a stricter one. In auto mode it works unattended (unless you pass `autopilot: false`): when it finishes DevTool lands its work into its stream as one commit and closes it. ' +
       (ownWorktree
-        ? 'Its commits are not in your worktree until you update this task from its stream (the `/hook/update` call above).'
+        ? 'Its commits are not in your worktree until you update this task from its stream (the `/hook/update` call above, or the `update_task` tool).'
         : 'Its work lands on the stream\'s branch, not in this folder\'s uncommitted state.')
   ]
 }

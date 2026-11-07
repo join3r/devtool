@@ -528,6 +528,19 @@ describe('schedule tools', () => {
     expect(fake.deps.peek().projects[0].streams[0].tasks[0].quietRun).toEqual({ note: 'Still open' })
     expect((await call(fake.deps, 'nothing_new', {}, 'other-tab')).isError).toBe(true)
   })
+
+  it('land_task and update_task land the caller\'s own task, as the hook calls do', async () => {
+    // The MCP endpoint is handed over on every spawn, so these work for a session
+    // resumed after a DevTool restart, whose note still names the old port and token.
+    const fake = fakeDeps(data())
+    const calls: unknown[][] = []
+    fake.deps.landTask = async (...args) => { calls.push(args); return 'Landed.' }
+    expect((await call(fake.deps, 'land_task', { summary: ' Adds X. ' })).json).toEqual({ result: 'Landed.' })
+    expect((await call(fake.deps, 'update_task', {})).json).toEqual({ result: 'Landed.' })
+    expect(calls).toEqual([['parent-tab', 'land', 'Adds X.'], ['parent-tab', 'update', undefined]])
+    expect((await call(fake.deps, 'land_task', {}, 'nobody')).isError).toBe(true)
+    expect(calls).toHaveLength(2)
+  })
 })
 
 describe('submit_score', () => {

@@ -1360,6 +1360,7 @@ export class HostServices {
       requestSecret: (input, signal) => this.requestSecretForAgent(input, signal),
       redact: (text) => redactSecrets(text, this.secretRequests.redactionList()),
       reported: (taskIds) => this.delegation.reported(taskIds),
+      landTask: (tabId, endpoint, summary) => this.landForAgent(endpoint, tabId, summary),
       modelsFor: (agent) => (agent === 'codex' ? readCodexModels() : null)
     }
   }
