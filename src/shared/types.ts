@@ -1,4 +1,5 @@
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig } from './mobile'
+import type { OutputStyle } from './output-style'
 
 export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'codex-chat' | 'pi' | 'pi-chat' | 'diff' | 'editor' | 'notebook' | 'note'
 
@@ -989,6 +990,11 @@ export interface AppConfig {
   /** Settings → AI: sending a prompt leaves the task, so the window goes empty for the next one. */
   leaveTaskOnSend: boolean
   /**
+   * Settings → AI → Response style: how every agent writes its answers
+   * (`shared/output-style.ts`). App-wide; a desktop sends it to its servers.
+   */
+  outputStyle: OutputStyle
+  /**
    * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
    * window's stale copy cannot flip it back.
    */
@@ -1286,6 +1292,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   deskAgent: 'claude-chat',
   autopilotReview: false,
   leaveTaskOnSend: true,
+  outputStyle: 'standard',
   externalEditors: { editors: [], defaultId: null },
   mobile: { ...DEFAULT_MOBILE_CONFIG },
   hosts: []

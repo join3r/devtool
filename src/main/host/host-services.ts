@@ -64,6 +64,8 @@ import { TaskDiffWatch } from '../task-diff-watch'
 import { PlanLimits } from '../plan-limits'
 import { registerPlanLimitsHandlers } from '../ipc/plan-limits'
 import { registerTaskUsageHandlers } from '../ipc/task-usage'
+import { registerOutputStyleHandlers } from '../ipc/output-style'
+import { outputStyleNote, type OutputStyle } from '../../shared/output-style'
 import { TaskUsage } from '../task-usage'
 import { registerNotebookHandlers } from '../ipc/notebooks'
 import { registerHostFsHandlers } from '../ipc/host-fs'
@@ -1241,6 +1243,12 @@ export class HostServices {
     return this.activityRegistry.subscribe(() => listener())
   }
 
+  /** Settings → AI → Response style, for a desktop's routing to send to its servers. */
+  readonly outputStyle = {
+    get: (): OutputStyle => this.config.outputStyle,
+    onChange: (listener: (style: OutputStyle) => void): (() => void) => this.onConfigChanged((config) => listener(config.outputStyle))
+  }
+
   onConfigChanged(listener: (config: AppConfig) => void): () => void {
     this.configListeners.add(listener)
     return () => { this.configListeners.delete(listener) }
@@ -1666,9 +1674,15 @@ export class HostServices {
     return this.chatManager.snapshot(tabId)?.state.info.permissionMode ?? null
   }
 
-  /** What DevTool tells the agent in `tabId` about where it runs (`agent-context.ts`); null outside a project task. */
+  /**
+   * What DevTool tells the agent in `tabId`: where it runs (`agent-context.ts`,
+   * project tasks only) and the response style. Null when there is neither.
+   */
   agentContext(tabId: string): string | null {
-    return agentContextForTab(this.projectsStore.peek().projects, tabId, this.hookServer.isReady())
+    const context = agentContextForTab(this.projectsStore.peek().projects, tabId, this.hookServer.isReady())
+    // Settings → AI → Response style: every agent, in a project task or not.
+    const style = outputStyleNote(this.config.outputStyle)
+    return [context, style].filter(Boolean).join('\n\n') || null
   }
 
   /**
@@ -2077,6 +2091,9 @@ export class HostServices {
     registerPlanLimitsHandlers(ipc, { accounts: () => this.isServer ? this.planLimits.own() : this.planLimits.accounts() })
     // A server answers its own machine (its desktop merges it); a desktop every host it knows.
     registerTaskUsageHandlers(ipc, { snapshot: () => this.isServer ? this.taskUsage.own() : this.taskUsage.snapshot() })
+    registerOutputStyleHandlers(ipc, {
+      set: (outputStyle) => { if (this.config.outputStyle !== outputStyle) this.applyConfig({ outputStyle }) }
+    })
     registerHostFsHandlers(ipc, {
       send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       env: () => getShellEnv()

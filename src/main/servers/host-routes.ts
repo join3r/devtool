@@ -222,6 +222,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'plan-limits-get': 'local',
   // CPU and memory per tab (ipc/task-usage.ts): this desktop's usage already holds its servers'.
   'task-usage-get': 'local',
+  // the response style (ipc/output-style.ts): a desktop sets it on its servers itself, never routed
+  'output-style-set': 'local',
   // a task's title from its first prompt (ipc/task-names.ts): this desktop's claude names it
   'task-name-suggest': 'local',
   // an agent's request_secret prompts and remembered secrets (ipc/secrets.ts): asked only for projects on this desktop

@@ -13,6 +13,7 @@ import { LinkError, LinkErrorCode } from '../host/link/errors'
 import { SERVER_PLAN_LIMITS_CHANNEL, SERVER_TASK_USAGE_CHANNEL } from '../../shared/servers'
 import type { PlanAccount } from '../../shared/plan-limits'
 import { parseMachineUsage, type MachineUsage } from '../../shared/task-usage'
+import { OUTPUT_STYLE_SET_CHANNEL, type OutputStyle } from '../../shared/output-style'
 
 /** The part of ServerHub the desktop's routing uses. */
 export interface RoutingHub {
@@ -30,6 +31,8 @@ export interface RoutedHost {
   planLimits?: { setForeign(serverId: string, label: string, accounts: PlanAccount[] | null): void }
   /** CPU and memory per tab, which holds each online server's too. */
   taskUsage?: { setForeign(serverId: string, label: string, usage: MachineUsage | null): void }
+  /** Settings → AI → Response style, which every server gets too. */
+  outputStyle?: { get(): OutputStyle; onChange(listener: (style: OutputStyle) => void): () => void }
 }
 
 export interface DesktopRoutingDeps {
@@ -120,6 +123,12 @@ export class DesktopRouting {
 
   attachHost(host: RoutedHost): void {
     this.host = host
+    let style = host.outputStyle?.get()
+    host.outputStyle?.onChange((next) => {
+      if (next === style) return
+      style = next
+      for (const serverId of this.online) void this.pushOutputStyle(serverId)
+    })
     host.onProjectsChanged(() => {
       // A server's ids that collide with this desktop's are dropped from its view.
       this.projects.localChanged()
@@ -172,6 +181,7 @@ export class DesktopRouting {
       void this.refreshWorktreeStates(serverId)
       void this.refreshPlanLimits(serverId)
       void this.refreshTaskUsage(serverId)
+      void this.pushOutputStyle(serverId)
     }
     // An offline server's logins stay as last read; an unpaired one's go.
     for (const serverId of [...this.planLimitServers]) {
@@ -195,6 +205,23 @@ export class DesktopRouting {
     const usage = parseMachineUsage(value)
     if (!usage || !this.online.has(serverId)) return
     this.host?.taskUsage?.setForeign(serverId, this.serverNames.get(serverId) ?? `server ${serverId.slice(0, 6)}`, usage)
+  }
+
+  /**
+   * The response style is the user's, not a project's: a server's agents write
+   * the way this desktop's do. Sent when the server comes (back) online and on
+   * every change; the server keeps it, so its scheduled tasks use it too.
+   */
+  private async pushOutputStyle(serverId: string): Promise<void> {
+    const hub = this.hub
+    const style = this.host?.outputStyle?.get()
+    if (!hub || !style) return
+    try {
+      await hub.call(serverId, MAIN_CLIENT_ID, OUTPUT_STYLE_SET_CHANNEL, [style])
+    } catch (err) {
+      // An older server has no such channel: its agents keep their own style.
+      this.deps.log(`servers outputStylePush server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   /** A server came (back) online: what its tabs run now. It pushes only changes. */

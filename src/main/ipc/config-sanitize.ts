@@ -86,6 +86,7 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   deskAgent: v.literal('claude-chat', 'claude', 'codex-chat', 'codex', 'pi-chat', 'pi'),
   autopilotReview: bool,
   leaveTaskOnSend: bool,
+  outputStyle: v.literal('standard', 'ste100'),
   mobile: v.optional(mobileConfig),
   hosts: v.optional(v.array(v.union(
     v.object({

@@ -22,6 +22,7 @@ import {
   type WindowViewState
 } from '../shared/types'
 import { normalizeMobileConfig } from '../shared/mobile'
+import { isOutputStyle } from '../shared/output-style'
 import { migratePinnedItems, migrateProjects } from '../shared/streams-migration'
 import { projectTasks } from '../shared/streams'
 import { atomicWriteFileSync } from './atomic-write'
@@ -209,6 +210,7 @@ export class Storage {
         defaultId: typeof savedEditors?.defaultId === 'string' ? savedEditors.defaultId : null
       }
       config.mobile = normalizeMobileConfig(rest.mobile)
+      if (!isOutputStyle(config.outputStyle)) config.outputStyle = DEFAULT_CONFIG.outputStyle
       return config
     } catch {
       return { ...DEFAULT_CONFIG }

@@ -18,6 +18,7 @@ import MobileSettings from './settings/MobileSettings'
 import HostsSettings from './settings/HostsSettings'
 import RelaySettings from './settings/RelaySettings'
 import UpdatesSettings from './settings/UpdatesSettings'
+import { OUTPUT_STYLES, OUTPUT_STYLE_LABEL, type OutputStyle } from '../../shared/output-style'
 
 interface Props {
   onClose: () => void
@@ -465,6 +466,23 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                 />
               </Group>
             )}
+
+            <GrpHead>Responses</GrpHead>
+            <FormGroup>
+              <SetBlock label="Response style">
+                <Select
+                  value={config.outputStyle}
+                  onChange={(e) => updateConfig({ outputStyle: e.target.value as OutputStyle })}
+                >
+                  {OUTPUT_STYLES.map(style => (
+                    <option key={style} value={style}>{OUTPUT_STYLE_LABEL[style]}</option>
+                  ))}
+                </Select>
+                <HelperText>
+                  How Claude, Codex and Pi write their answers, in every project and on your DevTool servers too. An agent that is already running uses the new style after it restarts.
+                </HelperText>
+              </SetBlock>
+            </FormGroup>
 
             <GrpHead>Claude Code</GrpHead>
             {config.enableClaude && (

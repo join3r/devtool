@@ -9,6 +9,7 @@ import type { Project, ProjectsData } from '../src/shared/types'
 import type { ServersState } from '../src/shared/servers'
 import { fixtureProject } from './helpers/streams-fixtures'
 import type { DecodedImage, ImageCodec } from '../src/main/mobile/chat-image'
+import type { OutputStyle } from '../src/shared/output-style'
 
 /**
  * A desktop's routing put together around a fake ServerHub: the server's
@@ -23,7 +24,7 @@ afterEach(() => {
 
 type Handler = (ctx: IpcContext, ...args: unknown[]) => unknown
 
-function setup(options: { images?: ImageCodec; serverProjects?: Project[]; worktreeStates?: Record<string, unknown> } = {}) {
+function setup(options: { images?: ImageCodec; serverProjects?: Project[]; worktreeStates?: Record<string, unknown>; outputStyle?: OutputStyle } = {}) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-routing-'))
   dirs.push(configDir)
   const serverData: ProjectsData = {
@@ -69,7 +70,14 @@ function setup(options: { images?: ImageCodec; serverProjects?: Project[]; workt
     projectOrder: ['local-p'],
     pinnedItems: []
   }
-  routing.attachHost({ getProjectsData: () => localData, onProjectsChanged: () => () => {} })
+  let style = options.outputStyle ?? 'standard'
+  const styleListeners = new Set<(style: OutputStyle) => void>()
+  const setStyle = (next: OutputStyle) => { style = next; for (const listener of styleListeners) listener(next) }
+  routing.attachHost({
+    getProjectsData: () => localData,
+    onProjectsChanged: () => () => {},
+    outputStyle: { get: () => style, onChange: (listener) => { styleListeners.add(listener); return () => styleListeners.delete(listener) } }
+  })
 
   const handlers = new Map<string, Handler>()
   const inner: IpcRegistrar = {
@@ -83,7 +91,7 @@ function setup(options: { images?: ImageCodec; serverProjects?: Project[]; workt
   wrapped.handle('chat-attach', [], (() => 'attached here') as never)
   wrapped.handle('chat-send', [], (() => 'sent here') as never)
   const emit = (event: ServerEvent) => { for (const listener of eventListeners) listener(event) }
-  return { routing, hub, calls, sent, broadcast, handlers, emit }
+  return { routing, hub, calls, sent, broadcast, handlers, emit, setStyle }
 }
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -112,6 +120,20 @@ describe('DesktopRouting', () => {
     // The server's own broadcasts of its settings never reach the windows.
     t.emit({ serverId: 'srvA', client: '*', ch: 'config-updated', args: [{}] })
     expect(t.broadcast.filter(b => b[0] === 'config-updated')).toEqual([])
+  })
+
+  it('sends the response style to a server when it comes online and again when it changes', async () => {
+    const t = setup({ outputStyle: 'ste100' })
+    t.routing.attachHub(t.hub)
+    await flush()
+    const styleCalls = () => t.calls.filter(c => c.ch === 'output-style-set').map(c => [c.serverId, ...c.args])
+    expect(styleCalls()).toEqual([['srvA', 'ste100']])
+
+    t.setStyle('ste100')
+    t.setStyle('standard')
+    await flush()
+    // An unchanged style is not sent again.
+    expect(styleCalls()).toEqual([['srvA', 'ste100'], ['srvA', 'standard']])
   })
 
   it('scales a server chat\'s images down to fit one link message, and leaves small ones as they are', async () => {
