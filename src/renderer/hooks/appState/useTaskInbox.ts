@@ -119,7 +119,7 @@ export interface PutAwayActions extends Pick<TaskInboxActions, 'snoozeTask'> {
    * A prompt just went to the task's agent: with Settings' "Leave the task
    * after sending" on, this window lets go of it (nothing selected) and the
    * compose box takes focus for the next one. The agent works on unseen; its
-   * answer comes back unread in the Inbox.
+   * answer comes back unread in the Inbox. A pinned task stays open.
    */
   leaveAfterSend: (projectId: string, taskId: string) => void
 }
@@ -137,7 +137,7 @@ export function useLeaveOnPutAway(
   selectProjectHome: (projectId: string) => void,
   selectProject: (id: string | null) => void
 ): PutAwayActions {
-  const { windowViewStateRef, config } = core
+  const { windowViewStateRef, projectsDataRef, config } = core
   const { snoozeTask: snooze } = inbox
   // Read when the prompt goes, not when the sending tab rendered.
   const leaveOnSendRef = useRef(false)
@@ -156,9 +156,13 @@ export function useLeaveOnPutAway(
     if (!leaveOnSendRef.current) return
     const view = windowViewStateRef.current
     if (view.selectedProjectId !== projectId || view.selectedTaskId !== taskId) return
+    // A pinned task is one the user keeps open on purpose: stay on it.
+    const pinned = (projectsDataRef.current.pinnedItems ?? []).some(item =>
+      item.type === 'task' && item.projectId === projectId && item.taskId === taskId)
+    if (pinned) return
     selectProject(null)
     deskEvents.focusCompose()
-  }, [windowViewStateRef, selectProject])
+  }, [windowViewStateRef, projectsDataRef, selectProject])
 
   return { snoozeTask, leaveAfterSend }
 }

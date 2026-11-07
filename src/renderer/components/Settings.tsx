@@ -636,7 +636,7 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
             <Group>
               <GroupRow
                 label="Leave the task after sending"
-                sub="Once a prompt goes to the agent, the window empties so you can pick another task or start a new one. The answer comes back unread in the Inbox."
+                sub="Once a prompt goes to the agent, the window empties so you can pick another task or start a new one. The answer comes back unread in the Inbox. Pinned tasks stay open."
                 trailing={
                   <Switch
                     checked={config.leaveTaskOnSend}
