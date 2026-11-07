@@ -4,17 +4,19 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readBranchGraph } from '../src/main/git-branch-graph'
-import { layoutGraph } from '../src/renderer/components/gitGraphLayout'
+import { layoutGraph, type GraphSegment } from '../src/renderer/components/gitGraphLayout'
 import type { GitGraphCommit } from '../src/shared/types'
 
 const c = (hash: string, ...parents: string[]): GitGraphCommit => ({ hash, parents, subject: hash, author: 'a', isoDate: '2026-10-29T00:00:00Z' })
+
+const plain = ({ from, to, part, lane }: GraphSegment) => ({ from, to, part, lane })
 
 describe('layoutGraph', () => {
   it('keeps a straight history in one lane', () => {
     const { rows, width } = layoutGraph([c('c', 'b'), c('b', 'a'), c('a')])
     expect(width).toBe(1)
     expect(rows.map(r => r.column)).toEqual([0, 0, 0])
-    expect(rows[2].segments).toEqual([{ from: 0, to: 0, part: 'top', lane: 0 }])
+    expect(rows[2].segments.map(plain)).toEqual([{ from: 0, to: 0, part: 'top', lane: 0 }])
   })
 
   it('opens a lane for a merged branch and closes it where the branch forked', () => {
@@ -22,14 +24,14 @@ describe('layoutGraph', () => {
     const { rows, width } = layoutGraph([c('m', 'b', 's2'), c('s2', 's1'), c('b', 'a'), c('s1', 'a'), c('a')])
     expect(width).toBe(2)
     expect(rows[0]).toMatchObject({ column: 0, merge: true })
-    expect(rows[0].segments).toContainEqual({ from: 0, to: 1, part: 'bottom', lane: 1 })
+    expect(rows[0].segments.map(plain)).toContainEqual({ from: 0, to: 1, part: 'bottom', lane: 1 })
     expect(rows[1].column).toBe(1)
     // b's lane passes through s2's row, and s2's lane through b's.
-    expect(rows[1].segments).toContainEqual({ from: 0, to: 0, part: 'full', lane: 0 })
-    expect(rows[2].segments).toContainEqual({ from: 1, to: 1, part: 'full', lane: 1 })
+    expect(rows[1].segments.map(plain)).toContainEqual({ from: 0, to: 0, part: 'full', lane: 0 })
+    expect(rows[2].segments.map(plain)).toContainEqual({ from: 1, to: 1, part: 'full', lane: 1 })
     // At the fork both lanes come into a.
     expect(rows[4].column).toBe(0)
-    expect(rows[4].segments).toEqual(expect.arrayContaining([
+    expect(rows[4].segments.map(plain)).toEqual(expect.arrayContaining([
       { from: 0, to: 0, part: 'top', lane: 0 },
       { from: 1, to: 0, part: 'top', lane: 1 }
     ]))
@@ -44,8 +46,8 @@ describe('layoutGraph', () => {
   it('keeps a lane drawn through a merge whose second parent it already waits for', () => {
     // x and m both have p as a parent; p's lane exists before m's row.
     const { rows } = layoutGraph([c('x', 'p'), c('m', 'y', 'p'), c('y', 'p'), c('p')])
-    expect(rows[1].segments).toContainEqual({ from: 0, to: 0, part: 'full', lane: 0 })
-    expect(rows[1].segments).toContainEqual({ from: 1, to: 0, part: 'bottom', lane: 0 })
+    expect(rows[1].segments.map(plain)).toContainEqual({ from: 0, to: 0, part: 'full', lane: 0 })
+    expect(rows[1].segments.map(plain)).toContainEqual({ from: 1, to: 0, part: 'bottom', lane: 0 })
   })
 })
 

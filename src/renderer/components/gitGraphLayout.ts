@@ -11,6 +11,9 @@ export interface GraphSegment {
   part: 'top' | 'bottom' | 'full'
   /** The lane the line belongs to, for its color. */
   lane: number
+  /** The edge it draws: the newer commit, and the parent the line leads down to. */
+  child: string
+  parent: string
 }
 
 export interface GraphRow {
@@ -38,44 +41,50 @@ export interface GraphLayout {
  */
 export function layoutGraph(commits: readonly GitGraphCommit[]): GraphLayout {
   const lanes: (string | null)[] = []
+  /** For each lane, the commit whose parent it waits for. */
+  const children: (string | null)[] = []
   const rows: GraphRow[] = []
   let width = 0
   const free = (): number => {
     const index = lanes.indexOf(null)
     if (index >= 0) return index
     lanes.push(null)
+    children.push(null)
     return lanes.length - 1
   }
 
   for (const commit of commits) {
     const segments: GraphSegment[] = []
     const before = lanes.slice()
+    const childBefore = children.slice()
     let column = lanes.indexOf(commit.hash)
     if (column < 0) column = free()
     for (let lane = 0; lane < lanes.length; lane++) {
       const waiting = lanes[lane]
       if (waiting === null) continue
       if (waiting === commit.hash) {
-        segments.push({ from: lane, to: column, part: 'top', lane })
-        if (lane !== column) lanes[lane] = null
+        segments.push({ from: lane, to: column, part: 'top', lane, child: children[lane] ?? '', parent: commit.hash })
+        if (lane !== column) { lanes[lane] = null; children[lane] = null }
       }
     }
     const [first, ...others] = commit.parents
     lanes[column] = first ?? null
-    if (first) segments.push({ from: column, to: column, part: 'bottom', lane: column })
+    children[column] = first ? commit.hash : null
+    if (first) segments.push({ from: column, to: column, part: 'bottom', lane: column, child: commit.hash, parent: first })
     for (const parent of others) {
       let lane = lanes.indexOf(parent)
       if (lane < 0) {
         lane = free()
         lanes[lane] = parent
+        children[lane] = commit.hash
       }
-      segments.push({ from: column, to: lane, part: 'bottom', lane })
+      segments.push({ from: column, to: lane, part: 'bottom', lane, child: commit.hash, parent })
     }
     // Lanes waiting for an older commit pass through.
     before.forEach((waiting, lane) => {
-      if (waiting !== null && waiting !== commit.hash) segments.push({ from: lane, to: lane, part: 'full', lane })
+      if (waiting !== null && waiting !== commit.hash) segments.push({ from: lane, to: lane, part: 'full', lane, child: childBefore[lane] ?? '', parent: waiting })
     })
-    while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop()
+    while (lanes.length > 0 && lanes[lanes.length - 1] === null) { lanes.pop(); children.pop() }
     width = Math.max(width, column + 1, lanes.length)
     rows.push({ commit, column, segments, merge: commit.parents.length > 1 })
   }

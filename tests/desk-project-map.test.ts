@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { aheadBehindLine, commitNotes, LANE_GEOMETRY as G, labelWidth, laneGeometry, laneTrack, mergedBranch, placeMarks, projectLanes, type RailMark, projectHostLabel, quietFor, recentWeeks } from '../src/renderer/components/desk/projectMap'
-import { emptyArchive, pruneArchive, withoutArchived, type ProjectArchive } from '../src/shared/archive'
+import { aheadBehindLine, FOCUS_CONTEXT, FOCUS_MIN, FOLD_MIN, projectGraph, projectHostLabel, quietFor, recentWeeks, streamAheadBehind, type GraphRow } from '../src/renderer/components/desk/projectMap'
+import { emptyArchive, pruneArchive, withoutArchived, type ArchivedTask, type ProjectArchive } from '../src/shared/archive'
 import type { GitBranchGraph, GitGraphCommit, Project, Stream, Task, WorkspaceConfig } from '../src/shared/types'
 
 function commit(hash: string, parents: string[], day = 1): GitGraphCommit {
@@ -11,8 +11,8 @@ function ws(branchName: string, baseBranch: string): WorkspaceConfig {
   return { worktreePath: `/wt/${branchName}`, branchName, baseBranch, relativeProjectPath: '' }
 }
 
-function task(id: string, workspace?: WorkspaceConfig): Task {
-  return { id, name: id, panes: [], ...(workspace ? { workspace } : {}) } as unknown as Task
+function task(id: string, workspace?: WorkspaceConfig, extra: Partial<Task> = {}): Task {
+  return { id, name: id, panes: [], ...(workspace ? { workspace } : {}), ...extra } as unknown as Task
 }
 
 function stream(id: string, extra: Partial<Stream> = {}): Stream {
@@ -24,84 +24,164 @@ function graph(commits: GitGraphCommit[], tips: Record<string, string>, head = '
   return { commits, tips, head, more: false }
 }
 
-const ids = (items: ReturnType<typeof laneTrack>['items']) => items.map(i => i.kind === 'commit' ? i.commit.hash : i.kind === 'task' ? `task:${i.task.id}` : `mark:${i.mark.key}`)
+const at = (day: number) => new Date(`2026-10-${String(day).padStart(2, '0')}T12:00:00Z`).getTime()
+const done = (t: Task, day: number, streamId = 'main'): ArchivedTask => ({ task: t, streamId, streamName: streamId, dir: '', archivedAt: at(day) })
+const keys = (rows: GraphRow[]) => rows.map(r => r.item.kind === 'fold' ? `fold:${r.item.commits.length}` : r.item.key)
+const opts = { showDone: false, expanded: new Set<string>(), rowLimit: 100 }
 
-describe('project map lanes', () => {
-  // master: a ← b ← c ← d; stream rel cut from b: b ← r1 ← r2; task t1 off c, task t2 off a.
+describe('project graph', () => {
+  // master: a ← b ← c ← d; stream rel cut from b: b ← r1 ← r2; task t1's branch t1x off c.
   const g = graph([
     commit('r2', ['r1'], 9), commit('d', ['c'], 8), commit('t1x', ['c'], 7), commit('r1', ['b'], 6),
-    commit('c', ['b'], 5), commit('b', ['a'], 4), commit('t2x', ['a'], 3), commit('a', [], 2)
-  ], { master: 'd', rel: 'r2', 'task/t1': 't1x', 'task/t2': 't2x' })
+    commit('c', ['b'], 5), commit('b', ['a'], 4), commit('a', [], 2)
+  ], { master: 'd', rel: 'r2', 'task/t1': 't1x' })
+  const main = stream('main', { isMain: true, tasks: [task('t1', ws('task/t1', 'master')), task('plain')] })
+  const rel = stream('rel', { workspace: ws('rel', 'master'), tasks: [task('rx')] })
+  const project = { id: 'p', name: 'p', streams: [main, rel] } as unknown as Project
 
-  it('draws the main stream\'s first-parent history older → newer with tasks after the commit they forked from', () => {
-    const main = stream('main', { isMain: true, tasks: [task('t1', ws('task/t1', 'master')), task('plain'), task('t2', ws('task/t2', 'master'))] })
-    const track = laneTrack(g, main)
-    expect(track.branch).toBe('master')
-    expect(track.projectFolder).toBe(true)
-    expect(ids(track.items)).toEqual(['a', 'task:t2', 'b', 'c', 'task:t1', 'd', 'task:plain'])
-    expect(track.newest?.hash).toBe('d')
-    expect(track.ahead).toBeNull()
+  it('puts open tasks on top, each joined to its own branch or else its stream\'s head', () => {
+    const { rows } = projectGraph(project, g, null, opts)
+    expect(keys(rows).slice(0, 3)).toEqual(['task:t1', 'task:plain', 'task:rx'])
+    const parentOf = (key: string) => rows.find(r => r.item.key === key)!.segments.find(s => s.part === 'bottom')?.parent
+    expect(parentOf('task:t1')).toBe('t1x')
+    expect(parentOf('task:plain')).toBe('d')
+    expect(parentOf('task:rx')).toBe('r2')
   })
 
-  it('keeps only the newest commits, and puts tasks forked from older ones first', () => {
-    const main = stream('main', { isMain: true, tasks: [task('t2', ws('task/t2', 'master'))] })
-    expect(ids(laneTrack(g, main, 2).items)).toEqual(['task:t2', 'c', 'd'])
+  it('names the streams whose branch ends at a commit, and colours commits by the stream they belong to', () => {
+    const model = projectGraph(project, g, null, opts)
+    const row = (key: string) => model.rows.find(r => r.item.key === key)!
+    expect(row('d').item).toMatchObject({ kind: 'commit', heads: ['main'] })
+    expect(row('r2').item).toMatchObject({ kind: 'commit', heads: ['rel'] })
+    expect(['a', 'b', 'c', 'd', 't1x'].map(h => model.owner.get(h))).toEqual(['main', 'main', 'main', 'main', 'main'])
+    expect(['r1', 'r2', 'task:rx'].map(h => model.owner.get(h))).toEqual(['rel', 'rel', 'rel'])
+    // rel's line curving into b where it was cut is rel's.
+    const fork = row('b').segments.find(s => s.part === 'top' && s.child === 'r1')!
+    expect(model.edgeOwner(fork)).toBe('rel')
   })
 
-  it('says when a lane has older commits than it draws', () => {
-    const main = stream('main', { isMain: true })
-    expect(laneTrack(g, main, 2).older).toBe(true)
-    expect(laneTrack(g, main).older).toBe(false)
-    // The chain runs off the end of a graph that has more.
-    const cut = { ...graph([commit('d', ['c']), commit('c', ['b'])], { master: 'd' }), more: true }
-    expect(laneTrack(cut, main).older).toBe(true)
-    expect(laneTrack({ ...cut, more: false }, main).older).toBe(false)
+  it('shows branches git has that no stream or task claims', () => {
+    const extra = { ...g, tips: { ...g.tips, develop: 'b' } }
+    const row = projectGraph(project, extra, null, opts).rows.find(r => r.item.key === 'b')!
+    expect(row.item).toMatchObject({ branches: ['develop'] })
   })
 
-  it('draws each lane as deep as asked', () => {
-    const project = { id: 'p', streams: [stream('main', { isMain: true })] } as unknown as Project
-    const deep = projectLanes(project, g, null, () => 2).get('main')!.track
-    expect(ids(deep.items)).toEqual(['c', 'd'])
+  it('folds runs of plain commits, and opens one asked for', () => {
+    const chain = Array.from({ length: 10 }, (_, i) => commit(`c${9 - i}`, i === 9 ? [] : [`c${8 - i}`], 20 - i))
+    const linear = graph(chain, { master: 'c9' })
+    const solo = { id: 'p', streams: [stream('main', { isMain: true })] } as unknown as Project
+    // The head, eight plain commits, then the root (where the line ends).
+    expect(keys(projectGraph(solo, linear, null, opts).rows)).toEqual(['c9', 'fold:8', 'c0'])
+    expect(keys(projectGraph(solo, linear, null, { ...opts, expanded: new Set(['c8']) }).rows)).toHaveLength(10)
+    // Fewer than FOLD_MIN stay as they are.
+    const short = graph(chain.slice(7), { master: 'c2' })
+    expect(FOLD_MIN).toBe(3)
+    expect(keys(projectGraph(solo, short, null, opts).rows)).toEqual(['c2', 'c1', 'c0'])
   })
 
-  it('counts a worktree stream ahead of and behind its base, drawing only its own commits', () => {
-    const rel = stream('rel', { workspace: ws('rel', 'master') })
-    const track = laneTrack(g, rel)
-    expect(ids(track.items)).toEqual(['r1', 'r2'])
-    expect([track.ahead, track.behind, track.partial]).toEqual([2, 2, false])
-    expect(aheadBehindLine(track, 'master')).toBe('2 ahead of master · 2 behind')
+  it('keeps a fold\'s lines and marks its commits\' column dotted', () => {
+    const chain = Array.from({ length: 6 }, (_, i) => commit(`c${5 - i}`, i === 5 ? [] : [`c${4 - i}`], 20 - i))
+    const solo = { id: 'p', streams: [stream('main', { isMain: true })] } as unknown as Project
+    const fold = projectGraph(solo, graph(chain, { master: 'c5' }), null, opts).rows[1]
+    expect(fold.item.kind).toBe('fold')
+    expect(fold.column).toBeNull()
+    expect(fold.dotted).toEqual([0])
+    expect(fold.segments.map(s => [s.lane, s.part])).toEqual([[0, 'full']])
   })
 
-  it('draws no commits for another project-folder stream, which shares main\'s checkout', () => {
-    const side = stream('side', { tasks: [task('x')] })
-    const track = laneTrack(g, side)
-    expect(track.branch).toBe('master')
-    expect(ids(track.items)).toEqual(['task:x'])
-    expect(track.newest).toBeNull()
+  it('leaves done tasks out until asked for', () => {
+    const archive: ProjectArchive = { ...emptyArchive(), tasks: [done({ ...task('x'), name: 'commit c' } as Task, 6)] }
+    const hidden = projectGraph(project, g, archive, opts)
+    expect(hidden.rows.every(r => r.item.kind !== 'commit' || r.item.done.length === 0)).toBe(true)
+    const shown = projectGraph(project, g, archive, { ...opts, showDone: true })
+    expect(shown.rows.find(r => r.item.key === 'c')!.item).toMatchObject({ done: [{ task: { id: 'x' } }] })
   })
 
-  it('without a graph lists the tasks alone', () => {
-    const track = laneTrack(null, stream('main', { isMain: true, tasks: [task('a'), task('b')] }))
-    expect(track.branch).toBeNull()
-    expect(ids(track.items)).toEqual(['task:a', 'task:b'])
+  it('puts a done task on the commit it landed, by its recorded commit or else by its name on its stream\'s branch', () => {
+    const archive: ProjectArchive = {
+      ...emptyArchive(),
+      tasks: [
+        done({ ...task('recorded'), name: 'Something else', landedCommits: ['r1'] } as Task, 7, 'rel'),
+        done({ ...task('named'), name: 'commit b' } as Task, 5),
+        // Named like a commit on rel, but closed from main: not that one.
+        done({ ...task('wrong'), name: 'commit r2' } as Task, 9)
+      ]
+    }
+    const { rows } = projectGraph(project, g, archive, { ...opts, showDone: true })
+    const doneOn = (key: string) => (rows.find(r => r.item.key === key)!.item as { done: ArchivedTask[] }).done.map(e => e.task.id)
+    expect(doneOn('r1')).toEqual(['recorded'])
+    expect(doneOn('b')).toEqual(['named'])
+    expect(doneOn('r2')).toEqual([])
+    expect(keys(rows)).toContain('done:wrong')
   })
 
-  it('marks counts that ran past the loaded graph', () => {
+  it('places done tasks without a commit, and closed and deleted streams, by time', () => {
+    const archive: ProjectArchive = {
+      ...emptyArchive(),
+      tasks: [done({ ...task('lost'), name: 'Never landed' } as Task, 6)],
+      streams: [{ stream: stream('old', { workspace: ws('old', 'master') }), doneTasks: [], dir: '', archivedAt: at(4) }],
+      deletedStreams: [{ streamId: 'gone', streamName: 'gone', closedAt: at(1), deletedAt: at(8) }]
+    }
+    const { rows } = projectGraph(project, g, archive, { ...opts, showDone: true })
+    const commitsAndEvents = keys(rows).filter(k => !k.startsWith('task:'))
+    // Commit days: r2 9, d 8, t1x 7, r1 6, c 5, b 4, a 2; events at noon of days 8, 6 and 4.
+    expect(commitsAndEvents).toEqual(['r2', 'deleted:gone', 'd', 't1x', 'done:lost', 'r1', 'c', 'closed:old', 'b', 'a'])
+    // An event row passes the lines around it through.
+    const event = rows.find(r => r.item.key === 'done:lost')!
+    expect(event.column).toBeNull()
+    expect(event.segments.length).toBeGreaterThan(0)
+    expect(event.segments.every(s => s.part === 'full')).toBe(true)
+  })
+
+  it('stops at the row limit and says so', () => {
+    const model = projectGraph(project, g, null, { ...opts, rowLimit: 4 })
+    expect(model.rows).toHaveLength(4)
+    expect(model.cut).toBe(true)
+    expect(projectGraph(project, g, null, opts).cut).toBe(false)
+  })
+
+  it('by default stops a little past where the last stream or task branches off', () => {
+    // main c0 … c19; feature cut from c15; old branches nobody claims at c1 … c12 keep those rows from folding.
+    const chain = Array.from({ length: 20 }, (_, i) => commit(`c${19 - i}`, i === 19 ? [] : [`c${18 - i}`], 25 - i))
+    const tips: Record<string, string> = { master: 'c19', feature: 'f1' }
+    for (let i = 1; i <= 12; i++) tips[`old${i}`] = `c${i}`
+    const g2 = graph([commit('f1', ['c15'], 26), ...chain], tips)
+    const p = { id: 'p', streams: [stream('main', { isMain: true }), stream('feature', { workspace: ws('feature', 'master') })] } as unknown as Project
+    const focused = projectGraph(p, g2, null, { showDone: false, expanded: new Set() })
+    // f1, c19, ⋯ 3, c15 (the fork), then FOCUS_CONTEXT rows, at least FOCUS_MIN in all.
+    expect(keys(focused.rows).slice(0, 4)).toEqual(['f1', 'c19', 'fold:3', 'c15'])
+    expect(focused.rows).toHaveLength(Math.max(4 + FOCUS_CONTEXT, FOCUS_MIN))
+    expect(focused.cut).toBe(true)
+  })
+
+  it('without a graph lists the open tasks alone', () => {
+    const { rows, width } = projectGraph(project, null, null, opts)
+    expect(keys(rows)).toEqual(['task:t1', 'task:plain', 'task:rx'])
+    expect(rows.every(r => r.column === 0 && r.segments.length === 0)).toBe(true)
+    expect(width).toBe(1)
+  })
+
+  it('nests a task under the task in its stream that started it', () => {
+    const parent = task('parent')
+    const child = task('child', undefined, { delegatedFrom: { taskId: 'parent', name: 'parent' } })
+    const p = { id: 'p', streams: [stream('main', { isMain: true, tasks: [child, task('other'), parent] })] } as unknown as Project
+    const rows = projectGraph(p, null, null, opts).rows
+    expect(rows.map(r => r.item.kind === 'task' ? `${r.item.task.id}${r.item.nested ? '*' : ''}` : '')).toEqual(['other', 'parent', 'child*'])
+  })
+
+  it('counts a worktree stream ahead of and behind its base', () => {
+    expect(streamAheadBehind(g, rel)).toEqual({ ahead: 2, behind: 2, partial: false })
+    expect(aheadBehindLine(streamAheadBehind(g, rel), 'master')).toBe('2 ahead of master · 2 behind')
+    expect(streamAheadBehind(g, main)).toBeNull()
     const cut = graph([commit('r2', ['r1']), commit('d', ['c'])], { master: 'd', rel: 'r2' })
-    const track = laneTrack(cut, stream('rel', { workspace: ws('rel', 'master') }))
-    expect(track.partial).toBe(true)
-    expect(aheadBehindLine(track, 'master')).toBe('1+ ahead of master · 1+ behind')
+    expect(aheadBehindLine(streamAheadBehind(cut, rel), 'master')).toBe('1+ ahead of master · 1+ behind')
+    expect(aheadBehindLine({ ahead: 0, behind: 0, partial: false }, 'master')).toBe('up to date with master')
+    expect(aheadBehindLine({ ahead: 0, behind: 3, partial: false }, 'master')).toBe('3 behind master')
+    expect(aheadBehindLine(null, 'master')).toBeNull()
   })
 })
 
 describe('project map lines', () => {
-  it('says how a stream stands against its base', () => {
-    const base = { branch: 'x', projectFolder: false, items: [], partial: false, newest: null, history: [], baseMerges: new Set<string>(), older: false }
-    expect(aheadBehindLine({ ...base, ahead: 0, behind: 0 }, 'master')).toBe('up to date with master')
-    expect(aheadBehindLine({ ...base, ahead: 0, behind: 3 }, 'master')).toBe('3 behind master')
-    expect(aheadBehindLine({ ...base, ahead: null, behind: null }, 'master')).toBeNull()
-  })
-
   it('says how long a quiet lane has been quiet', () => {
     const now = new Date('2026-10-30T12:00:00Z').getTime()
     expect(quietFor('2026-10-30T08:00:00Z', now)).toBeNull()
@@ -131,102 +211,7 @@ describe('project map lines', () => {
   })
 })
 
-describe('project map lane geometry', () => {
-  const c = (hash: string) => ({ kind: 'commit' as const, commit: commit(hash, []) })
-  const t = (id: string) => ({ kind: 'task' as const, task: task(id) })
-
-  it('spaces commits on the rail and hangs each task under the commit it forked from', () => {
-    const geo = laneGeometry([c('a'), t('early'), c('b'), c('c'), t('late')])
-    expect(geo.commits.map(x => x.x)).toEqual([G.padLeft, G.padLeft + G.step, G.padLeft + 2 * G.step])
-    expect(geo.tasks.map(x => x.forkX)).toEqual([G.padLeft, G.padLeft + 2 * G.step])
-    expect(geo.tasks[0].x).toBe(G.padLeft - G.stemInset)
-    // The second card can't sit under its fork: it starts after the first.
-    expect(geo.tasks[1].x).toBe(geo.tasks[0].x + G.cardWidth + G.cardGap)
-    expect(geo.railEnd).toBe(G.padLeft + 2 * G.step)
-    expect(geo.addX).toBe(geo.railEnd + G.addGap)
-    expect(geo.width).toBe(geo.tasks[1].x + G.cardWidth + G.padRight)
-  })
-
-  it('forks tasks older than every drawn commit from the rail\'s start', () => {
-    const geo = laneGeometry([t('old'), c('a')])
-    expect(geo.tasks[0].forkX).toBe(geo.railStart)
-    expect(geo.tasks[0].x).toBeGreaterThanOrEqual(0)
-  })
-
-  it('without commits keeps the rail short and the tasks at its start', () => {
-    const geo = laneGeometry([t('x')])
-    expect(geo.commits).toEqual([])
-    expect(geo.railEnd).toBe(geo.railStart)
-    expect(geo.tasks[0].forkX).toBe(geo.railStart)
-  })
-})
-
-describe('project map history', () => {
-  const at = (day: number) => new Date(`2026-10-${String(day).padStart(2, '0')}T10:00:00Z`).getTime()
-  const done = (t: Task, day: number, streamId = 'main') => ({ task: t, streamId, streamName: streamId, dir: '', archivedAt: at(day) })
-
-  // master: a ← b ← "Fix login" ← m (merges rel's r1); rel cut from a: a ← r1 ← mb (merges b back in) ← r2
-  const g = graph([
-    commit('r2', ['mb'], 9), commit('m', ['fix', 'r1'], 8), commit('mb', ['r1', 'b'], 7), commit('r1', ['a'], 5),
-    commit('fix', ['b'], 4), commit('b', ['a'], 3), commit('a', [], 2)
-  ], { master: 'm', rel: 'r2' })
-  g.commits.find(c => c.hash === 'fix')!.subject = 'Fix login'
-  g.commits.find(c => c.hash === 'm')!.subject = 'Merge stream "rel" (rel) into master'
-  const main = stream('main', { isMain: true })
-  const rel = stream('rel', { workspace: ws('rel', 'master') })
-
-  it('reads the branch a merge commit names', () => {
-    expect(mergedBranch('Merge stream "0.8.0" (0.8.0) into main')).toEqual({ stream: '0.8.0', branch: '0.8.0' })
-    expect(mergedBranch("Merge branch 'feature/x' into main")).toEqual({ branch: 'feature/x' })
-    expect(mergedBranch('Merge pull request #12 from me/fix-it')).toEqual({ branch: 'fix-it' })
-    expect(mergedBranch('Fix merge of things')).toBeNull()
-  })
-
-  it('checks the commit a done task landed, by its recorded commit or else by its name', () => {
-    const track = laneTrack(g, main)
-    const recorded = { ...task('t1'), name: 'Something else', landedCommits: ['b'] } as Task
-    const named = { ...task('t2'), name: 'Fix login' } as Task
-    const lost = { ...task('t3'), name: 'Never landed' } as Task
-    const { notes, unclaimed } = commitNotes(track, [done(recorded, 3), done(named, 4), done(lost, 6)], undefined, new Map())
-    expect(notes.get('b')).toEqual({ kind: 'task', name: 'Something else' })
-    expect(notes.get('fix')).toEqual({ kind: 'task', name: 'Fix login' })
-    expect(notes.get('m')).toEqual({ kind: 'merged', name: 'rel' })
-    expect(unclaimed.map(t => t.id)).toEqual(['t3'])
-  })
-
-  it('tells a merge of the base into a stream apart', () => {
-    const track = laneTrack(g, rel)
-    expect([...track.baseMerges]).toEqual(['mb'])
-    expect(commitNotes(track, [], 'master', new Map()).notes.get('mb')).toEqual({ kind: 'base', name: 'master' })
-  })
-
-  it('puts marks on the rail by time, leaving out ones older than what is drawn', () => {
-    const mark = (key: string, day: number): RailMark => ({ key, kind: 'closed', at: at(day) + 1, label: key, title: key })
-    const whole = laneTrack(g, main)
-    expect(ids(placeMarks(whole, [mark('x', 3), mark('y', 20), mark('z', 1)]).items)).toEqual(['mark:z', 'a', 'b', 'mark:x', 'fix', 'm', 'mark:y'])
-    const cut = laneTrack(g, main, 2)
-    expect(ids(placeMarks(cut, [mark('old', 2), mark('new', 8)]).items)).toEqual(['fix', 'm', 'mark:new'])
-  })
-
-  it('puts closed and deleted streams on the lane they came from, folding a close into its merge', () => {
-    const project = { id: 'p', name: 'p', streams: [main, rel] } as unknown as Project
-    const archive: ProjectArchive = {
-      ...emptyArchive(),
-      tasks: [done({ ...task('t3'), name: 'Never landed' } as Task, 6)],
-      streams: [
-        { stream: stream('rel-old', { name: 'rel' } as Partial<Stream>), doneTasks: [], dir: '', archivedAt: at(8) },
-        { stream: stream('spike'), doneTasks: [], dir: '', archivedAt: at(4) }
-      ],
-      deletedStreams: [{ streamId: 'gone', streamName: 'gone', branchName: 'gone', baseBranch: 'rel', closedAt: at(5), deletedAt: at(9) }]
-    }
-    const lanes = projectLanes(project, g, archive)
-    const mainLane = lanes.get('main')!
-    expect(mainLane.notes.get('m')).toEqual({ kind: 'merged', name: 'rel', closed: true })
-    expect(ids(mainLane.track.items)).toEqual(['a', 'b', 'fix', 'mark:closed-spike', 'mark:done-t3', 'm'])
-    // r1 reached master with the merge, so only mb and r2 are rel's own.
-    expect(ids(lanes.get('rel')!.track.items)).toEqual(['mb', 'r2', 'mark:deleted-gone'])
-  })
-
+describe('project archive', () => {
   it('remembers streams deleted for good, not reopened ones, until they are older than the retention', () => {
     const archive: ProjectArchive = { ...emptyArchive(), streams: [{ stream: stream('s', { workspace: ws('s', 'master') }), doneTasks: [], dir: '', archivedAt: 5 }] }
     expect(withoutArchived(archive, { streams: ['s'] }).deletedStreams).toBeUndefined()
@@ -234,13 +219,5 @@ describe('project map history', () => {
     expect(deleted.deletedStreams).toEqual([{ streamId: 's', streamName: 's', branchName: 's', baseBranch: 'master', closedAt: 5, deletedAt: 100 }])
     expect(pruneArchive(deleted, 50)).toBe(deleted)
     expect(pruneArchive(deleted, 200).deletedStreams).toBeUndefined()
-  })
-
-  it('spreads labelled rail items so their labels don\'t touch', () => {
-    const c = (hash: string) => ({ kind: 'commit' as const, commit: commit(hash, []) })
-    const geo = laneGeometry([c('a'), c('b'), c('c')], item => item.kind === 'commit' && item.commit.hash !== 'b' ? 'a long label here' : null)
-    const [a, , cc] = geo.commits.map(x => x.x)
-    expect(cc - a).toBeGreaterThanOrEqual(labelWidth('a long label here') + 8)
-    expect(geo.labels.map(l => l.key)).toEqual(['a', 'c'])
   })
 })

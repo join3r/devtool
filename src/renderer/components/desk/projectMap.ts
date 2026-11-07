@@ -1,66 +1,64 @@
 /**
- * Pure logic behind the desk's Project map (plan change 4, board Project.dc.html):
- * one lane per stream, its commits older → newer with the stream's open tasks
- * placed where they branched off, and the stream's ahead/behind against the
- * branch it was cut from. Everything comes from one `GitBranchGraph` of the
- * project's branches (`git-branch-graph.ts`), so a lane only knows the commits
- * that graph loaded.
+ * Pure logic behind the desk's Project map: the project's branches on one
+ * graph, newest first. Streams are branches in their own colour; each open
+ * task is an unfinished node at the tip of its branch (its own, or its
+ * stream's when it has none). Runs of plain commits fold into one line, and
+ * with done tasks shown each sits on the commit it landed (or at the time it
+ * closed, when it landed none), with closed and deleted streams beside them.
+ * Everything comes from one `GitBranchGraph` of the project's branches
+ * (`git-branch-graph.ts`), so the graph only knows the commits that loaded.
  */
 import type { GitBranchGraph, GitGraphCommit, Project, Stream, Task } from '../../../shared/types'
-import { archivedTasksOf, type ProjectArchive } from '../../../shared/archive'
+import type { ArchivedTask, ProjectArchive } from '../../../shared/archive'
+import { layoutGraph, type GraphSegment } from '../gitGraphLayout'
 
-/** How many of a lane's newest commits it draws at first. */
-export const LANE_COMMITS = 12
+/** Runs of at least this many plain commits fold into one "⋯ N commits" row. */
+export const FOLD_MIN = 3
 
-/** How many more commits a lane draws each time it is scrolled to its oldest end. */
-export const LANE_COMMITS_STEP = 24
+/** Rows shown past the oldest one a stream or task still branches from, before "Show older". */
+export const FOCUS_CONTEXT = 2
+/** The fewest rows the graph shows by default. */
+export const FOCUS_MIN = 8
 
-/**
- * Something that happened on a lane at a time rather than at a commit: a task
- * closed without its commit on the lane, a stream closed or deleted.
- */
-export interface RailMark {
-  key: string
-  kind: 'done' | 'closed' | 'deleted'
-  /** Epoch ms. */
-  at: number
-  /** Drawn above the rail; null draws none (the tooltip still says it). */
-  label: string | null
-  title: string
+export type GraphItem =
+  /** An open task: an unfinished node at the tip of its branch. `nested` under the task that started it. */
+  | { kind: 'task'; key: string; task: Task; streamId: string; nested: boolean }
+  /**
+   * A commit, with the streams whose branch ends there, other branches git
+   * knows that end there, and (with done tasks shown) the done tasks that landed it.
+   */
+  | { kind: 'commit'; key: string; commit: GitGraphCommit; heads: string[]; branches: string[]; done: ArchivedTask[] }
+  /** A run of plain commits, folded. Its key opens it. */
+  | { kind: 'fold'; key: string; commits: GitGraphCommit[] }
+  /** With done tasks shown: one that landed no commit on the graph, at the time it closed. */
+  | { kind: 'done'; key: string; entry: ArchivedTask }
+  /** With done tasks shown: a stream that closed or was deleted, at the time it went. */
+  | { kind: 'stream'; key: string; name: string; what: 'closed' | 'deleted'; at: number }
+
+export interface GraphRow {
+  item: GraphItem
+  /** The node's column; null for a row that only passes lines through. */
+  column: number | null
+  segments: GraphSegment[]
+  /** Columns drawn dotted: where a fold's commits are. */
+  dotted: number[]
+  merge: boolean
 }
 
-/** What a lane's track shows, older first. */
-export type TrackItem =
-  | { kind: 'commit'; commit: GitGraphCommit }
-  | { kind: 'task'; task: Task }
-  | { kind: 'mark'; mark: RailMark }
-
-export interface LaneTrack {
-  /** The branch the lane draws; null when the stream has none git knows. */
-  branch: string | null
-  /** The stream works in the project folder (no worktree of its own). */
-  projectFolder: boolean
-  items: TrackItem[]
+export interface ProjectGraph {
+  rows: GraphRow[]
+  /** Columns the widest drawn row uses. */
+  width: number
+  /** The stream each commit and task node belongs to, by hash: its colour. Others are nobody's. */
+  owner: ReadonlyMap<string, string>
   /**
-   * Commits on the stream's branch that its base doesn't have (worktree
-   * streams only); null when there is no base to count against.
+   * The stream a line belongs to: its newer commit's along a first parent
+   * (a branch's own line, a fork curving off), else its older one's (a branch
+   * curving into the merge that took it in).
    */
-  ahead: number | null
-  /** Commits on the base the stream doesn't have yet; null like `ahead`. */
-  behind: number | null
-  /** The counts stopped at the end of the loaded graph, so they may be higher. */
-  partial: boolean
-  /** The lane's newest commit, for "Quiet for 6 days". */
-  newest: GitGraphCommit | null
-  /** Every commit the lane owns in the loaded graph, newest first (`items` draws the newest few). */
-  history: GitGraphCommit[]
-  /** Merge commits on the lane that took its base in ("main merged into 0.8.0"). */
-  baseMerges: Set<string>
-  /**
-   * The lane has older commits than it draws: loaded ones past `maxCommits`,
-   * or its chain ran off the end of a graph that has more.
-   */
-  older: boolean
+  edgeOwner: (segment: GraphSegment) => string | undefined
+  /** Rows past `rowLimit` (or past the focus, without one) were left out. */
+  cut: boolean
 }
 
 /** Every commit reachable from `tip` within the loaded graph. Reports whether a parent fell outside it. */
@@ -95,171 +93,315 @@ function firstParentChain(byHash: ReadonlyMap<string, GitGraphCommit>, tip: stri
 }
 
 /**
- * The stream's lane. The main stream draws the project folder's branch; a
- * worktree stream draws the commits it has on top of its base, with ahead and
- * behind counted against that base. Any other project-folder stream shares
- * main's checkout, so it draws no commits of its own, only its tasks.
- *
- * Open tasks with a branch of their own sit just after the lane commit they
- * branched off (at the start when that is older than what is drawn); the rest
- * sit at the newer end, in the stream's order.
+ * The commit a stream's branch ends at: a worktree stream's own branch, the
+ * main stream's the project folder's. Another project-folder stream has none
+ * of its own (it shares main's checkout).
  */
-export function laneTrack(graph: GitBranchGraph | null, stream: Stream, maxCommits = LANE_COMMITS): LaneTrack {
-  const projectFolder = !stream.workspace
-  const branch = stream.workspace?.branchName ?? graph?.head ?? null
-  const ownsHistory = !projectFolder || !!stream.isMain
-  const byHash = new Map((graph?.commits ?? []).map(c => [c.hash, c]))
-  const tip = branch ? graph?.tips[branch] : undefined
-
-  let commits: GitGraphCommit[] = []
-  let ahead: number | null = null
-  let behind: number | null = null
-  let partial = false
-  let chainCut = false
-  const baseMerges = new Set<string>()
-  if (graph && ownsHistory && tip) {
-    const base = stream.workspace?.baseBranch
-    const baseTip = base ? graph.tips[base] : undefined
-    if (stream.workspace && baseTip) {
-      const onBase = ancestors(byHash, baseTip)
-      const own = firstParentChain(byHash, tip, hash => !onBase.set.has(hash))
-      const mine = ancestors(byHash, tip)
-      commits = own.chain
-      ahead = own.chain.length
-      behind = [...onBase.set].filter(hash => !mine.set.has(hash)).length
-      partial = own.cut || onBase.cut || mine.cut
-      chainCut = own.cut
-      for (const c of own.chain) if (c.parents.slice(1).some(parent => onBase.set.has(parent))) baseMerges.add(c.hash)
-    } else {
-      const own = firstParentChain(byHash, tip)
-      commits = own.chain
-      chainCut = own.cut
-    }
-  }
-  const newest = commits[0] ?? null
-  const shown = commits.slice(0, maxCommits).reverse()
-
-  // Where each task goes: after the shown commit it forked from (-1: before them all), or at the end.
-  const slotOf = new Map(shown.map((c, i) => [c.hash, i]))
-  const allOwn = new Set(commits.map(c => c.hash))
-  const atSlot = new Map<number, Task[]>()
-  const atEnd: Task[] = []
-  for (const task of stream.tasks) {
-    const taskTip = task.workspace && graph ? graph.tips[task.workspace.branchName] : undefined
-    let slot: number | null = null
-    if (taskTip && shown.length > 0) {
-      const { chain } = firstParentChain(byHash, taskTip)
-      const fork = chain.find(c => slotOf.has(c.hash) || allOwn.has(c.hash))
-      if (fork) slot = slotOf.get(fork.hash) ?? -1
-    }
-    // A fork at the lane's newest commit is the same as the end.
-    if (slot === null || slot === shown.length - 1) atEnd.push(task)
-    else atSlot.set(slot, [...(atSlot.get(slot) ?? []), task])
-  }
-  const items: TrackItem[] = (atSlot.get(-1) ?? []).map(task => ({ kind: 'task' as const, task }))
-  shown.forEach((commit, i) => {
-    items.push({ kind: 'commit', commit })
-    for (const task of atSlot.get(i) ?? []) items.push({ kind: 'task', task })
-  })
-  for (const task of atEnd) items.push({ kind: 'task', task })
-
-  const older = commits.length > shown.length || (chainCut && !!graph?.more)
-  return { branch, projectFolder, items, ahead, behind, partial, newest, history: commits, baseMerges, older }
+export function streamTip(graph: GitBranchGraph | null, stream: Stream): string | undefined {
+  if (!graph) return undefined
+  if (stream.workspace) return graph.tips[stream.workspace.branchName]
+  return stream.isMain && graph.head ? graph.tips[graph.head] : undefined
 }
 
-/**
- * The lane with `marks` on its rail by time: each after the newest drawn commit
- * not later than it. One older than every drawn commit goes first when the
- * lane's whole history is drawn, and is left out when older commits are not.
- */
-export function placeMarks(track: LaneTrack, marks: readonly RailMark[]): LaneTrack {
-  if (marks.length === 0) return track
-  const shown = track.items.flatMap(item => item.kind === 'commit' ? [item.commit] : [])
-  const cut = track.history.length > shown.length || track.partial
-  const after = new Map<number, RailMark[]>()
-  for (const mark of [...marks].sort((a, b) => a.at - b.at)) {
-    let slot = -1
-    shown.forEach((c, i) => { if (new Date(c.isoDate).getTime() <= mark.at) slot = i })
-    if (slot === -1 && shown.length > 0 && cut) continue
-    // With no commits drawn there is no time to place by: in order, at the start.
-    after.set(slot, [...(after.get(slot) ?? []), mark])
-  }
-  const items: TrackItem[] = (after.get(-1) ?? []).map(mark => ({ kind: 'mark' as const, mark }))
-  let i = -1
-  for (const item of track.items) {
-    items.push(item)
-    if (item.kind === 'commit') {
-      i++
-      for (const mark of after.get(i) ?? []) items.push({ kind: 'mark', mark })
-    }
-  }
-  return { ...track, items }
+export interface AheadBehind {
+  ahead: number
+  behind: number
+  /** The counts stopped at the end of the loaded graph, so they may be higher. */
+  partial: boolean
 }
 
-/** What a commit on a lane stands for, beyond itself. */
-export type CommitNote =
-  | { kind: 'task'; name: string }
-  /** Another branch merged into this lane; `name` is its stream's name when known, else the branch. */
-  | { kind: 'merged'; name: string; closed?: true }
-  /** The lane's base merged into it. */
-  | { kind: 'base'; name: string }
-
-/** The branch a merge commit's subject names: DevTool's own, git's and GitHub's wording. */
-export function mergedBranch(subject: string): { stream?: string; branch?: string } | null {
-  const own = /^Merge stream "(.+)" \((.+)\) into /.exec(subject)
-  if (own) return { stream: own[1], branch: own[2] }
-  const git = /^Merge (?:remote-tracking )?branch '([^']+)'/.exec(subject)
-  if (git) return { branch: git[1] }
-  const pr = /^Merge pull request #\d+ from [^/\s]+\/(\S+)/.exec(subject)
-  if (pr) return { branch: pr[1] }
-  return null
-}
-
-/**
- * Notes for a lane's commits: the done task each landed commit belongs to (by
- * `Task.landedCommits`, else a commit named after the task, as a landing names
- * it), and who each merge commit took in. Each task claims one commit, the
- * newest that fits. Returns the notes and the done tasks no commit claimed.
- */
-export function commitNotes(
-  track: LaneTrack,
-  done: readonly { task: Task }[],
-  base: string | undefined,
-  streamOfBranch: ReadonlyMap<string, string>
-): { notes: Map<string, CommitNote>; unclaimed: Task[] } {
-  const notes = new Map<string, CommitNote>()
-  for (const c of track.history) {
-    if (c.parents.length < 2) continue
-    if (track.baseMerges.has(c.hash)) {
-      notes.set(c.hash, { kind: 'base', name: base ?? 'base' })
-      continue
-    }
-    const named = mergedBranch(c.subject)
-    const name = named?.stream ?? (named?.branch ? streamOfBranch.get(named.branch) ?? named.branch : 'a branch')
-    notes.set(c.hash, { kind: 'merged', name })
+/** A worktree stream's commits its base lacks, and its base's it lacks; null without both branches. */
+export function streamAheadBehind(graph: GitBranchGraph | null, stream: Stream): AheadBehind | null {
+  const base = stream.workspace?.baseBranch
+  const tip = streamTip(graph, stream)
+  const baseTip = base ? graph?.tips[base] : undefined
+  if (!graph || !tip || !baseTip) return null
+  const byHash = new Map(graph.commits.map(c => [c.hash, c]))
+  const onBase = ancestors(byHash, baseTip)
+  const own = firstParentChain(byHash, tip, hash => !onBase.set.has(hash))
+  const mine = ancestors(byHash, tip)
+  return {
+    ahead: own.chain.length,
+    behind: [...onBase.set].filter(hash => !mine.set.has(hash)).length,
+    partial: own.cut || onBase.cut || mine.cut
   }
-  const unclaimed: Task[] = []
-  for (const { task } of done) {
-    const landed = new Set(task.landedCommits ?? [])
-    const subject = task.name.trim()
-    const hit = landed.size > 0
-      ? track.history.find(c => landed.has(c.hash) && !notes.has(c.hash))
-      : track.history.find(c => c.parents.length < 2 && c.subject === subject && !notes.has(c.hash))
-    if (hit) notes.set(hit.hash, { kind: 'task', name: task.name })
-    else unclaimed.push(task)
-  }
-  return { notes, unclaimed }
 }
 
 /** "3 ahead of master · 1 behind", "up to date with master", "12+ ahead of master". */
-export function aheadBehindLine(track: LaneTrack, base: string): string | null {
-  if (track.ahead === null || track.behind === null) return null
-  const plus = track.partial ? '+' : ''
-  if (track.ahead === 0 && track.behind === 0) return `up to date with ${base}`
+export function aheadBehindLine(counts: AheadBehind | null, base: string): string | null {
+  if (!counts) return null
+  const plus = counts.partial ? '+' : ''
+  if (counts.ahead === 0 && counts.behind === 0) return `up to date with ${base}`
   const parts: string[] = []
-  if (track.ahead > 0) parts.push(`${track.ahead}${plus} ahead of ${base}`)
-  if (track.behind > 0) parts.push(`${track.behind}${plus} behind${track.ahead > 0 ? '' : ` ${base}`}`)
+  if (counts.ahead > 0) parts.push(`${counts.ahead}${plus} ahead of ${base}`)
+  if (counts.behind > 0) parts.push(`${counts.behind}${plus} behind${counts.ahead > 0 ? '' : ` ${base}`}`)
   return parts.join(' · ')
+}
+
+/**
+ * Which stream each commit belongs to: main's first-parent history, then each
+ * worktree stream's own commits on top of its base (bases first), then each
+ * task branch's own commits, as its stream's.
+ */
+function commitOwners(project: Project, graph: GitBranchGraph, byHash: ReadonlyMap<string, GitGraphCommit>): Map<string, string> {
+  const owner = new Map<string, string>()
+  const claim = (tip: string | undefined, streamId: string, stop?: ReadonlySet<string>) => {
+    for (const commit of firstParentChain(byHash, tip, hash => !owner.has(hash) && !stop?.has(hash)).chain) owner.set(commit.hash, streamId)
+  }
+  const main = project.streams.find(s => s.isMain)
+  if (main) claim(streamTip(graph, main), main.id)
+  const byBranch = new Map(project.streams.flatMap(s => s.workspace ? [[s.workspace.branchName, s] as const] : []))
+  const depth = (stream: Stream, seen = new Set<string>()): number => {
+    const base = stream.workspace?.baseBranch
+    const parent = base ? byBranch.get(base) : undefined
+    if (!parent || seen.has(parent.id)) return 0
+    seen.add(stream.id)
+    return 1 + depth(parent, seen)
+  }
+  const worktreeStreams = project.streams.filter(s => s.workspace).sort((a, b) => depth(a) - depth(b))
+  for (const stream of worktreeStreams) {
+    const baseTip = graph.tips[stream.workspace!.baseBranch]
+    claim(streamTip(graph, stream), stream.id, baseTip ? ancestors(byHash, baseTip).set : undefined)
+  }
+  for (const stream of project.streams) {
+    for (const task of stream.tasks) if (task.workspace) claim(graph.tips[task.workspace.branchName], stream.id)
+  }
+  return owner
+}
+
+/** The commits only open tasks' own branches have: their lines matter until they join a stream. */
+function taskBranchCommits(project: Project, graph: GitBranchGraph, byHash: ReadonlyMap<string, GitGraphCommit>, streamOwned: ReadonlyMap<string, string>): Set<string> {
+  const out = new Set<string>()
+  for (const stream of project.streams) {
+    for (const task of stream.tasks) {
+      if (!task.workspace) continue
+      for (const commit of firstParentChain(byHash, graph.tips[task.workspace.branchName], hash => !streamOwned.has(hash) && !out.has(hash)).chain) out.add(commit.hash)
+    }
+  }
+  return out
+}
+
+/** The stream's open tasks, each one followed by those it started in the same stream. */
+function tasksInOrder(stream: Stream): { task: Task; nested: boolean }[] {
+  const ids = new Set(stream.tasks.map(t => t.id))
+  const parentOf = (task: Task) => task.delegatedFrom && ids.has(task.delegatedFrom.taskId) ? task.delegatedFrom.taskId : null
+  const out: { task: Task; nested: boolean }[] = []
+  const placed = new Set<string>()
+  const add = (task: Task, nested: boolean) => {
+    if (placed.has(task.id)) return
+    placed.add(task.id)
+    out.push({ task, nested })
+    for (const child of stream.tasks) if (parentOf(child) === task.id) add(child, true)
+  }
+  for (const task of stream.tasks) if (!parentOf(task)) add(task, false)
+  // A loop of starters (shouldn't happen) still lists every task.
+  for (const task of stream.tasks) add(task, false)
+  return out
+}
+
+const timeOf = (commit: GitGraphCommit): number => new Date(commit.isoDate).getTime()
+
+/** The lines a row without a node passes through: those entering the row below it, else leaving the row above. */
+function passThrough(below: GraphRow | undefined, above: GraphRow | undefined): GraphSegment[] {
+  const lanes = new Map<number, GraphSegment>()
+  if (below) {
+    for (const s of below.segments) {
+      if (s.part === 'bottom') continue
+      const lane = s.part === 'top' ? s.from : s.lane
+      if (!lanes.has(lane)) lanes.set(lane, { ...s, from: lane, to: lane, part: 'full', lane })
+    }
+  } else if (above) {
+    for (const s of above.segments) {
+      if (s.part === 'top') continue
+      const lane = s.part === 'bottom' ? s.to : s.lane
+      if (!lanes.has(lane)) lanes.set(lane, { ...s, from: lane, to: lane, part: 'full', lane })
+    }
+  }
+  return [...lanes.values()]
+}
+
+/** A commit with nothing on it in the middle of its lane, where no line joins or leaves. */
+function isPlain(row: GraphRow): boolean {
+  const { item } = row
+  if (item.kind !== 'commit' || row.merge || item.heads.length > 0 || item.branches.length > 0 || item.done.length > 0) return false
+  if (row.segments.some(s => s.from !== s.to)) return false
+  const own = row.segments.filter(s => s.lane === row.column)
+  return own.some(s => s.part === 'top') && own.some(s => s.part === 'bottom')
+}
+
+/**
+ * The project's graph as rows, newest first: its open tasks on top, each
+ * joined to the commit it works from, then the commits of every stream's and
+ * task's branch. Plain runs fold unless their key is in `expanded`. With
+ * `showDone`, done tasks sit on the commits they landed (by
+ * `Task.landedCommits`, else a commit named after the task on its stream's
+ * branch), or at the time they closed; closed and deleted streams likewise.
+ * At most `rowLimit` rows; without one, down to a little past the oldest row
+ * a stream or open task still branches from (the focus).
+ */
+export function projectGraph(
+  project: Project,
+  graph: GitBranchGraph | null,
+  archive: ProjectArchive | null,
+  opts: { showDone: boolean; expanded: ReadonlySet<string>; rowLimit?: number }
+): ProjectGraph {
+  const commits = graph?.commits ?? []
+  const byHash = new Map(commits.map(c => [c.hash, c]))
+  const owner = graph ? commitOwners(project, graph, byHash) : new Map<string, string>()
+  // Before task nodes join `owner`: commits on task branches that no stream has yet.
+  const onTaskBranch = graph ? taskBranchCommits(project, graph, byHash, new Map(owner)) : new Set<string>()
+  const main = project.streams.find(s => s.isMain)
+  const mainTip = main ? streamTip(graph, main) : undefined
+
+  // Open tasks become nodes on top, each with the commit it works from as its parent.
+  const taskNodes: GitGraphCommit[] = []
+  const taskOf = new Map<string, { task: Task; streamId: string; nested: boolean }>()
+  for (const stream of project.streams) {
+    const from = streamTip(graph, stream) ?? mainTip
+    for (const { task, nested } of tasksInOrder(stream)) {
+      const hash = `task:${task.id}`
+      const anchor = (task.workspace ? graph?.tips[task.workspace.branchName] : undefined) ?? from
+      taskNodes.push({ hash, parents: anchor ? [anchor] : [], subject: task.name, author: '', isoDate: '' })
+      taskOf.set(hash, { task, streamId: stream.id, nested })
+      owner.set(hash, stream.id)
+    }
+  }
+  const layout = layoutGraph([...taskNodes, ...commits])
+
+  // Branch ends: streams' own, and branches git has that no stream or task claims.
+  const heads = new Map<string, string[]>()
+  for (const stream of project.streams) {
+    const tip = streamTip(graph, stream)
+    if (tip) heads.set(tip, [...(heads.get(tip) ?? []), stream.id])
+  }
+  const claimed = new Set<string>(project.streams.flatMap(s => [
+    ...(s.workspace ? [s.workspace.branchName] : []),
+    ...s.tasks.flatMap(t => t.workspace ? [t.workspace.branchName] : [])
+  ]))
+  if (main && graph?.head) claimed.add(graph.head)
+  const branches = new Map<string, string[]>()
+  for (const [name, sha] of Object.entries(graph?.tips ?? {})) {
+    if (!claimed.has(name)) branches.set(sha, [...(branches.get(sha) ?? []), name])
+  }
+
+  // Done tasks on the commits they landed; the rest at the time they closed.
+  const doneAt = new Map<string, ArchivedTask[]>()
+  const events: { at: number; item: GraphItem }[] = []
+  if (opts.showDone && archive) {
+    const live = new Map(project.streams.map(s => [s.id, s]))
+    // The stream whose branch a stream's tasks land on: its own, or main's for a project-folder stream.
+    const branchOwner = (streamId: string) => {
+      const stream = live.get(streamId)
+      return stream ? (stream.workspace ? stream.id : main?.id) : undefined
+    }
+    const taken = new Set<string>()
+    const done = [...archive.tasks, ...archive.streams.flatMap(e => e.doneTasks)].sort((a, b) => b.archivedAt - a.archivedAt)
+    for (const entry of done) {
+      const landed = new Set(entry.task.landedCommits ?? [])
+      const name = entry.task.name.trim()
+      const on = branchOwner(entry.streamId)
+      const hit = landed.size > 0
+        ? commits.find(c => landed.has(c.hash) && !taken.has(c.hash))
+        : commits.find(c => c.parents.length < 2 && c.subject.trim() === name && !taken.has(c.hash) && (on === undefined || owner.get(c.hash) === on))
+      if (hit) {
+        taken.add(hit.hash)
+        doneAt.set(hit.hash, [...(doneAt.get(hit.hash) ?? []), entry])
+      } else if (entry.archivedAt > 0) {
+        events.push({ at: entry.archivedAt, item: { kind: 'done', key: `done:${entry.task.id}`, entry } })
+      }
+    }
+    for (const entry of archive.streams) {
+      if (entry.archivedAt > 0) events.push({ at: entry.archivedAt, item: { kind: 'stream', key: `closed:${entry.stream.id}`, name: entry.stream.name, what: 'closed', at: entry.archivedAt } })
+    }
+    for (const d of archive.deletedStreams ?? []) {
+      events.push({ at: d.deletedAt, item: { kind: 'stream', key: `deleted:${d.streamId}`, name: d.streamName, what: 'deleted', at: d.deletedAt } })
+    }
+    events.sort((a, b) => b.at - a.at)
+  }
+
+  let rows: GraphRow[] = layout.rows.map(row => {
+    const task = taskOf.get(row.commit.hash)
+    const item: GraphItem = task
+      ? { kind: 'task', key: row.commit.hash, ...task }
+      : { kind: 'commit', key: row.commit.hash, commit: row.commit, heads: heads.get(row.commit.hash) ?? [], branches: branches.get(row.commit.hash) ?? [], done: doneAt.get(row.commit.hash) ?? [] }
+    return { item, column: row.column, segments: row.segments, dotted: [], merge: row.merge }
+  })
+
+  // Each event goes before the first commit older than it; one older than every loaded commit waits for more to load.
+  if (events.length > 0) {
+    const out: GraphRow[] = []
+    let next = 0
+    const place = (row: GraphRow | null) => {
+      const at = row?.item.kind === 'commit' ? timeOf(row.item.commit) : null
+      while (next < events.length && (row === null || (at !== null && Number.isFinite(at) && at < events[next].at))) {
+        out.push({ item: events[next].item, column: null, segments: [], dotted: [], merge: false })
+        next++
+      }
+    }
+    for (const row of rows) {
+      place(row)
+      out.push(row)
+    }
+    if (!graph?.more) place(null)
+    rows = out
+  }
+
+  // Fold runs of plain commits.
+  const folded: GraphRow[] = []
+  for (let i = 0; i < rows.length;) {
+    let j = i
+    while (j < rows.length && isPlain(rows[j])) j++
+    const run = rows.slice(i, j)
+    const first = run[0]
+    if (run.length >= FOLD_MIN && first.item.kind === 'commit' && !opts.expanded.has(first.item.key)) {
+      folded.push({
+        item: { kind: 'fold', key: first.item.key, commits: run.flatMap(r => r.item.kind === 'commit' ? [r.item.commit] : []) },
+        column: null,
+        segments: passThrough(first, undefined),
+        dotted: [...new Set(run.map(r => r.column as number))],
+        merge: false
+      })
+      i = j
+    } else if (run.length > 0) {
+      folded.push(...run)
+      i = j
+    } else {
+      folded.push(rows[i])
+      i++
+    }
+  }
+
+  // Rows without a node pass through the lines around them.
+  for (let i = 0; i < folded.length; i++) {
+    const row = folded[i]
+    if (row.column !== null || row.item.kind === 'fold') continue
+    const below = folded.slice(i + 1).find(r => r.column !== null || r.item.kind === 'fold')
+    const above = [...folded.slice(0, i)].reverse().find(r => r.column !== null || r.item.kind === 'fold')
+    row.segments = passThrough(below, below ? undefined : above)
+  }
+
+  const parentsOf = new Map<string, readonly string[]>([...taskNodes, ...commits].map(c => [c.hash, c.parents]))
+  const edgeOwner = (s: GraphSegment) => parentsOf.get(s.child)?.[0] === s.parent ? owner.get(s.child) : owner.get(s.parent)
+
+  // The focus: the last row a line of a live stream (not main's, which runs on) or an open task still runs into.
+  const mainId = main?.id
+  const live = (s: GraphSegment) => {
+    if (s.child.startsWith('task:') || onTaskBranch.has(s.child)) return true
+    const who = edgeOwner(s)
+    return who !== undefined && who !== mainId
+  }
+  let focus = 0
+  folded.forEach((row, i) => {
+    const item = row.item
+    if (item.kind === 'task' || (item.kind === 'commit' && item.heads.length > 0) || row.segments.some(s => s.part !== 'bottom' && live(s))) focus = i + 1
+  })
+  const limit = opts.rowLimit ?? Math.max(focus + FOCUS_CONTEXT, FOCUS_MIN)
+  const shown = folded.slice(0, limit)
+  let width = 0
+  for (const row of shown) {
+    width = Math.max(width, (row.column ?? -1) + 1, ...row.segments.map(s => Math.max(s.from, s.to, s.lane) + 1))
+  }
+  return { rows: shown, width, owner, edgeOwner, cut: folded.length > limit }
 }
 
 /** "Quiet for 6 days", "Quiet since yesterday", null within the day or with nothing to go on. */
@@ -315,153 +457,4 @@ export function recentWeeks(dayCounts: ReadonlyMap<string, number>, now: Date, w
     cols.push(col)
   }
   return cols
-}
-
-/** The lane graph's measures, in px. */
-export const LANE_GEOMETRY = {
-  /** Room before the oldest commit for the fork-in curve. */
-  padLeft: 44,
-  /** Between two commits on the rail. */
-  step: 26,
-  /** Rail's distance from the top of the track (time labels sit above it). */
-  railY: 30,
-  /** Where task cards start, below the rail. */
-  cardTop: 64,
-  cardWidth: 184,
-  cardGap: 12,
-  /** A stem enters its card this far from the card's left edge. */
-  stemInset: 16,
-  /** From the newest commit to the "+ Task" node on the rail. */
-  addGap: 28,
-  padRight: 24
-} as const
-
-export interface LaneGeometry {
-  commits: { commit: GitGraphCommit; x: number }[]
-  marks: { mark: RailMark; x: number }[]
-  /** Text above the rail, centred on `x`. */
-  labels: { key: string; text: string; x: number }[]
-  /** Each task card: where it leaves the rail (`forkX`) and where its card's left edge sits. */
-  tasks: { task: Task; forkX: number; x: number }[]
-  /** The rail's oldest and newest points (the newest commit, or `railStart` with none). */
-  railStart: number
-  railEnd: number
-  /** Where the "+ Task" node sits on the rail. */
-  addX: number
-  /** The track's full drawn width. */
-  width: number
-}
-
-/** About how wide a label of `text` is drawn (text-2xs). */
-export function labelWidth(text: string): number {
-  return Math.ceil(text.length * 5.6) + 4
-}
-
-/**
- * Where a lane's pieces go: commits and marks evenly on the rail older → newer,
- * spread wider where their labels would otherwise touch, then each
- * task card below the rail, as close under the commit it forked from as the
- * cards before it allow, joined to that commit by a stem. A task forked before
- * every drawn commit leaves the rail at its start.
- */
-export function laneGeometry(
-  items: readonly TrackItem[],
-  labelOf: (item: TrackItem) => string | null = () => null,
-  g: typeof LANE_GEOMETRY = LANE_GEOMETRY
-): LaneGeometry {
-  const commits: LaneGeometry['commits'] = []
-  const marks: LaneGeometry['marks'] = []
-  const labels: LaneGeometry['labels'] = []
-  const tasks: LaneGeometry['tasks'] = []
-  const railStart = g.padLeft - g.step / 2
-  let lastX = railStart
-  let railX: number | null = null
-  let labelRight = -Infinity
-  let cardRight = -Infinity
-  for (const item of items) {
-    if (item.kind !== 'task') {
-      const text = labelOf(item)
-      let x: number = railX === null ? g.padLeft : railX + g.step
-      if (text) {
-        const half = labelWidth(text) / 2
-        x = Math.max(x, labelRight + 8 + half)
-        labelRight = x + half
-        labels.push({ key: item.kind === 'commit' ? item.commit.hash : item.mark.key, text, x })
-      }
-      railX = x
-      if (item.kind === 'commit') {
-        lastX = x
-        commits.push({ commit: item.commit, x })
-      } else {
-        marks.push({ mark: item.mark, x })
-      }
-      continue
-    }
-    const forkX = lastX
-    const x = Math.max(forkX - g.stemInset, cardRight + g.cardGap, 0)
-    tasks.push({ task: item.task, forkX, x })
-    cardRight = x + g.cardWidth
-  }
-  const railEnd = railX ?? railStart
-  const addX = Math.max(railEnd + g.addGap, labelRight + 8)
-  const width = Math.max(addX + 60, cardRight) + g.padRight
-  return { commits, marks, labels, tasks, railStart, railEnd, addX, width }
-}
-
-export interface ProjectLane {
-  track: LaneTrack
-  notes: Map<string, CommitNote>
-}
-
-const when = (at: number): string => new Date(at).toLocaleString()
-
-/**
- * Every live stream's lane with what the archive knows: its done tasks (a
- * check on the commit each landed, a mark when none did), and closed and
- * deleted streams as marks on the lane they were cut from (main when that
- * one is gone). A closed stream whose merge commit is on that lane says so on
- * the merge instead.
- */
-export function projectLanes(
-  project: Project,
-  graph: GitBranchGraph | null,
-  archive: ProjectArchive | null,
-  /** How many commits each lane draws, by stream id (`LANE_COMMITS` when unset). */
-  depthOf: (streamId: string) => number = () => LANE_COMMITS
-): Map<string, ProjectLane> {
-  const streamOfBranch = new Map<string, string>()
-  for (const d of archive?.deletedStreams ?? []) if (d.branchName) streamOfBranch.set(d.branchName, d.streamName)
-  for (const e of archive?.streams ?? []) if (e.stream.workspace) streamOfBranch.set(e.stream.workspace.branchName, e.stream.name)
-  for (const s of project.streams) if (s.workspace) streamOfBranch.set(s.workspace.branchName, s.name)
-
-  const main = project.streams.find(s => s.isMain) ?? project.streams[0]
-  const laneOf = (base: string | undefined): Stream | undefined => project.streams.find(s => !!base && s.workspace?.branchName === base) ?? main
-
-  const lanes = new Map<string, ProjectLane & { marks: RailMark[] }>()
-  for (const stream of project.streams) {
-    const track = laneTrack(graph, stream, depthOf(stream.id))
-    const done = archive ? archivedTasksOf(archive, stream.id) : []
-    const { notes, unclaimed } = commitNotes(track, done, stream.workspace?.baseBranch, streamOfBranch)
-    const closedAt = new Map(done.map(entry => [entry.task.id, entry.archivedAt]))
-    const marks: RailMark[] = unclaimed.flatMap(task => {
-      const at = closedAt.get(task.id) ?? 0
-      return at > 0 ? [{ key: `done-${task.id}`, kind: 'done' as const, at, label: null, title: `✓ Done: ${task.name}\nClosed ${when(at)}, no commit of its own here` }] : []
-    })
-    lanes.set(stream.id, { track, notes, marks })
-  }
-
-  for (const entry of archive?.streams ?? []) {
-    const lane = lanes.get(laneOf(entry.stream.workspace?.baseBranch)?.id ?? '')
-    if (!lane || entry.archivedAt <= 0) continue
-    const merge = [...lane.notes].find(([, note]) => note.kind === 'merged' && note.name === entry.stream.name)
-    if (merge) lane.notes.set(merge[0], { kind: 'merged', name: entry.stream.name, closed: true })
-    else lane.marks.push({ key: `closed-${entry.stream.id}`, kind: 'closed', at: entry.archivedAt, label: `${entry.stream.name} closed`, title: `Stream ${entry.stream.name} closed ${when(entry.archivedAt)}` })
-  }
-  for (const d of archive?.deletedStreams ?? []) {
-    const lane = lanes.get(laneOf(d.baseBranch)?.id ?? '')
-    if (!lane) continue
-    lane.marks.push({ key: `deleted-${d.streamId}`, kind: 'deleted', at: d.deletedAt, label: `${d.streamName} deleted`, title: `Stream ${d.streamName} deleted ${when(d.deletedAt)}${d.closedAt > 0 ? ` (closed ${when(d.closedAt)})` : ''}` })
-  }
-
-  return new Map([...lanes].map(([id, { track, notes, marks }]) => [id, { track: placeMarks(track, marks), notes }]))
 }
