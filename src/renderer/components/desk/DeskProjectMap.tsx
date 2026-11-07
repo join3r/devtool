@@ -29,9 +29,11 @@ import { StreamRunButtons } from '../StreamRunControls'
 import { bucketByDay, formatRelativeTime, quartileBins } from '../projectStats'
 import { taskAgentLabel, taskStatusChip, type TaskChipTone } from '../taskHeaderState'
 import { projectHomeSummary } from '../projectHomeState'
-import { aheadBehindLine, LANE_GEOMETRY, laneGeometry, plural, projectHostLabel, projectLanes, quietFor, recentWeeks, type CommitNote, type LaneTrack, type TrackItem } from './projectMap'
+import { aheadBehindLine, LANE_COMMITS, LANE_COMMITS_STEP, LANE_GEOMETRY, laneGeometry, plural, projectHostLabel, projectLanes, quietFor, recentWeeks, type CommitNote, type LaneTrack, type TrackItem } from './projectMap'
 
 const GRAPH_LIMIT = 150
+/** The most commits the lanes load, however far they are scrolled back. */
+const GRAPH_LIMIT_MAX = 20_000
 const HEAT_WEEKS = 16
 
 const ghostCls = 'shrink-0 inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-border-strong bg-transparent text-sm text-text cursor-pointer hover:bg-sel transition-colors duration-(--motion-fast)'
@@ -51,20 +53,47 @@ const TIP: Record<TaskChipTone, { card: string; dot: string; text: string }> = {
   quiet: { card: 'border-border bg-field', dot: 'border border-border-strong', text: 'text-text-subtle' }
 }
 
-/** A lane's horizontal track, kept scrolled to its newest end whenever what it draws grows or shrinks. */
-function useScrolledToEnd(): React.RefObject<HTMLDivElement | null> {
+/** How close (px) to a lane's oldest end scrolling has to come before it draws older commits. */
+const OLDER_EDGE = 160
+
+/**
+ * A lane's horizontal track. It opens at its newest end and keeps the same
+ * distance from that end when what it draws grows or shrinks, so older
+ * commits drawn in on the left don't move what is in view. Scrolled near its
+ * oldest end (or not wide enough to scroll at all) while `older` says there
+ * is more, it asks for it with `onOlder`.
+ */
+function useLaneScroll(older: boolean, onOlder: () => void): React.RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement>(null)
+  const latest = useRef({ older, onOlder })
+  latest.current = { older, onOlder }
   useLayoutEffect(() => {
     const el = ref.current
     const content = el?.firstElementChild
     if (!el || !content) return
-    const toEnd = () => { el.scrollLeft = el.scrollWidth }
-    toEnd()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(toEnd)
+    let fromEnd = 0
+    const maybeOlder = () => { if (latest.current.older && el.scrollLeft < OLDER_EDGE) latest.current.onOlder() }
+    const keep = () => {
+      el.scrollLeft = Math.max(0, el.scrollWidth - el.clientWidth - fromEnd)
+      maybeOlder()
+    }
+    const onScroll = () => {
+      fromEnd = Math.max(0, el.scrollWidth - el.clientWidth - el.scrollLeft)
+      maybeOlder()
+    }
+    keep()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    if (typeof ResizeObserver === 'undefined') return () => el.removeEventListener('scroll', onScroll)
+    const observer = new ResizeObserver(keep)
     observer.observe(content)
-    return () => observer.disconnect()
+    observer.observe(el)
+    return () => { observer.disconnect(); el.removeEventListener('scroll', onScroll) }
   }, [])
+  // Newly told there is more while already at the oldest end (the graph loaded further).
+  useEffect(() => {
+    const el = ref.current
+    if (older && el && el.scrollLeft < OLDER_EDGE) onOlder()
+  }, [older]) // eslint-disable-line react-hooks/exhaustive-deps
   return ref
 }
 
@@ -447,7 +476,7 @@ function DoneChips({ done, total, now, onOpen }: {
  * and where it lives, and how it stands against its base; the track draws its
  * commits older → newer with its open tasks as tips; the end runs its commands.
  */
-function StreamLane({ project, stream, color, colorOf, graph, track, notes, local, folderPosture, statuses, statusSince, now, diffs, runs }: {
+function StreamLane({ project, stream, color, colorOf, graph, track, notes, local, folderPosture, statuses, statusSince, now, diffs, runs, onOlder }: {
   project: Project
   stream: Stream
   /** The lane's rail colour. */
@@ -464,13 +493,15 @@ function StreamLane({ project, stream, color, colorOf, graph, track, notes, loca
   now: number
   diffs: ReadonlyMap<string, GitDiffSummary>
   runs: readonly StreamRunState[]
+  /** Draw older commits on this lane (it was scrolled to its oldest end). */
+  onOlder: () => void
 }): React.ReactElement {
   const [menu, setMenu] = useState<EntityMenuTarget | null>(null)
   const [doneOpen, setDoneOpen] = useState(false)
   const archive = useProjectArchive(project.id, true)
   const ownPosture = useGitPosture(local && stream.workspace ? streamDirectory(project, stream) : '', local && !!stream.workspace, project.id)
   const posture = stream.workspace ? ownPosture : folderPosture
-  const trackRef = useScrolledToEnd()
+  const trackRef = useLaneScroll(track.older, onOlder)
   const openMenu = (x: number, y: number) => setMenu({ x, y, kind: 'stream', projectId: project.id, streamId: stream.id })
   const doneCount = stream.archivedTaskCount ?? 0
   const doneTasks = archive ? archivedTasksOf(visibleArchive(archive, project), stream.id) : []
@@ -545,7 +576,7 @@ function StreamLane({ project, stream, color, colorOf, graph, track, notes, loca
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col">
-          <div ref={trackRef} className="min-w-0 overflow-x-auto [scrollbar-width:none]" data-testid={`map-track-${stream.id}`}>
+          <div ref={trackRef} className="min-w-0 overflow-x-auto [scrollbar-width:thin] [scrollbar-color:var(--color-border-strong)_transparent]" data-testid={`map-track-${stream.id}`}>
             <LaneGraph
               items={track.items.filter(item => item.kind !== 'task' || !nestedInLane.has(item.task.id))}
               notes={notes}
@@ -617,7 +648,12 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
   const posture = useGitPosture(projectDir, local, project?.id)
   const { commits } = useCommitHistory(projectDir, local, project?.id)
   const branches = useMemo(() => project ? [...projectBranchLabels(project, null).keys()].sort() : [], [project])
-  const graph = useBranchGraph(projectDir, branches, GRAPH_LIMIT, local && !!posture?.isGitRepo, project?.id)
+  // Each lane draws its newest LANE_COMMITS and goes further back as it is scrolled
+  // to its oldest end; the graph loads more commits when a lane wants past them.
+  const [depth, setDepth] = useState<Record<string, number>>({})
+  const [graphLimit, setGraphLimit] = useState(GRAPH_LIMIT)
+  useEffect(() => { setDepth({}); setGraphLimit(GRAPH_LIMIT) }, [projectId])
+  const graph = useBranchGraph(projectDir, branches, graphLimit, local && !!posture?.isGitRepo, project?.id)
   const statuses = useAllTabStatuses()
   const statusSince = useAllTabStatusSince()
   const allRuns = useAllStreamRuns(project ? [project.id] : [])
@@ -634,7 +670,19 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
 
   if (!project) return null
 
-  const lanes = projectLanes(project, local ? graph : null, archive ? visibleArchive(archive, project) : null)
+  const depthOf = (streamId: string) => depth[streamId] ?? LANE_COMMITS
+  const lanes = projectLanes(project, local ? graph : null, archive ? visibleArchive(archive, project) : null, depthOf)
+  const drawOlder = (streamId: string) => {
+    const track = lanes.get(streamId)?.track
+    if (!track?.older) return
+    // Counted from what is loaded, so asking again while the graph loads changes nothing.
+    const want = Math.min(depthOf(streamId), track.history.length) + LANE_COMMITS_STEP
+    if (want !== depthOf(streamId)) setDepth(d => ({ ...d, [streamId]: want }))
+    // Past what the graph loaded: load more, once per graph that reached its limit.
+    if (track.history.length < want && graph?.more && graph.commits.length >= graphLimit) {
+      setGraphLimit(l => Math.min(l * 2, GRAPH_LIMIT_MAX))
+    }
+  }
   const colors = new Map(project.streams.map(stream => [stream.name, streamColor(project, stream, effectiveTheme)]))
   const colorOf = (name: string) => colors.get(name)
   const runsByStream = new Map(project.streams.map(stream => [stream.id, runsOfStream(allRuns, stream.id)]))
@@ -708,6 +756,7 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
           now={now}
           diffs={diffs}
           runs={runsByStream.get(stream.id) ?? []}
+          onOlder={() => drawOlder(stream.id)}
         />
       ))}
       <div className="px-5 py-2"><ArchivedStreamsLine project={project} /></div>

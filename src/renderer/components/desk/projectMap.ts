@@ -9,8 +9,11 @@
 import type { GitBranchGraph, GitGraphCommit, Project, Stream, Task } from '../../../shared/types'
 import { archivedTasksOf, type ProjectArchive } from '../../../shared/archive'
 
-/** How many of a lane's newest commits it draws. */
+/** How many of a lane's newest commits it draws at first. */
 export const LANE_COMMITS = 12
+
+/** How many more commits a lane draws each time it is scrolled to its oldest end. */
+export const LANE_COMMITS_STEP = 24
 
 /**
  * Something that happened on a lane at a time rather than at a commit: a task
@@ -53,6 +56,11 @@ export interface LaneTrack {
   history: GitGraphCommit[]
   /** Merge commits on the lane that took its base in ("main merged into 0.8.0"). */
   baseMerges: Set<string>
+  /**
+   * The lane has older commits than it draws: loaded ones past `maxCommits`,
+   * or its chain ran off the end of a graph that has more.
+   */
+  older: boolean
 }
 
 /** Every commit reachable from `tip` within the loaded graph. Reports whether a parent fell outside it. */
@@ -107,6 +115,7 @@ export function laneTrack(graph: GitBranchGraph | null, stream: Stream, maxCommi
   let ahead: number | null = null
   let behind: number | null = null
   let partial = false
+  let chainCut = false
   const baseMerges = new Set<string>()
   if (graph && ownsHistory && tip) {
     const base = stream.workspace?.baseBranch
@@ -119,9 +128,12 @@ export function laneTrack(graph: GitBranchGraph | null, stream: Stream, maxCommi
       ahead = own.chain.length
       behind = [...onBase.set].filter(hash => !mine.set.has(hash)).length
       partial = own.cut || onBase.cut || mine.cut
+      chainCut = own.cut
       for (const c of own.chain) if (c.parents.slice(1).some(parent => onBase.set.has(parent))) baseMerges.add(c.hash)
     } else {
-      commits = firstParentChain(byHash, tip).chain
+      const own = firstParentChain(byHash, tip)
+      commits = own.chain
+      chainCut = own.cut
     }
   }
   const newest = commits[0] ?? null
@@ -151,7 +163,8 @@ export function laneTrack(graph: GitBranchGraph | null, stream: Stream, maxCommi
   })
   for (const task of atEnd) items.push({ kind: 'task', task })
 
-  return { branch, projectFolder, items, ahead, behind, partial, newest, history: commits, baseMerges }
+  const older = commits.length > shown.length || (chainCut && !!graph?.more)
+  return { branch, projectFolder, items, ahead, behind, partial, newest, history: commits, baseMerges, older }
 }
 
 /**
@@ -409,7 +422,13 @@ const when = (at: number): string => new Date(at).toLocaleString()
  * one is gone). A closed stream whose merge commit is on that lane says so on
  * the merge instead.
  */
-export function projectLanes(project: Project, graph: GitBranchGraph | null, archive: ProjectArchive | null): Map<string, ProjectLane> {
+export function projectLanes(
+  project: Project,
+  graph: GitBranchGraph | null,
+  archive: ProjectArchive | null,
+  /** How many commits each lane draws, by stream id (`LANE_COMMITS` when unset). */
+  depthOf: (streamId: string) => number = () => LANE_COMMITS
+): Map<string, ProjectLane> {
   const streamOfBranch = new Map<string, string>()
   for (const d of archive?.deletedStreams ?? []) if (d.branchName) streamOfBranch.set(d.branchName, d.streamName)
   for (const e of archive?.streams ?? []) if (e.stream.workspace) streamOfBranch.set(e.stream.workspace.branchName, e.stream.name)
@@ -420,7 +439,7 @@ export function projectLanes(project: Project, graph: GitBranchGraph | null, arc
 
   const lanes = new Map<string, ProjectLane & { marks: RailMark[] }>()
   for (const stream of project.streams) {
-    const track = laneTrack(graph, stream)
+    const track = laneTrack(graph, stream, depthOf(stream.id))
     const done = archive ? archivedTasksOf(archive, stream.id) : []
     const { notes, unclaimed } = commitNotes(track, done, stream.workspace?.baseBranch, streamOfBranch)
     const closedAt = new Map(done.map(entry => [entry.task.id, entry.archivedAt]))

@@ -48,6 +48,22 @@ describe('project map lanes', () => {
     expect(ids(laneTrack(g, main, 2).items)).toEqual(['task:t2', 'c', 'd'])
   })
 
+  it('says when a lane has older commits than it draws', () => {
+    const main = stream('main', { isMain: true })
+    expect(laneTrack(g, main, 2).older).toBe(true)
+    expect(laneTrack(g, main).older).toBe(false)
+    // The chain runs off the end of a graph that has more.
+    const cut = { ...graph([commit('d', ['c']), commit('c', ['b'])], { master: 'd' }), more: true }
+    expect(laneTrack(cut, main).older).toBe(true)
+    expect(laneTrack({ ...cut, more: false }, main).older).toBe(false)
+  })
+
+  it('draws each lane as deep as asked', () => {
+    const project = { id: 'p', streams: [stream('main', { isMain: true })] } as unknown as Project
+    const deep = projectLanes(project, g, null, () => 2).get('main')!.track
+    expect(ids(deep.items)).toEqual(['c', 'd'])
+  })
+
   it('counts a worktree stream ahead of and behind its base, drawing only its own commits', () => {
     const rel = stream('rel', { workspace: ws('rel', 'master') })
     const track = laneTrack(g, rel)
@@ -80,7 +96,7 @@ describe('project map lanes', () => {
 
 describe('project map lines', () => {
   it('says how a stream stands against its base', () => {
-    const base = { branch: 'x', projectFolder: false, items: [], partial: false, newest: null, history: [], baseMerges: new Set<string>() }
+    const base = { branch: 'x', projectFolder: false, items: [], partial: false, newest: null, history: [], baseMerges: new Set<string>(), older: false }
     expect(aheadBehindLine({ ...base, ahead: 0, behind: 0 }, 'master')).toBe('up to date with master')
     expect(aheadBehindLine({ ...base, ahead: 0, behind: 3 }, 'master')).toBe('3 behind master')
     expect(aheadBehindLine({ ...base, ahead: null, behind: null }, 'master')).toBeNull()
