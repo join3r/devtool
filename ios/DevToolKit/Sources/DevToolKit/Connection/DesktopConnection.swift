@@ -441,6 +441,13 @@ extension DesktopConnection {
         _ = try await request(ChatOp.bash, params: ChatBashParams(tabId: tabId, command: command).json)
     }
 
+    /// `chat.fork` (§8.27): a sibling task whose conversation stops after the
+    /// agent reply `itemId`, idle. Making its worktree takes git a while.
+    public func forkChat(tabId: String, itemId: String) async throws -> ChatForkResult {
+        let result = try await request(ChatOp.fork, params: ChatForkParams(tabId: tabId, itemId: itemId).json, timeout: .seconds(120))
+        return try decode(result, ChatForkResult.parse)
+    }
+
     /// `chat.queue` (§8.24): edits, removes or sends now one queued message. One
     /// that already went out (or was removed) throws `.remote(code: "gone")`.
     public func queueChat(tabId: String, id: String, action: ChatQueueParams.Action, text: String? = nil) async throws {

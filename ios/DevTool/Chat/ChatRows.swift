@@ -8,6 +8,8 @@ struct ChatItemRow: View {
     var images: ChatImageActions? = nil
     /// Fetches and opens your own attached images; nil shows only how many there are.
     var userImages: ChatImageActions? = nil
+    /// Fork the chat after this reply (§8.27); nil when the desktop can't, or the item isn't `forkable`.
+    var onFork: ((ChatItem) -> Void)? = nil
     let onOpenDetail: (ChatItem) -> Void
 
     var body: some View {
@@ -15,7 +17,14 @@ struct ChatItemRow: View {
         case .user(let text, let images, let queued, let failed):
             UserBubble(itemId: item.id, text: text, images: images ?? 0, queued: queued, failed: failed, actions: userImages)
         case .text(let markdown, let streaming):
-            AssistantText(markdown: markdown, streaming: streaming)
+            if item.forkable, !streaming, let onFork {
+                AssistantText(markdown: markdown, streaming: streaming)
+                    .environment(\.linkTextMenuActions, [
+                        LinkTextMenuAction(title: "Fork from Here", systemImage: "arrow.triangle.branch") { onFork(item) },
+                    ])
+            } else {
+                AssistantText(markdown: markdown, streaming: streaming)
+            }
         case .thinking(let preview, let streaming):
             ThinkingRow(preview: preview, streaming: streaming)
         case .tool(let tool):

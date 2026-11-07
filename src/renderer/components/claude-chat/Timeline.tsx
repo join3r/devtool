@@ -1,5 +1,5 @@
 import React, { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronRight, CircleSlash, X } from 'lucide-react'
+import { Check, ChevronRight, CircleSlash, GitFork, X } from 'lucide-react'
 import type { ChatBashItem, ChatImage, ChatItem, ChatTask, ChatToolItem } from '../../../shared/claude-chat'
 import { firstLine } from '../../../shared/agent-activity'
 import { buildTimeline, summarizeGroup, type TimelineRow } from './timelineRows'
@@ -29,6 +29,10 @@ interface Props {
   onStopTask?: (taskId: string) => void
   /** Find in the thread: open whatever hides this item. */
   reveal?: TimelineReveal | null
+  /** Fork the conversation after this agent message (its transcript uuid); absent: no Fork button. */
+  onFork?: (uuid: string) => void
+  /** The message a fork is being made from: its button waits. */
+  forking?: string | null
 }
 
 export interface TimelineFocus {
@@ -42,6 +46,8 @@ interface TimelineContextValue {
   /** True the first time a row claims a focus request; rows remounting later don't re-scroll. */
   claim: (focus: TimelineFocus) => boolean
   reveal: TimelineReveal | null
+  onFork?: (uuid: string) => void
+  forking?: string | null
 }
 
 const NO_TOOLS: ReadonlySet<string> = new Set()
@@ -52,7 +58,7 @@ const FLASH_MS = 1400
 
 export default function Timeline({
   items, busy, compacting, waiting, turnStartedAt, onOpenLink, taskTools = NO_TOOLS, focus = null, folded = false,
-  backgroundTasks = NO_TASKS, onStopTask, reveal = null
+  backgroundTasks = NO_TASKS, onStopTask, reveal = null, onFork, forking = null
 }: Props): React.ReactElement {
   const rows = useMemo(() => folded ? [] : buildTimeline(items, busy), [items, busy, folded])
   const inBackground = backgroundTasks.length > 0
@@ -66,8 +72,10 @@ export default function Timeline({
       claimed.current = request.seq
       return true
     },
-    reveal
-  }), [taskTools, focus, reveal])
+    reveal,
+    onFork,
+    forking
+  }), [taskTools, focus, reveal, onFork, forking])
   const activeTool = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i]
@@ -107,7 +115,7 @@ const Row = memo(function Row({ row }: { row: TimelineRow }): React.ReactElement
     case 'user':
       return <UserMessage item={item} />
     case 'text':
-      return <AssistantText id={item.id} text={item.text} streaming={item.streaming} />
+      return <AssistantText id={item.id} text={item.text} streaming={item.streaming} uuid={item.uuid} />
     case 'thinking':
       return <Thinking id={item.id} text={item.text} streaming={item.streaming} />
     case 'tool':
@@ -190,14 +198,35 @@ function UserMessage({ item }: { item: Extract<ChatItem, { kind: 'user' }> }): R
   )
 }
 
-const AssistantText = memo(function AssistantText({ id, text, streaming }: { id: string; text: string; streaming?: boolean }): React.ReactElement {
+const AssistantText = memo(function AssistantText({ id, text, streaming, uuid }: { id: string; text: string; streaming?: boolean; uuid?: string }): React.ReactElement {
   const html = useMemo(() => renderChatMarkdown(text), [text])
-  return (
+  const { onFork, forking } = useContext(TimelineContext)
+  const body = (
     <div className={`note-preview chat-md text-base text-text break-words${streaming ? ' chat-streaming' : ''}`}
       data-chat-item={id}
       // Sanitized by DOMPurify in renderChatMarkdown.
       dangerouslySetInnerHTML={{ __html: html }}
     />
+  )
+  // A finished message from the transcript is where a fork can cut the conversation.
+  if (!onFork || !uuid || streaming) return body
+  const busy = forking === uuid
+  return (
+    <div className="group/fork relative">
+      {body}
+      <button
+        type="button"
+        className={`absolute -top-1 -right-1 size-6 inline-flex items-center justify-center rounded-md border-[0.5px] border-border bg-surface-2 text-text-subtle shadow-pop cursor-pointer hover:text-text disabled:cursor-default transition-opacity ${busy ? 'opacity-100 animate-pulse' : 'opacity-0 group-hover/fork:opacity-100 focus-visible:opacity-100'}`}
+        title={busy ? 'Forking…' : 'Fork from here'}
+        aria-label="Fork from here"
+        disabled={forking !== null && forking !== undefined}
+        onClick={() => onFork(uuid)}
+        data-find-skip
+        data-testid="chat-fork"
+      >
+        <GitFork size={13} />
+      </button>
+    </div>
   )
 })
 
@@ -483,7 +512,7 @@ const TurnBlock = memo(function TurnBlock({ turnKey, turn, compacting, waiting, 
             onStopTask={onStopTask}
           />
         : turn.work.length > 0 && <FoldedWork turnKey={turnKey} turn={turn} />}
-      {turn.answer.map((item) => <AssistantText key={item.id} id={item.id} text={item.text} streaming={item.streaming} />)}
+      {turn.answer.map((item) => <AssistantText key={item.id} id={item.id} text={item.text} streaming={item.streaming} uuid={item.uuid} />)}
       {turn.tail.map((item) => <Notice key={item.id} id={item.id} text={item.text} tone={item.tone} />)}
     </>
   )

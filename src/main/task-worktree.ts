@@ -39,7 +39,7 @@ import type { WorktreeSetupResult } from './worktree-setup'
 export type TaskWorktreeGit = Pick<
   WorkspaceManager,
   'listBranches' | 'create' | 'restore' | 'runSetup' | 'approveSetup' | 'delete' | 'repoRoot' | 'currentBranch' |
-  'setupOffer' | 'addSuggestedSetup' | 'declineSetupOffer'
+  'setupOffer' | 'addSuggestedSetup' | 'declineSetupOffer' | 'headCommit' | 'copyUncommitted'
 >
 
 export interface TaskWorktreeDeps {
@@ -105,8 +105,25 @@ export class TaskWorktreeManager {
   private readonly states = new Map<string, TaskWorktreeState>()
   private readonly held = new Map<string, HeldSetup>()
   private readonly publishTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Forks still to get their worktree: the folder whose commit and uncommitted work they start from. */
+  private readonly forkSources = new Map<string, string>()
 
   constructor(private readonly deps: TaskWorktreeDeps) {}
+
+  /**
+   * `taskId` is a fork of the task working in `sourceDir`: its worktree, when
+   * made, starts on that folder's commit with its uncommitted changes, not on
+   * the stream's tip. Set before the task is committed, so nothing makes the
+   * worktree the usual way first.
+   */
+  forkFrom(taskId: string, sourceDir: string): void {
+    this.forkSources.set(taskId, sourceDir)
+  }
+
+  /** The fork's worktree is made, or it never needed one. */
+  forgetFork(taskId: string): void {
+    this.forkSources.delete(taskId)
+  }
 
   /** A worktree is being made or set up for the task right now. */
   isBusy(taskId: string): boolean {
@@ -316,10 +333,18 @@ export class TaskWorktreeManager {
       const name = options.name?.trim() || (this.find(projectId, taskId)?.task.name ?? task.name)
       const branch = taskBranchName(base.branchName, name, branches)
       this.setState(taskId, { phase: 'creating', branch })
-      created = await this.deps.git.create(project.directory, branch, base.branchName, {
+      const forkSource = this.forkSources.get(taskId)
+      const startPoint = forkSource ? await this.deps.git.headCommit(forkSource) : base.branchName
+      created = await this.deps.git.create(project.directory, branch, startPoint, {
         setupSource: base.worktreePath,
         onSetupOutput: (text) => this.appendLog(taskId, text)
       })
+      if (forkSource) {
+        this.forkSources.delete(taskId)
+        const missed = await this.deps.git.copyUncommitted(forkSource, created.worktreePath).catch((err: unknown) => [errorMessage(err)])
+        this.deps.log?.(`task worktree task=${taskId} fork from=${forkSource} at=${startPoint}${missed.length ? ` missed=${missed.length}` : ''}`)
+        if (missed.length) this.appendLog(taskId, `Couldn't copy some uncommitted changes into the fork: ${missed.slice(0, 10).join(', ')}\n`)
+      }
     } catch (err) {
       const error = errorMessage(err)
       this.deps.log?.(`task worktree task=${taskId} error=${error}`)

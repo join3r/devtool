@@ -242,7 +242,8 @@ struct ChatScreen: View {
                         loadEarlierButton(proxy)
                     }
                     ForEach(model.view?.items ?? []) { item in
-                        ChatItemRow(item: item, images: imageActions, userImages: userImageActions) { detailItem = $0 }
+                        ChatItemRow(item: item, images: imageActions, userImages: userImageActions,
+                                    onFork: supportsFork ? { forked in Task { await model.fork(forked.id) } } : nil) { detailItem = $0 }
                             .background { findMark(item.id) }
                             .id(item.id)
                     }
@@ -501,6 +502,11 @@ struct ChatScreen: View {
     /// The desktop sends the chat's tasks (§8.20).
     private var supportsTasks: Bool {
         app.supports(DesktopFeature.chatTasks, on: route.desktopId)
+    }
+
+    /// The desktop forks a chat at a reply (§8.27). Not while only a saved copy shows.
+    private var supportsFork: Bool {
+        app.supports(DesktopFeature.chatFork, on: route.desktopId) && !readOnly
     }
 
     /// The desktop runs `!command`s (§8.17).

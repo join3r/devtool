@@ -455,6 +455,15 @@ public actor MockDesktopConnection: DesktopConnection {
             guard chats[parsed.tabId] != nil else { throw notFound() }
             startBash(tabId: parsed.tabId, command: parsed.command)
             return .object([:])
+        case ChatOp.fork:
+            let parsed: ChatForkParams
+            do {
+                parsed = try ChatForkParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard let chat = chats[parsed.tabId], chat.items.contains(where: { $0.id == parsed.itemId && $0.forkable }) else { throw notFound() }
+            return ChatForkResult(taskId: "fork-\(parsed.itemId)", name: "Fix the login bug (fork)").json
         case ChatOp.search:
             let parsed: ChatSearchParams
             do {
@@ -1333,7 +1342,7 @@ public actor MockDesktopConnection: DesktopConnection {
         chats[tabId] = chat
         var upserts: [ChatItem] = chat.items.compactMap { item in
             switch item.content {
-            case .text(let markdown, true): ChatItem(id: item.id, .text(markdown: markdown, streaming: false))
+            case .text(let markdown, true): ChatItem(id: item.id, .text(markdown: markdown, streaming: false), forkable: true)
             case .thinking(let preview, true): ChatItem(id: item.id, .thinking(preview: preview, streaming: false))
             case .tool(let tool) where tool.status.isActive:
                 ChatItem(id: item.id, .tool(ChatTool(name: tool.name, summary: tool.summary, status: .denied, hasDetail: tool.hasDetail,
@@ -1380,6 +1389,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
             DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules, DesktopFeature.taskChildren,
+            DesktopFeature.chatFork,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

@@ -639,6 +639,7 @@ var CHAT_BTW_OP = "chat.btw";
 var CHAT_PERMISSIONS_OP = "chat.permissions";
 var CHAT_PERMISSIONS_UPDATE_OP = "chat.permissions.update";
 var CHAT_BASH_OP = "chat.bash";
+var CHAT_FORK_OP = "chat.fork";
 var CHAT_SEARCH_OP = "chat.search";
 var CHAT_QUEUE_OP = "chat.queue";
 var CHAT_TASK_STOP_OP = "chat.task.stop";
@@ -677,6 +678,7 @@ var AppOp = {
   ChatCommands: CHAT_COMMANDS_OP,
   ChatBtw: CHAT_BTW_OP,
   ChatBash: CHAT_BASH_OP,
+  ChatFork: CHAT_FORK_OP,
   ChatSearch: CHAT_SEARCH_OP,
   ChatQueue: CHAT_QUEUE_OP,
   ChatTaskStop: CHAT_TASK_STOP_OP,

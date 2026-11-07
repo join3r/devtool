@@ -135,10 +135,13 @@ public struct ChatItem: Sendable, Equatable, Identifiable {
 
     public var id: String
     public var content: Content
+    /// A finished agent reply `chat.fork` can start a fork after (§8.27); only on `text`.
+    public var forkable: Bool
 
-    public init(id: String, _ content: Content) {
+    public init(id: String, _ content: Content, forkable: Bool = false) {
         self.id = id
         self.content = content
+        self.forkable = forkable
     }
 
     public var kind: String {
@@ -927,6 +930,8 @@ public enum ChatOp {
     public static let permissionsUpdate = "chat.permissions.update"
     /// `!command` (§8.17); parsed by `ChatBashParams`, not `ChatParams`.
     public static let bash = "chat.bash"
+    /// Fork the chat at an agent reply (§8.27); parsed by `ChatForkParams`, not `ChatParams`.
+    public static let fork = "chat.fork"
     /// Find in the thread (§8.23); parsed by `ChatSearchParams`, not `ChatParams`.
     public static let search = "chat.search"
     /// §8.20, behind `DesktopFeature.chatTasks`.
@@ -1099,7 +1104,7 @@ extension ChatItem {
                 failed: f.flag("failed")
             ))
         case "text":
-            return ChatItem(id: id, .text(markdown: try f.str("markdown"), streaming: f.flag("streaming")))
+            return ChatItem(id: id, .text(markdown: try f.str("markdown"), streaming: f.flag("streaming")), forkable: f.flag("forkable"))
         case "thinking":
             return ChatItem(id: id, .thinking(preview: try f.str("preview"), streaming: f.flag("streaming")))
         case "tool":
@@ -1135,6 +1140,7 @@ extension ChatItem {
         case .text(let markdown, let streaming):
             o["markdown"] = .string(markdown)
             if streaming { o["streaming"] = true }
+            if forkable { o["forkable"] = true }
         case .thinking(let preview, let streaming):
             o["preview"] = .string(preview)
             if streaming { o["streaming"] = true }

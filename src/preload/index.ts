@@ -34,6 +34,7 @@ import type {
   TaskLandingPreview,
   StreamMergeFixResult,
   StreamMergeResult,
+  TaskForkResult,
   TaskLandingResult,
   TaskWorktreeResult,
   TaskWorktreeState,
@@ -593,6 +594,9 @@ const api = {
   scheduleRun: (projectId: string, scheduleId: string): Promise<ScheduleRunResult> =>
     ipcRenderer.invoke('schedule-run', projectId, scheduleId),
 
+  /** Fork the task's Claude chat `tabId` after its agent's message `messageUuid` (`main/task-fork.ts`). */
+  taskFork: (projectId: string, taskId: string, tabId: string, messageUuid: string): Promise<TaskForkResult> =>
+    ipcRenderer.invoke('task-fork', projectId, taskId, tabId, messageUuid),
   taskLand: (projectId: string, taskId: string, options?: { keepWorktree?: boolean }): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-land', projectId, taskId, options),
   taskLandingRetry: (projectId: string, taskId: string): Promise<TaskLandingResult> =>

@@ -278,6 +278,11 @@ export interface Task {
    * MCP `submit_score`, and main closes it once it has.
    */
   judgeOf?: TaskJudgeOf
+  /**
+   * Forked from another task's chat at one of its agent's messages (`main/task-fork.ts`):
+   * that task as it was named then, and the start of the message the conversation stops after.
+   */
+  forkedFrom?: TaskForkedFrom
   /** A run of one of the project's schedules (`shared/schedules.ts`): that schedule, as it was named then. */
   scheduledFrom?: { scheduleId: string; name: string }
   /**
@@ -540,6 +545,24 @@ export type TaskWorktreeResult =
   | { status: 'failed'; error: string }
 
 /** Hints from the asking window, whose latest save may not have reached main yet. */
+export interface TaskForkedFrom {
+  taskId: string
+  name: string
+  /** The first line of the agent message the fork starts after, shortened. */
+  excerpt: string
+}
+
+/** What a fork (`task-fork` IPC, the phone's `chat.fork`) came to. */
+export type TaskForkResult =
+  | {
+    ok: true
+    taskId: string
+    name: string
+    /** No worktree of its own (the folder isn't a git repository, or the stream has none): both agents edit the same files. */
+    sharesFolder: boolean
+  }
+  | { ok: false; error: string }
+
 export interface EnsureTaskWorktreeOptions {
   /** The task's name as the asking window has it (a rename may not be saved yet). */
   name?: string

@@ -43,7 +43,7 @@ export interface SharedLink {
 export interface AgentContextInput {
   project: Pick<Project, 'name' | 'directory'>
   stream: Pick<Stream, 'name' | 'isMain' | 'workspace'>
-  task: Pick<Task, 'name' | 'workspace' | 'scheduledFrom' | 'judgeOf'>
+  task: Pick<Task, 'name' | 'workspace' | 'scheduledFrom' | 'judgeOf' | 'forkedFrom'>
   /** The folder the agent runs in. */
   dir: string
   hook?: AgentContextHook
@@ -132,7 +132,16 @@ export function buildAgentContext(input: AgentContextInput): string {
   if (input.mcp) lines.push(...mcpLines(!!own))
   if (input.autopilot) lines.push(...autopilotLines(input.autopilot.review, !!input.autopilot.loop))
   if (task.scheduledFrom) lines.push(...scheduledRunLines(task.scheduledFrom.name, !!input.mcp))
+  if (task.forkedFrom) lines.push(forkLine(task.forkedFrom.name, !!own))
   return lines.join('\n')
+}
+
+/** A fork's conversation stops at one message, but its files are the original task's as they were when it was forked. */
+function forkLine(from: string, ownWorktree: boolean): string {
+  return `- This task is a fork of the task "${from}": the user copied that conversation up to one of your earlier replies to try another direction from there. ` +
+    (ownWorktree
+      ? 'This worktree started from that task\'s files as they were at the moment of the fork, uncommitted changes included, so they may contain edits made later in the original conversation that you do not remember. Check the files before relying on what you remember of them.'
+      : 'You share the original task\'s folder, so its files may contain edits made later in the original conversation, and its agent may still be changing them. Check the files before relying on what you remember of them.')
 }
 
 /** What DevTool's MCP tools are for, and what a task they start does with its work. */

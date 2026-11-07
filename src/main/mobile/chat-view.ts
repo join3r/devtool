@@ -43,6 +43,8 @@ export function mapItem(item: ChatItem): ChatViewItem {
     case 'text': {
       const out: ChatViewItem = { kind: 'text', id: item.id, markdown: capText(item.text, ChatLimits.text).text }
       if (item.streaming) out.streaming = true
+      // A finished Claude reply from the transcript: where `chat.fork` can cut (§8.27).
+      else if (item.uuid) out.forkable = true
       return out
     }
     case 'thinking': {

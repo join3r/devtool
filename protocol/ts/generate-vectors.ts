@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseChatForkParams, parseChatForkResult, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -527,7 +527,7 @@ function chatMessages(): unknown {
     { kind: 'user', id: 'u2', text: 'And a screenshot', images: 1, queued: true },
     { kind: 'user', id: 'u3', text: 'lost', failed: true },
     { kind: 'thinking', id: 'i3-0', preview: 'Let me look at the test runner first…' },
-    { kind: 'text', id: 'i4-0', markdown: 'Running **the tests** now.' },
+    { kind: 'text', id: 'i4-0', markdown: 'Running **the tests** now.', forkable: true },
     tool,
     { kind: 'tool', id: 'toolu_02', name: 'Agent', summary: 'Explore · find auth code', status: 'running', hasDetail: true, childCount: 3, lastChild: 'Grep · verifyToken' },
     { kind: 'notice', id: 'n9-0', text: 'Interrupted', tone: 'muted' },
@@ -1223,6 +1223,27 @@ function chatMessages(): unknown {
           text({ tabId: 'tab-chat', command: 'x'.repeat(32001) }),
           'null'
         ]
+      }
+    },
+    // §8.27: fork a chat at one of its agent's messages.
+    fork: {
+      params: [
+        text({ tabId: 'tab-chat', itemId: 'i4-0' }),
+        text({ tabId: 'tab-chat', itemId: 'i4-0', extra: true })
+      ].map((json) => ({ json, expected: parseChatForkParams(JSON.parse(json)) })),
+      results: [
+        text({ taskId: 'task-9', name: 'Fix PIN (fork)' }),
+        text({ taskId: 'task-9', name: 'Fix PIN (fork 2)', sharesFolder: true }),
+        text({ taskId: 'task-9', name: 'Fix PIN (fork)', sharesFolder: false, extra: 1 })
+      ].map((json) => ({ json, expected: parseChatForkResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ itemId: 'i4-0' }),
+          text({ tabId: 'tab-chat' }),
+          text({ tabId: 'tab-chat', itemId: '' }),
+          'null'
+        ],
+        results: [text({ name: 'x' }), text({ taskId: 'task-9' }), 'null']
       }
     },
     // §8.23: find in a chat thread.

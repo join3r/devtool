@@ -339,7 +339,7 @@ ChatViewUsage = {                      // each part once the desktop has read it
 }
 ChatViewItem =
   | { kind: 'user', id, text, images?: number, queued?: true, failed?: true }
-  | { kind: 'text', id, markdown, streaming?: true }
+  | { kind: 'text', id, markdown, streaming?: true, forkable?: true }
   | { kind: 'thinking', id, preview, streaming?: true }          // preview ≤ 300 chars
   | { kind: 'tool', id, name, summary, status: 'pending'|'running'|'waiting'|'done'|'error'|'denied',
       hasDetail: boolean, childCount?: number, lastChild?: string, images?: number }   // images: §8.9
@@ -900,6 +900,19 @@ An agent DevTool runs can start tasks of its own (DevTool's MCP `start_task`). S
 - A phone nests each task under its parent's row, and a parent with a task under it that needs the user moves to Needs you. Every row action works on a nested task as on any other.
 - `task.close` (§8.7) takes `children: "stop" | "keep"`: what happens to the open tasks it started (grandchildren included) once the close goes ahead. `stop` stops and closes them without landing (a task with a worktree of its own keeps its branch, its work committed); `keep`, or absent, leaves them running as top-level tasks. A phone asks the user when the task's `children.working` > 0. A bad value is `bad-request`.
 - A desktop that implements this lists `"task.children"` in its features (§8.1). An older phone ignores the fields and shows every task as a row of its own.
+
+### 8.27 `chat.fork` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `chat.fork` | `{ tabId, itemId }` | `{ taskId, name, sharesFolder? }` |
+
+Fork a chat at one of its agent's messages, as the Fork button on a desktop chat message does: the desktop adds a sibling task in the same stream, named after the task with ` (fork)` (` (fork 2)`, … for later forks), whose Claude conversation is the chat's up to and including the `text` item `itemId`. Its worktree starts from the task's files as they are now, uncommitted changes included; when the task can't have a worktree of its own (a folder that isn't a git repository, an older worktree stream) the fork works in the same folder and the result says `sharesFolder: true`. The fork is idle: nothing is sent, and it shows in the inbox like any other task. The phone stays where it is.
+
+- Only `text` items that carry `forkable: true` can be forked: finished replies of a Claude chat that are in its transcript. A streaming item never has it.
+- The fork gets the chat's permission mode, a model picked in it, and its effort.
+- A desktop that implements this op lists `"chat.fork"` in its features (§8.1) and marks `forkable` items. A phone against a desktop without it offers no Fork.
+- Errors: unknown tab, or an item that isn't a forkable `text` item → `not-found`. Missing or malformed params → `bad-request`. A fork the desktop can't make (a project on another machine, a worktree git refused) → `internal`, with the reason as the message.
 
 ## 9. Version 2: streams
 

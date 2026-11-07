@@ -45,6 +45,9 @@ import {
   parseTaskNewParams,
   parseTaskCloseParams,
   parseTaskLandParams,
+  parseChatForkParams,
+  type ChatForkParams,
+  type ChatForkResult,
   type TaskLandParams,
   type TaskLandResult,
   parseTabCloseParams,
@@ -251,6 +254,8 @@ export interface MobileServiceDeps {
   closeTask?(params: TaskCloseParams, phone: { version: number }): Promise<{ ok: true; result: TaskCloseResult } | { ok: false; code: string; message: string }>
   /** `task.land` (SPEC.md §8.15). Without it the op answers `unsupported`. */
   landTask?(params: TaskLandParams): Promise<{ ok: true; result: TaskLandResult } | { ok: false; code: string; message: string }>
+  /** `chat.fork` (SPEC.md §8.27). Without it the op answers `unsupported`. */
+  forkChat?(params: ChatForkParams): Promise<{ ok: true; result: ChatForkResult } | { ok: false; code: string; message: string }>
   /** `tab.close` (SPEC.md §8.8). Without it the op answers `unsupported`. */
   closeTab?(tabId: string): Promise<{ ok: true } | { ok: false; code: string; message: string }>
   /** `pin.set` (SPEC.md §8.10). Without it the op answers `unsupported`. */
@@ -977,6 +982,14 @@ export class MobileService {
       this.answerLater(session, id, message.op, () => parseTaskLandParams(message.params), async (params) => {
         const outcome = await landTask(params)
         return outcome.ok ? { ok: true, result: outcome.result, log: `task=${params.taskId} action=${params.action} status=${outcome.result.status}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.ChatFork && this.deps.forkChat) {
+      const forkChat = this.deps.forkChat
+      this.answerLater(session, id, message.op, () => parseChatForkParams(message.params), async (params) => {
+        const outcome = await forkChat(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `tab=${params.tabId} fork=${outcome.result.taskId}` } : outcome
       })
       return
     }

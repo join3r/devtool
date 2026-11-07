@@ -1,5 +1,6 @@
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import type { WorkspaceDeleteResult, WorkspaceRestoreResult } from '../shared/types'
 import { GitError, gitOutput, LocalGitRunner, type GitRunner } from './git-runner'
 import { addWorktreeConfig, gitCommonDir, runWorktreeSetup, suggestWorktreeConfig, type WorktreeSetupResult } from './worktree-setup'
@@ -88,6 +89,46 @@ export class WorkspaceManager {
     const branch = result.code === 0 ? result.stdout.trim() : ''
     if (!branch) throw new Error('The project folder is not on a branch')
     return branch
+  }
+
+  /** The commit `dir`'s checkout is on (a fork's worktree starts there). */
+  async headCommit(dir: string): Promise<string> {
+    return (await this.git(dir, ['rev-parse', '--verify', 'HEAD^{commit}'])).trim()
+  }
+
+  /**
+   * What `fromDir`'s checkout has not committed, into the checkout at `toDir`
+   * (on the same commit): tracked changes as a binary patch, untracked files
+   * copied. A file already in `toDir` (worktree setup put it there) stays.
+   * Returns the paths it could not carry.
+   */
+  async copyUncommitted(fromDir: string, toDir: string): Promise<string[]> {
+    const fromRoot = await this.getRepoRoot(fromDir)
+    const toRoot = await this.getRepoRoot(toDir)
+    const failed: string[] = []
+    const patch = await this.git(fromRoot, ['diff', '--binary', 'HEAD'], 30_000)
+    if (patch.trim()) {
+      const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-fork-')), 'changes.patch')
+      try {
+        fs.writeFileSync(file, patch)
+        const applied = await this.runner.run(['apply', '--binary', '--whitespace=nowarn', file], { cwd: toRoot, timeoutMs: 30_000 })
+        if (applied.code !== 0) failed.push(...patch.split('\n').filter(line => line.startsWith('diff --git ')).map(line => line.replace(/^diff --git a\/(.*?) b\/.*$/, '$1')))
+      } finally {
+        fs.rmSync(path.dirname(file), { recursive: true, force: true })
+      }
+    }
+    const untracked = await this.git(fromRoot, ['ls-files', '--others', '--exclude-standard', '-z'], 30_000)
+    for (const rel of untracked.split('\0').filter(Boolean)) {
+      const target = path.join(toRoot, rel)
+      if (fs.existsSync(target)) continue
+      try {
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.cpSync(path.join(fromRoot, rel), target, { recursive: true, verbatimSymlinks: true })
+      } catch {
+        failed.push(rel)
+      }
+    }
+    return failed
   }
 
   async listBranches(projectDir: string): Promise<string[]> {

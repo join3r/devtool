@@ -441,6 +441,23 @@ export const CHAT_BASH_FEATURE = 'chat.bash'
 export interface ChatBashParams { tabId: string; command: string }
 
 /**
+ * Fork a chat at one of its agent's messages (SPEC.md §8.27): the desktop makes
+ * a sibling task, idle, whose conversation stops after that message and whose
+ * worktree starts from the task's files as they are now. The phone stays where it is.
+ */
+export const CHAT_FORK_OP = 'chat.fork'
+/** The handshake feature (§8.1) a desktop lists when it answers `chat.fork` and marks `forkable` text items. */
+export const CHAT_FORK_FEATURE = 'chat.fork'
+
+export interface ChatForkParams { tabId: string; itemId: string }
+export interface ChatForkResult {
+  taskId: string
+  name: string
+  /** The fork has no worktree of its own: both agents edit the same folder. */
+  sharesFolder?: true
+}
+
+/**
  * Find in a chat thread (SPEC.md §8.23): the desktop searches every item of the
  * chat, not only the phone's window, and says which items match and how often.
  */
@@ -590,7 +607,8 @@ export type ChatViewTone = 'muted' | 'warning' | 'error'
 export type ChatViewProcess = 'idle' | 'starting' | 'running' | 'exited'
 
 export interface ChatViewUserItem { kind: 'user'; id: string; text: string; images?: number; queued?: true; failed?: true }
-export interface ChatViewTextItem { kind: 'text'; id: string; markdown: string; streaming?: true }
+/** `forkable`: `chat.fork` can start a fork after this message (§8.27). */
+export interface ChatViewTextItem { kind: 'text'; id: string; markdown: string; streaming?: true; forkable?: true }
 export interface ChatViewThinkingItem { kind: 'thinking'; id: string; preview: string; streaming?: true }
 export interface ChatViewToolItem {
   kind: 'tool'
@@ -892,6 +910,7 @@ export function parseChatViewItem(value: unknown): ChatViewItem {
     case 'text': {
       const item: ChatViewTextItem = { kind, id, markdown: str(o, 'markdown') }
       if (flag(o, 'streaming')) item.streaming = true
+      if (flag(o, 'forkable')) item.forkable = true
       return item
     }
     case 'thinking': {
@@ -1503,6 +1522,23 @@ export function parseChatBashParams(params: unknown): ChatBashParams {
   if (command.length > ChatLimits.bashCommand) fail(`command over ${ChatLimits.bashCommand} characters`)
   if (!command.trim()) fail('command is empty')
   return { tabId, command }
+}
+
+/** `chat.fork` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `tabId` or `itemId`. */
+export function parseChatForkParams(params: unknown): ChatForkParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const itemId = str(o, 'itemId')
+  if (!tabId || !itemId) fail('tabId and itemId must not be empty')
+  return { tabId, itemId }
+}
+
+/** `chat.fork` result (the phone's side). */
+export function parseChatForkResult(value: unknown): ChatForkResult {
+  const o = obj(value, 'result')
+  const result: ChatForkResult = { taskId: str(o, 'taskId'), name: str(o, 'name') }
+  if (flag(o, 'sharesFolder')) result.sharesFolder = true
+  return result
 }
 
 /**

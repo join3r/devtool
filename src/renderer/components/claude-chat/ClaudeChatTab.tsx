@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { confirmAction } from '../../confirmAction'
-import { ArrowDown, FolderOpen } from 'lucide-react'
+import { ArrowDown, FolderOpen, GitFork } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { AiTabType, SshConfig } from '../../../shared/types'
@@ -33,6 +33,7 @@ import { handleCodeCopyClick, handleCodeRunClick } from './markdown'
 import ServerOfflineOverlay, { useServerOnline } from '../ServerOfflineOverlay'
 import AgentCliMissing from '../AgentCliMissing'
 import { useAgentCliGate } from '../../agentClis'
+import { showToast } from '../../toasts'
 
 interface Props {
   /** The agent the chat runs; Claude when absent. */
@@ -64,7 +65,7 @@ interface Props {
  */
 export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
   const features = chatAgentFeatures(agent)
-  const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab, leaveAfterSend, projects, setActiveTab } = useApp()
+  const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab, leaveAfterSend, projects, setActiveTab, switchToTask } = useApp()
   const statusStore = useTabStatusStore()
   const state = useChatState(tabId)
   const attachedRef = useRef(false)
@@ -387,6 +388,27 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
     if (artifacts.some((a) => a.url === url)) openArtifact(url)
     else openLink(url)
   }, [artifacts, openArtifact, openLink])
+  // Fork: a sibling task with the conversation up to that message; you stay here.
+  const [forking, setForking] = useState<string | null>(null)
+  const canFork = agent === 'claude' && !sshConfig
+  const forkAt = useCallback((uuid: string) => {
+    setForking(uuid)
+    window.api.taskFork(projectId, taskId, tabId, uuid)
+      .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }))
+      .then((result) => {
+        if (!result.ok) {
+          showToast(`Couldn't fork: ${result.error}`)
+          return
+        }
+        const open = { label: 'Open', run: () => switchToTask(projectId, result.taskId) }
+        showToast(result.sharesFolder
+          ? `Forked to “${result.name}”. It shares this folder, so both agents edit the same files`
+          : `Forked to “${result.name}”`, { action: open })
+      })
+      .finally(() => setForking(null))
+  }, [projectId, taskId, tabId, switchToTask])
+  const forkedFrom = useMemo(() => findTaskInProject(projects.find((p) => p.id === projectId), taskId)?.forkedFrom, [projects, projectId, taskId])
+  const forkParentOpen = useMemo(() => !!forkedFrom && !!findTaskInProject(projects.find((p) => p.id === projectId), forkedFrom.taskId), [projects, projectId, forkedFrom])
   const openExternal = useCallback((url: string) => {
     void window.api.openExternal(url).catch(reportError)
   }, [reportError])
@@ -442,6 +464,19 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
                 })()}
               </div>
             ) : (
+              <>
+              {forkedFrom && (
+                <div className="mb-3 flex items-center gap-1.5 min-w-0 text-xs text-text-subtle" data-find-skip data-testid="chat-forked-from">
+                  <GitFork size={12} className="shrink-0" aria-hidden="true" />
+                  <span className="truncate">
+                    Forked from{' '}
+                    {forkParentOpen
+                      ? <button type="button" className="p-0 border-0 bg-transparent text-xs text-text-muted underline decoration-dotted underline-offset-2 cursor-pointer hover:text-text" onClick={() => switchToTask(projectId, forkedFrom.taskId)}>“{forkedFrom.name}”</button>
+                      : <>“{forkedFrom.name}”</>}
+                    {forkedFrom.excerpt && <> at: “{forkedFrom.excerpt}”</>}
+                  </span>
+                </div>
+              )}
               <Timeline
                 items={state.items}
                 busy={state.busy}
@@ -455,7 +490,10 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
                 backgroundTasks={backgroundTasks}
                 onStopTask={stopTask}
                 reveal={find.reveal}
+                onFork={canFork ? forkAt : undefined}
+                forking={forking}
               />
+              </>
             )}
           </div>
         </div>

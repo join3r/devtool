@@ -10,9 +10,29 @@ struct LinkText: UIViewRepresentable {
     /// Longest line width; set for content in a horizontal scroll view (table cells).
     var maxWidth: CGFloat = .infinity
     var linkColor: UIColor? = nil
+    /// Extra entries for the long-press menu, after the system's (Copy, Look Up, …).
+    @Environment(\.linkTextMenuActions) private var menuActions
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var actions: [LinkTextMenuAction] = []
+
+        func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
+            guard !actions.isEmpty else { return nil }
+            let extra = actions.map { action in
+                UIAction(title: action.title, image: UIImage(systemName: action.systemImage)) { _ in
+                    textView.selectedTextRange = nil
+                    action.run()
+                }
+            }
+            return UIMenu(children: suggestedActions + [UIMenu(options: .displayInline, children: extra)])
+        }
+    }
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
+        view.delegate = context.coordinator
         view.isEditable = false
         view.isSelectable = true
         view.isScrollEnabled = false
@@ -27,6 +47,7 @@ struct LinkText: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.actions = menuActions
         if !view.attributedText.isEqual(to: text) {
             view.attributedText = text
         }
@@ -50,6 +71,17 @@ struct LinkText: UIViewRepresentable {
         let width = limit.isFinite && proposal.width != nil ? limit : ceil(rect.width)
         return CGSize(width: width, height: ceil(rect.height))
     }
+}
+
+/// One extra entry in a `LinkText`'s long-press menu (a chat reply's Fork from here).
+struct LinkTextMenuAction {
+    let title: String
+    let systemImage: String
+    let run: () -> Void
+}
+
+extension EnvironmentValues {
+    @Entry var linkTextMenuActions: [LinkTextMenuAction] = []
 }
 
 extension LinkText {

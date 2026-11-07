@@ -239,6 +239,8 @@ public enum DesktopFeature {
     public static let schedules = "schedules"
     /// The desktop answers `chat.bash` (§8.17).
     public static let chatBash = "chat.bash"
+    /// The desktop answers `chat.fork` and marks `forkable` text items (§8.27).
+    public static let chatFork = "chat.fork"
     /// The desktop answers `chat.search` (§8.23).
     public static let chatSearch = "chat.search"
     /// The desktop's `chat.send` takes `mode`, its chats carry `queue`, and it

@@ -24,6 +24,9 @@ import { RemoteWorkspaceManager } from '../remote-workspace-manager'
 import { WorkspaceManager } from '../workspace-manager'
 import { AutoSetupApprovals, FileSetupApprovals } from '../worktree-setup-approvals'
 import { TaskWorktreeManager } from '../task-worktree'
+import { deleteForkedSession, forkClaudeSession, forkExcerpt, forkTaskName, moveForkedSession } from '../task-fork'
+import { registerTaskForkHandlers } from '../ipc/task-fork'
+import { patchTabInTask } from '../../shared/panes'
 import { recordSetupArtifacts, TaskLandingManager } from '../task-landing'
 import { mergeStream } from '../stream-merge'
 import { startStreamMergeFix } from '../stream-merge-fix'
@@ -72,7 +75,7 @@ import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
 import { registerHostSshHandlers } from '../ipc/host-ssh'
 import { detectAgentClis } from '../agent-clis'
-import { chatTabAgent, isChatTabType, isRemoteProject, isShellCommandProject, type AiTabType } from '../../shared/types'
+import { chatTabAgent, isChatTabType, isRemoteProject, isShellCommandProject, type AiTabType, type TaskForkResult } from '../../shared/types'
 import {
   archiveTasksInData, archivedTabIds, archivedTaskEntry, doneRetentionCutoff, pruneArchive, syncArchiveCounts, vanishedProjectIds, withArchivedTasks,
   type ProjectArchive
@@ -144,6 +147,7 @@ import {
   AppErrorCode,
   BRANCHES_LIST_FEATURE,
   CHAT_BASH_FEATURE,
+  CHAT_FORK_FEATURE,
   CHAT_SEARCH_FEATURE,
   CHAT_QUEUE_FEATURE,
   CHAT_TASKS_FEATURE,
@@ -734,7 +738,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE, CHAT_FORK_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -790,6 +794,16 @@ export class HostServices {
         closeChildren: (projectId, taskId, action) => this.closeChildTasks(projectId, taskId, action)
       }, params, phone),
       landTask: (params) => landTask({ peek: () => this.projectsStore.peek(), landing: this.taskLanding }, params),
+      forkChat: async ({ tabId, itemId }) => {
+        const owner = this.projectsStore.peek().projects.flatMap(p => p.streams.flatMap(st => st.tasks.map(t => ({ p, t }))))
+          .find(({ t }) => taskTabs(t).some(tab => tab.id === tabId))
+        if (!owner) return { ok: false, code: AppErrorCode.NotFound, message: 'No such chat.' }
+        const item = this.chatManager.snapshot(tabId)?.state.items.find(i => i.id === itemId)
+        if (!item || item.kind !== 'text' || !item.uuid) return { ok: false, code: AppErrorCode.NotFound, message: 'That message can\'t be forked from.' }
+        const forked = await this.forkTask(owner.p.id, owner.t.id, tabId, item.uuid)
+        if (!forked.ok) return { ok: false, code: AppErrorCode.Internal, message: forked.error }
+        return { ok: true, result: { taskId: forked.taskId, name: forked.name, ...(forked.sharesFolder ? { sharesFolder: true as const } : {}) } }
+      },
       closeTab: async (tabId) => {
         const found = findClosableTab(this.projectsStore.peek(), tabId)
         if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab. A task\'s own agent or terminal closes with the task.' }
@@ -1523,6 +1537,99 @@ export class HostServices {
   }
 
   /**
+   * Fork the Claude chat `tabId` of `taskId` after its agent's message
+   * `messageUuid` (`task-fork.ts`): a sibling task, idle, named "<task> (fork)",
+   * with the conversation up to that message, a worktree of its own starting
+   * from the task's files as they are now (shared folder when it can't have
+   * one), and the chat's model, mode and effort. The original is left alone.
+   */
+  async forkTask(projectId: string, taskId: string, tabId: string, messageUuid: string): Promise<TaskForkResult> {
+    const data = this.projectsStore.peek()
+    const project = data.projects.find(p => p.id === projectId)
+    const task = findTaskInProject(project, taskId)
+    const tab = task ? taskTabs(task).find(t => t.id === tabId) : undefined
+    if (!project || !task || !tab) return { ok: false, error: 'The task is gone.' }
+    if (tab.type !== 'claude-chat' || !tab.sessionId) return { ok: false, error: 'Only Claude chats can be forked.' }
+    if (project.ssh || project.host) return { ok: false, error: 'Forking works for projects on this machine only.' }
+    const blocked = this.chatTaskBlocker(project)
+    if (blocked) return { ok: false, error: blocked }
+    if (this.missingFolders.peek().has(project.id)) return { ok: false, error: 'That project\'s folder is gone.' }
+    const stream = findStreamOfTask(project, taskId)
+    if (!stream) return { ok: false, error: 'The task is gone.' }
+
+    const sourceDir = taskDirectory(project, task)
+    const source = this.chatManager.snapshot(tab.id)?.state
+    const message = source?.items.find(item => item.kind === 'text' && item.uuid === messageUuid)
+    const name = forkTaskName(task.name, project)
+    let sessionId: string
+    try {
+      sessionId = await forkClaudeSession(tab.sessionId, sourceDir, messageUuid, name)
+    } catch (err) {
+      return { ok: false, error: `Couldn't fork the conversation: ${err instanceof Error ? err.message : String(err)}` }
+    }
+
+    // Main tasks share the project folder unless they ask for a worktree; a fork always asks.
+    const ownWorktree = stream.isMain && !streamGivesTaskWorktrees(stream) && canHaveMainTaskWorktrees(project)
+    const now = Date.now()
+    const latest = this.projectsStore.peek()
+    const latestProject = latest.projects.find(p => p.id === projectId)
+    if (!latestProject) {
+      deleteForkedSession(sessionId)
+      return { ok: false, error: 'The project is gone.' }
+    }
+    const added = addChatTaskToProject(latest, latestProject, name, stream.id, undefined, now, ownWorktree ? { ownWorktree: true } : undefined, 'claude')
+    this.taskWorktrees.forkFrom(added.taskId, sourceDir)
+    this.commitProjects({
+      ...added.data,
+      projects: added.data.projects.map(p => p.id !== projectId ? p : mapTaskInProject(p, added.taskId, t => ({
+        ...patchTabInTask(t, added.tabId, { sessionId }),
+        name,
+        forkedFrom: { taskId: task.id, name: task.name, excerpt: message?.kind === 'text' ? forkExcerpt(message.text) : '' }
+      })))
+    })
+
+    const worktree = await this.taskWorktrees.ensureTaskWorktree(projectId, added.taskId)
+    this.taskWorktrees.forgetFork(added.taskId)
+    const removeFork = (): void => {
+      const after = this.projectsStore.peek()
+      this.commitProjects({ ...after, projects: after.projects.map(p => (p.id === projectId ? removeTaskFromProject(p, added.taskId) : p)) })
+      deleteForkedSession(sessionId)
+    }
+    if (worktree.status === 'failed') {
+      removeFork()
+      return { ok: false, error: `Couldn't create the fork's worktree: ${worktree.error}` }
+    }
+    const nowProject = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    const forked = findTaskInProject(nowProject, added.taskId)
+    if (!nowProject || !forked) {
+      deleteForkedSession(sessionId)
+      return { ok: false, error: 'The fork was closed while it was being made.' }
+    }
+    const targetDir = taskDirectory(nowProject, forked)
+    try {
+      moveForkedSession(sessionId, sourceDir, targetDir)
+    } catch (err) {
+      removeFork()
+      return { ok: false, error: `Couldn't fork the conversation: ${err instanceof Error ? err.message : String(err)}` }
+    }
+
+    // The original chat's settings, on the fork's runtime (kept until its tab closes).
+    const info = source?.info
+    try {
+      const { stop } = await this.chatManager.listen(added.tabId, chatTabConfig(nowProject, forked, sessionId, 'claude'), () => {})
+      stop()
+      if (info?.permissionMode) await this.chatManager.setPermissionMode(added.tabId, info.permissionMode)
+      if (info?.modelPicked && info.model) await this.chatManager.setModel(added.tabId, info.model)
+      if (info?.effort) await this.chatManager.setEffort(added.tabId, info.effort)
+    } catch (err) {
+      this.logDebug(`forkTask settings tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
+    }
+    const sharesFolder = !forked.workspace
+    this.logDebug(`forkTask project=${projectId} from=${taskId} task=${added.taskId} at=${messageUuid} worktree=${forked.workspace?.branchName ?? 'shared'}`)
+    return { ok: true, taskId: added.taskId, name, sharesFolder }
+  }
+
+  /**
    * A judge of an Autopilot loop (`autopilot-loop.ts`): a chat task under the
    * loop's task, working in its folder. Nobody is there to answer its
    * questions, so it works without asking, but never with more rights than the
@@ -2055,6 +2162,7 @@ export class HostServices {
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerHostMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
+    registerTaskForkHandlers(ipc, { forkTask: (projectId, taskId, tabId, messageUuid) => this.forkTask(projectId, taskId, tabId, messageUuid) })
     registerTaskLandingHandlers(ipc, {
       taskLanding: this.taskLanding,
       closeChildTasks: (projectId, taskId, action) => this.closeChildTasks(projectId, taskId, action),

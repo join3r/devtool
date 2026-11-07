@@ -42,7 +42,8 @@ export interface ChatToolItem {
 export type ChatItem =
   /** `images` counts what was attached; `pictures` holds the ones we can draw (up to USER_IMAGE_LIMIT). */
   | { kind: 'user'; id: string; text: string; images: number; pictures?: ChatImage[]; queued?: boolean; failed?: boolean; at?: number }
-  | { kind: 'text'; id: string; text: string; streaming?: boolean; at?: number }
+  /** `uuid`: the transcript entry it came from (Claude), where a fork can cut the conversation. */
+  | { kind: 'text'; id: string; text: string; streaming?: boolean; at?: number; uuid?: string }
   | { kind: 'thinking'; id: string; text: string; streaming?: boolean; at?: number }
   | ChatToolItem
   | { kind: 'notice'; id: string; text: string; tone: 'muted' | 'warning' | 'error'; at?: number }
@@ -627,7 +628,7 @@ function toolItem(block: Json, status: ChatToolStatus): ChatToolItem {
   }
 }
 
-function applyAssistantBlocks(draft: Draft, message: Json, parentToolUseId: string | null): void {
+function applyAssistantBlocks(draft: Draft, message: Json, parentToolUseId: string | null, uuid?: string): void {
   const content = Array.isArray(message.content) ? message.content : []
   const messageId = str(message.id) ?? ''
 
@@ -674,14 +675,14 @@ function applyAssistantBlocks(draft: Draft, message: Json, parentToolUseId: stri
       if (openKey !== undefined) {
         const index = draft.openBlocks[openKey]
         delete draft.blocksMut()[openKey]
-        draft.update(index, (item) => (item.kind === 'text' || item.kind === 'thinking')
-          ? { ...item, text: text || item.text, streaming: false }
-          : item)
+        draft.update(index, (item) => item.kind === 'text'
+          ? { ...item, text: text || item.text, streaming: false, ...(uuid ? { uuid } : {}) }
+          : item.kind === 'thinking' ? { ...item, text: text || item.text, streaming: false } : item)
         continue
       }
       if (!text.trim()) continue
       draft.push(type === 'text'
-        ? { kind: 'text', id: draft.nextId(), text }
+        ? { kind: 'text', id: draft.nextId(), text, ...(uuid ? { uuid } : {}) }
         : { kind: 'thinking', id: draft.nextId(), text })
     }
   }
@@ -1449,7 +1450,7 @@ function applySdkMessage(state: ChatState, raw: unknown, at: number | undefined,
     }
     case 'assistant': {
       const message = obj(m.message)
-      if (message) applyAssistantBlocks(draft, message, str(m.parent_tool_use_id) ?? null)
+      if (message) applyAssistantBlocks(draft, message, str(m.parent_tool_use_id) ?? null, str(m.uuid))
       return history || state.busy ? {} : { busy: true, turnStartedAt: at ?? state.turnStartedAt }
     }
     case 'user':

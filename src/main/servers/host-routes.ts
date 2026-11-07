@@ -201,6 +201,7 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-worktree-states': { merge: 'tasks' },
   'stream-worktree-setup-run': project0,
   'task-land': project0,
+  'task-fork': project0,
   'task-landing-retry': project0,
   'task-landing-abort': project0,
   'task-landing-fix': project0,

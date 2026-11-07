@@ -376,6 +376,26 @@ final class ChatModel {
         }
     }
 
+    /// The reply a fork is being made from (§8.27); one at a time.
+    var forking: String?
+
+    /// Fork the chat after the reply `itemId` (§8.27): a sibling task, idle.
+    /// You stay here; a toast says what it is called.
+    func fork(_ itemId: String) async {
+        guard let connection = connection(), forking == nil else { return }
+        forking = itemId
+        defer { forking = nil }
+        flash("Forking…")
+        do {
+            let result = try await connection.forkChat(tabId: route.tabId, itemId: itemId)
+            flash(result.sharesFolder
+                ? "Forked to “\(result.name)”. It shares this folder, so both agents edit the same files."
+                : "Forked to “\(result.name)”. It's in the Inbox.")
+        } catch {
+            show(error)
+        }
+    }
+
     /// A task's Stop (§8.20); its new status comes with a later chat event.
     func stopTask(_ taskId: String) async {
         guard let connection = connection(), !stoppingTasks.contains(taskId) else { return }

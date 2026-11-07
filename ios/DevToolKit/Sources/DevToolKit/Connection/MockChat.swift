@@ -168,7 +168,7 @@ enum MockChats {
             ChatItem(id: "n1", .notice(text: "Permission mode changed to Accept edits", tone: .muted)),
             ChatItem(id: "t5", .tool(ChatTool(name: "Task", summary: "Explore: other callers of verifyRefreshToken", status: .done, hasDetail: true,
                                                 childCount: 6, lastChild: "Read src/routes/session.ts"))),
-            ChatItem(id: "a2", .text(markdown: "The fix is in, per the [jsonwebtoken docs](https://github.com/auth0/node-jsonwebtoken#errors--codes). Running the auth tests now; CI runs the whole suite as well: https://github.com/acme/api/actions", streaming: false)),
+            ChatItem(id: "a2", .text(markdown: "The fix is in, per the [jsonwebtoken docs](https://github.com/auth0/node-jsonwebtoken#errors--codes). Running the auth tests now; CI runs the whole suite as well: https://github.com/acme/api/actions", streaming: false), forkable: true),
             ChatItem(id: "t6", .tool(ChatTool(name: "Bash", summary: "npm test -- auth", status: .waiting, hasDetail: true))),
         ]
         details["t1"] = toolDetail(.object(["pattern": "refreshToken", "path": "src/", "output_mode": "content"]), """
@@ -304,7 +304,7 @@ enum MockChats {
             ChatItem(id: "t1", .tool(ChatTool(name: "Read", summary: "Read src/charts/UsageChart.tsx", status: .done, hasDetail: true))),
             ChatItem(id: "t2", .tool(ChatTool(name: "Grep", summary: "Grep \"usage_events\" in api/", status: .error, hasDetail: true))),
             ChatItem(id: "n1", .notice(text: "Grep failed: api/ is not in this workspace", tone: .warning)),
-            ChatItem(id: "a1", .text(markdown: "I have enough to propose a plan.", streaming: false)),
+            ChatItem(id: "a1", .text(markdown: "I have enough to propose a plan.", streaming: false), forkable: true),
             ChatItem(id: "t3", .tool(ChatTool(name: "ExitPlanMode", summary: "Plan ready for review", status: .waiting, hasDetail: false))),
         ]
         return MockChatTranscript(
