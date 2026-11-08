@@ -622,10 +622,10 @@ export default function DeskColumn({
                 data-testid={`desk-tab-${id}`}
               >
                 {label}{count ? (
-                  // Inbox counts what is unread (or needs you), in the unread colour; Working counts every row.
+                  // Inbox counts what is unread (or needs you), in the unread colour; Working and Snoozed count every row.
                   id === 'inbox'
                     ? <span className="ml-1.5 min-w-[18px] h-4 px-1 inline-flex items-center justify-center rounded-full tabular-nums text-2xs font-semibold text-answered bg-[color-mix(in_srgb,var(--color-answered)_16%,transparent)]" title={`${count} unread`}>{count}<span className="sr-only"> unread</span></span>
-                    : <span className={`ml-1.5 tabular-nums text-xs ${active ? 'text-text-muted' : 'text-text-subtle'}`}>{count}<span className="sr-only"> running</span></span>
+                    : <span className={`ml-1.5 tabular-nums text-xs ${active ? 'text-text-muted' : 'text-text-subtle'}`}>{count}<span className="sr-only">{id === 'snoozed' ? ' snoozed' : ' running'}</span></span>
                 ) : null}
               </button>
             )

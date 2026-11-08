@@ -83,7 +83,7 @@ describe('deskLists', () => {
     const read = task('read', { eventAt: NOW - 5000, visitedAt: NOW - 1000 })
     const busy = task('busy')
     const counts = deskTabCounts(lists([project('p', [unread, read, busy])], { 'busy-tab': 'working' }))
-    expect(counts).toEqual({ inbox: 1, working: 1, snoozed: null, done: null })
+    expect(counts).toEqual({ inbox: 1, working: 1, snoozed: 0, done: null })
   })
 })
 

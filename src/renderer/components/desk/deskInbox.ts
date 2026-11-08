@@ -65,7 +65,7 @@ export function deskTabCounts(lists: DeskLists): Record<DeskTab, number | null> 
   return {
     inbox: inboxRows.filter(entry => entry.unread || entry.status === 'attention').length,
     working: lists.working.length,
-    snoozed: null,
+    snoozed: lists.snoozed.length,
     done: null
   }
 }
