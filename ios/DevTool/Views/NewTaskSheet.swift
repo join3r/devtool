@@ -116,6 +116,9 @@ struct NewTaskSheet: View {
     @State private var createdStreamId: String?
     /// The same-folder warning's pick (`task.busy`); nil follows its default.
     @State private var pickedChoice: BusyChoice?
+    /// The Folder picker (`task.folder`): skip the worktree the stream gives
+    /// and work in its folder, for deploys and the like.
+    @State private var streamFolder = false
 
     init(target: NewTaskTarget) {
         self.target = target
@@ -144,6 +147,14 @@ struct NewTaskSheet: View {
                         } else if let stream = selectedStream ?? streams.first {
                             LabeledContent("Stream") { StreamLabel(stream: stream) }
                         }
+                        if offersStreamFolder {
+                            Picker("Folder", selection: $streamFolder) {
+                                Text("Own worktree").tag(false)
+                                Text(streamFolderLabel).tag(true)
+                            }
+                            .pickerStyle(.menu)
+                            .disabled(sending)
+                        }
                         sameFolderWarning
                     } footer: {
                         if let selection, model.isOffline(selection.desktopId) {
@@ -151,6 +162,8 @@ struct NewTaskSheet: View {
                         } else if let selection, selectedProject?.missingFolder == true {
                             Text("This project's folder is gone from \(model.desktop(selection.desktopId)?.name ?? "the desktop"). Point the project at its new place in DevTool's Project settings to start tasks in it.")
                                 .foregroundStyle(.red)
+                        } else if inStreamFolder {
+                            Text("Works in the \(streamFolderPlace), with no worktree of its own and nothing to land.")
                         } else if let stream = selectedStream, let branch = stream.branch {
                             Text("Works in the \(stream.name) worktree, on \(branch).")
                         }
@@ -377,7 +390,7 @@ struct NewTaskSheet: View {
     @ViewBuilder
     private var sameFolderWarning: some View {
         if !trimmed.isEmpty, let project = selectedProject, let selection, targetStreamId == selectedStream?.id {
-            let busy = project.busyInSameFolder(selectedStream)
+            let busy = project.busyInSameFolder(selectedStream, streamFolder: inStreamFolder)
             if !busy.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Label {
@@ -420,8 +433,29 @@ struct NewTaskSheet: View {
     /// The choice Send follows: the warning's pick while it shows, else none.
     private var busyChoice: BusyChoice? {
         guard let project = selectedProject, let selection, targetStreamId == selectedStream?.id else { return nil }
-        let busy = project.busyInSameFolder(selectedStream)
+        let busy = project.busyInSameFolder(selectedStream, streamFolder: inStreamFolder)
         return effectiveBusyChoice(busy: busy, choices: busyChoices(project, busy: busy, desktopId: selection.desktopId), picked: pickedChoice)
+    }
+
+    /// The Folder picker shows where the task would get a worktree of its own,
+    /// for a desktop that takes `streamFolder`.
+    private var offersStreamFolder: Bool {
+        guard let project = selectedProject, let selection, targetStreamId == selectedStream?.id else { return false }
+        return project.startsInOwnWorktree(selectedStream) && model.supports(DesktopFeature.taskFolder, on: selection.desktopId)
+    }
+
+    /// The task skips its own worktree: picked, and still offered.
+    private var inStreamFolder: Bool { streamFolder && offersStreamFolder }
+
+    private var streamFolderLabel: String {
+        if let stream = selectedStream, stream.branch != nil { return "\(stream.name) worktree" }
+        return "Project folder"
+    }
+
+    /// The same place, in a sentence.
+    private var streamFolderPlace: String {
+        if let stream = selectedStream, stream.branch != nil { return "\(stream.name) worktree" }
+        return "project folder"
     }
 
     private var trimmed: String { prompt.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -461,7 +495,8 @@ struct NewTaskSheet: View {
             // A stream that has gone since the picker was filled: let the desktop pick.
             let route = try await model.newTask(
                 desktopId: selection.desktopId, projectId: selection.projectId, streamId: targetStreamId,
-                prompt: trimmed, mode: mode.isEmpty ? nil : mode, images: encoded, start: start
+                prompt: trimmed, mode: mode.isEmpty ? nil : mode, images: encoded, start: start,
+                streamFolder: inStreamFolder && start != .worktree
             )
             lastProject = selection.id
             dismiss()

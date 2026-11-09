@@ -174,9 +174,10 @@ final class AppModel {
     /// the one last used) whose Claude chat starts on `prompt`, and the route
     /// to that chat. The task shows up with the next inbox.
     /// `start` (`task.busy`): queue it behind the agents in its folder, or give it a worktree of its own.
-    func newTask(desktopId: String, projectId: String, streamId: String?, prompt: String, mode: String?, images: [SentImage] = [], start: TaskNewParams.Start? = nil) async throws -> ChatRoute {
+    /// `streamFolder` (`task.folder`): no worktree of its own; it works in the stream's folder.
+    func newTask(desktopId: String, projectId: String, streamId: String?, prompt: String, mode: String?, images: [SentImage] = [], start: TaskNewParams.Start? = nil, streamFolder: Bool = false) async throws -> ChatRoute {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
-        let result = try await connection.newTask(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images, start: start)
+        let result = try await connection.newTask(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images, start: start, streamFolder: streamFolder)
         return ChatRoute(desktopId: desktopId, tabId: result.tabId)
     }
 

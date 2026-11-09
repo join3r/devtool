@@ -10,9 +10,9 @@ import Foundation
 ///   offline" show.
 /// - `-demoRoute sidebar|desktop|project|task|taskStatus|pair|pairConfirm|pairWait|settings`
 ///   (Debug builds, with `-mockDesktop`): open a screen directly, for screenshots.
-/// - `-demoRoute project|newStream|newTask [-demoProject <projectId>]`: the first
+/// - `-demoRoute project|newStream|newTask [-demoProject <projectId>] [-demoStream <streamId>]`: the first
 ///   desktop's first project (or `-demoProject`), with the New stream sheet or
-///   (on its last stream) the New task sheet up.
+///   (on `-demoStream`, else its last stream) the New task sheet up.
 /// - `-demoRoute streamLogs [-demoProject <projectId>] [-demoStream <streamId>]`: that
 ///   project with the stream's app run logs open (§8.19); the first stream with a
 ///   run command without `-demoStream`.

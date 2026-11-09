@@ -156,6 +156,7 @@ import {
   CHAT_IMAGE_USER_FEATURE,
   SEND_IMAGES_FEATURE,
   TASK_BUSY_FEATURE,
+  TASK_FOLDER_FEATURE,
   CHAT_SETTINGS_FEATURE,
   PIN_FEATURE,
   STREAM_NEW_FEATURE,
@@ -738,7 +739,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE, CHAT_FORK_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, TASK_FOLDER_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE, CHAT_FORK_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -746,7 +747,7 @@ export class HostServices {
       broadcastState: (state) => this.clients.broadcast(this.isServer ? SERVER_MOBILE_STATE_CHANNEL : 'mobile-state-changed', state),
       log,
       chat: bridge,
-      newTask: async (phoneId, { projectId, streamId, prompt, mode, images, start }) => {
+      newTask: async (phoneId, { projectId, streamId, prompt, mode, images, start, streamFolder }) => {
         // A server has no Claude switch: its desktops' settings are theirs.
         if (!this.isServer && !this.config.enableClaude) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
@@ -754,7 +755,7 @@ export class HostServices {
         if (this.missingFolders.peek().has(projectId)) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'This project\'s folder is gone. Point it at its new place in DevTool\'s Project settings.' }
         }
-        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId, undefined, undefined, { start, mode })
+        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId, undefined, undefined, { start, mode, streamFolder })
         if (!added.ok) return added
         this.commitProjects(added.data)
         this.nameTaskInBackground(projectId, added.taskId, prompt)

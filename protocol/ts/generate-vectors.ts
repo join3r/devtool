@@ -748,7 +748,11 @@ function chatMessages(): unknown {
         // `start` (feature `task.busy`): wait for the folder, or take a worktree of its own.
         text({ projectId: 'p1', prompt: 'Go', start: 'queue', mode: 'auto' }),
         text({ projectId: 'p1', prompt: 'Go', start: 'worktree', images: [{ mediaType: 'image/png', data: 'iVBORw0K' }] }),
-        text({ projectId: 'p1', prompt: 'Go', start: null })
+        text({ projectId: 'p1', prompt: 'Go', start: null }),
+        // `streamFolder` (feature `task.folder`): no worktree of its own; `false` counts as absent.
+        text({ projectId: 'p1', streamId: 's-050', prompt: 'Deploy', streamFolder: true }),
+        text({ projectId: 'p1', prompt: 'Deploy', streamFolder: true, start: 'queue' }),
+        text({ projectId: 'p1', prompt: 'Go', streamFolder: false })
       ].map((json) => ({ json, expected: parseTaskNewParams(JSON.parse(json)) })),
       results: [text({ taskId: 'task-new', tabId: 'tab-new' }), text({ taskId: 'task-new', tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseTaskNewResult(JSON.parse(json)) })),
       invalid: {
@@ -763,6 +767,7 @@ function chatMessages(): unknown {
           text({ projectId: 'p1', prompt: 'Go', start: 'later' }),
           text({ projectId: 'p1', prompt: 'Go', start: 'queue', images: [{ mediaType: 'image/png', data: 'iVBORw0K' }] }),
           text({ projectId: 'p1', prompt: 'Go', images: 'photo' }),
+          text({ projectId: 'p1', prompt: 'Go', streamFolder: true, start: 'worktree' }),
           'null'
         ],
         results: [text({ tabId: 'tab-new' }), text({ taskId: 'task-new' }), '[]']

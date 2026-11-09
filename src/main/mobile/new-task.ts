@@ -34,9 +34,10 @@ export function newTaskProject(
 /**
  * What `task.new`'s `start` (§8.4) makes of the task: `queued` waits, snoozed,
  * until no other agent works in its folder (`main/queued-task-runner.ts`);
- * `ownWorktree` gives a `main` task a worktree of its own.
+ * `ownWorktree` gives a `main` task a worktree of its own;
+ * `sharesStreamWorktree` (`streamFolder`) keeps it in its stream's folder.
  */
-export type NewTaskExtra = Pick<Task, 'queued' | 'ownWorktree'>
+export type NewTaskExtra = Pick<Task, 'queued' | 'ownWorktree' | 'sharesStreamWorktree'>
 
 export function addTaskWithChat(
   data: ProjectsData,
@@ -45,7 +46,7 @@ export function addTaskWithChat(
   streamId?: string,
   ids: () => string = randomUUID,
   now: number = Date.now(),
-  start?: { start?: 'queue' | 'worktree'; mode?: string }
+  start?: { start?: 'queue' | 'worktree'; mode?: string; streamFolder?: boolean }
 ): NewTaskResult {
   const found = newTaskProject(data, projectId)
   if (!found.ok) return found
@@ -64,6 +65,8 @@ export function addTaskWithChat(
     // Main giving them anyway: every new task gets one, flag or not.
     if (!streamGivesTaskWorktrees(target)) extra = { ownWorktree: true }
   }
+  // No worktree of its own, nothing to land: for deploys and the like.
+  if (start?.streamFolder && start.start !== 'worktree') extra = { ...extra, sharesStreamWorktree: true }
   return { ok: true, ...addChatTaskToProject(data, project, prompt, streamId, ids, now, extra) }
 }
 
@@ -91,7 +94,8 @@ export function addChatTaskToProject(
     ...(mainTabId ? { mainTabId } : {}),
     lastInteractedAt: now,
     ...(extra?.queued ? { queued: extra.queued } : {}),
-    ...(extra?.ownWorktree ? { ownWorktree: true as const } : {})
+    ...(extra?.ownWorktree ? { ownWorktree: true as const } : {}),
+    ...(extra?.sharesStreamWorktree ? { sharesStreamWorktree: true as const } : {})
   }
   const target = streamId ?? currentStreamId(project)
   const withTask: Project = withLastTask(

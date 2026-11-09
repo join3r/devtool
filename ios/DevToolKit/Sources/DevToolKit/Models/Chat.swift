@@ -463,6 +463,9 @@ public struct TaskNewParams: Sendable, Equatable {
     /// What the task does about other agents in its folder (`task.busy`);
     /// nil starts it there now.
     public var start: Start?
+    /// No worktree of its own: the task works in its stream's folder
+    /// (`task.folder`). Not with `start: .worktree`.
+    public var streamFolder: Bool
 
     /// `start` (§8.4): wait for the folder, or take a worktree of its own.
     public enum Start: String, Sendable, Equatable, CaseIterable {
@@ -472,13 +475,14 @@ public struct TaskNewParams: Sendable, Equatable {
         case worktree
     }
 
-    public init(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [SentImage] = [], start: Start? = nil) {
+    public init(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [SentImage] = [], start: Start? = nil, streamFolder: Bool = false) {
         self.projectId = projectId
         self.streamId = streamId
         self.prompt = prompt
         self.mode = mode
         self.images = images
         self.start = start
+        self.streamFolder = streamFolder
     }
 }
 
@@ -1328,7 +1332,8 @@ extension SentImage {
 
 extension TaskNewParams {
     /// The desktop's side: a missing `projectId`, a blank or over-long prompt, an
-    /// unknown `mode` or `start`, or `start: queue` with images throws (`bad-request`).
+    /// unknown `mode` or `start`, `start: queue` with images, or `streamFolder`
+    /// with `start: worktree` throws (`bad-request`).
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> TaskNewParams {
         let o = try Fields(value, "params")
         let projectId = try o.str("projectId")
@@ -1345,7 +1350,9 @@ extension TaskNewParams {
             if parsed == .queue, !images.isEmpty { throw ProtocolError("a queued task takes no images") }
             start = parsed
         }
-        return TaskNewParams(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images, start: start)
+        let streamFolder = o.flag("streamFolder")
+        if streamFolder, start == .worktree { throw ProtocolError("a task in its stream folder takes no worktree of its own") }
+        return TaskNewParams(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images, start: start, streamFolder: streamFolder)
     }
 
     public var json: JSONValue {
@@ -1355,6 +1362,7 @@ extension TaskNewParams {
         if let mode { fields["mode"] = .string(mode) }
         if !images.isEmpty { fields["images"] = SentImage.json(images) }
         if let start { fields["start"] = .string(start.rawValue) }
+        if streamFolder { fields["streamFolder"] = .bool(true) }
         return .object(fields)
     }
 }

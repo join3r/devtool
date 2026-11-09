@@ -232,12 +232,13 @@ extension DesktopConnection {
     /// which includes starting Claude, so this waits longer than other ops; a
     /// retry after a timeout could make a second task.
     /// `images` go only to a desktop that lists `task.images`, `start` only
-    /// to one that lists `task.busy`; a queued task answers once it is added.
-    public func newTask(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [SentImage] = [], start: TaskNewParams.Start? = nil) async throws -> TaskNewResult {
+    /// to one that lists `task.busy`, `streamFolder` only to one that lists
+    /// `task.folder`; a queued task answers once it is added.
+    public func newTask(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [SentImage] = [], start: TaskNewParams.Start? = nil, streamFolder: Bool = false) async throws -> TaskNewResult {
         guard prompt.utf16.count <= ChatOp.maxSendLength else {
             throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Prompts are limited to \(ChatOp.maxSendLength) characters.")
         }
-        let params = TaskNewParams(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images, start: start)
+        let params = TaskNewParams(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images, start: start, streamFolder: streamFolder)
         let result = try await request(TaskOp.new, params: params.json, timeout: .seconds(60))
         return try decode(result, TaskNewResult.parse)
     }

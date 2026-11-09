@@ -136,11 +136,12 @@ export function startsInOwnWorktree(project: Project, stream: Stream | undefined
  * The tasks whose agent is working in the folder a new task in `stream` (none:
  * `main`) would start in: the project folder, or a stream worktree its tasks
  * share. Empty when the new task gets a worktree of its own. Two agents in one
- * folder edit the same files, so starting there warns.
+ * folder edit the same files, so starting there warns. `inStreamFolder`: the
+ * task skips the worktree its stream gives (`Task.sharesStreamWorktree`).
  */
-export function busyInSameFolder(project: Project, stream: Stream | undefined, statusOf: StatusOf): Task[] {
+export function busyInSameFolder(project: Project, stream: Stream | undefined, statusOf: StatusOf, inStreamFolder = false): Task[] {
   const target = stream ?? findMainStream(project)
-  if (startsInOwnWorktree(project, target)) return []
+  if (startsInOwnWorktree(project, target) && !inStreamFolder) return []
   const dir = streamDirectory(project, target)
   return project.streams.flatMap(candidate => candidate.tasks)
     .filter(task => isTaskWorking(task, statusOf) && taskDirectory(project, task) === dir)

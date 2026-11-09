@@ -45,6 +45,13 @@ export interface NewTaskSubmission {
    * off still gets a worktree of its own (`Task.ownWorktree`).
    */
   ownWorktree?: boolean
+  /**
+   * In the stream's folder: a task of a stream that gives task worktrees works
+   * in the stream's worktree (or the project folder for `main`) instead, with
+   * nothing to land (`Task.sharesStreamWorktree`). For deploys and other work
+   * that must see the stream's files as they are.
+   */
+  inStreamFolder?: boolean
 }
 
 export interface NewTaskDraft {

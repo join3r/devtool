@@ -414,6 +414,46 @@ describe('NewTaskModal', () => {
     expect(onCreate).toHaveBeenCalledWith({ target: inProject('p1'), streamId: 's-bug', start: undefined })
   })
 
+  describe('Folder chip', () => {
+    const withTaskWorktrees = (): Project[] => [project('p1', 'devtool', {
+      streams: [{ ...createMainStream('p1'), taskWorktrees: true }]
+    }), ...PROJECTS.slice(1)]
+
+    it('is offered only where the task would get a worktree of its own', () => {
+      renderModal()
+      expect(screen.queryByTitle('Folder')).toBeNull()
+      cleanup()
+      renderModal('p1', withTaskWorktrees())
+      expect(screen.getByTitle('Folder').textContent).toContain('Own worktree')
+    })
+
+    it('starts the task in the stream folder, with no worktree, when picked', async () => {
+      renderModal('p1', withTaskWorktrees())
+      await act(async () => { fireEvent.click(screen.getByTitle('Folder')) })
+      await act(async () => { fireEvent.click(screen.getByText('Project folder')) })
+      expect(screen.getByTitle('Folder').textContent).toContain('Project folder')
+      await typePrompt('deploy the relay')
+      await submit()
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ streamId: 'main-p1', inStreamFolder: true }))
+    })
+
+    it('starts a terminal in the stream folder too', async () => {
+      renderModal('p1', withTaskWorktrees())
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Terminal' })) })
+      await act(async () => { fireEvent.click(screen.getByTitle('Folder')) })
+      await act(async () => { fireEvent.click(screen.getByText('Project folder')) })
+      await submit()
+      expect(onCreate).toHaveBeenCalledWith({ target: inProject('p1'), streamId: 'main-p1', inStreamFolder: true, terminal: {} })
+    })
+
+    it('keeps the own worktree by default', async () => {
+      renderModal('p1', withTaskWorktrees())
+      await typePrompt('fix the badge')
+      await submit()
+      expect(onCreate.mock.calls[0][0]).not.toHaveProperty('inStreamFolder')
+    })
+  })
+
   it('starts a terminal task, with an optional start-up command', async () => {
     renderModal()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Terminal' })) })

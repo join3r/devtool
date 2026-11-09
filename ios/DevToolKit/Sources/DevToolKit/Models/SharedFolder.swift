@@ -15,9 +15,10 @@ extension InboxProject {
     /// would start in: the stream's worktree, which its tasks without a
     /// `branch` share, or the project folder, shared by every task without a
     /// `branch` in a stream without one. Empty when the task gets its own worktree.
-    public func busyInSameFolder(_ stream: InboxStream?) -> [InboxTask] {
+    /// `streamFolder`: the task skips the worktree its stream gives (`task.folder`).
+    public func busyInSameFolder(_ stream: InboxStream?, streamFolder: Bool = false) -> [InboxTask] {
         let target = stream ?? mainStream
-        if startsInOwnWorktree(target) { return [] }
+        if startsInOwnWorktree(target), !streamFolder { return [] }
         let worktreeStreams = Set(streams.filter { $0.branch != nil }.map(\.id))
         return tasks.filter { task in
             guard task.status == .working, task.branch == nil else { return false }

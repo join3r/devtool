@@ -74,6 +74,7 @@ interface UnsentDraft {
   mode: string
   model: string
   effort: string
+  inStreamFolder: boolean
 }
 /** One kept draft per destination: project or directory, and stream. */
 const unsentDrafts = new Map<string, UnsentDraft>()
@@ -137,6 +138,8 @@ export default function NewTaskModal({
   const [model, setModel] = useState(kept?.model ?? '')
   const [effort, setEffort] = useState(kept?.effort ?? '')
   const [kind, setKind] = useState<NewTaskKind>(kept?.kind ?? 'agent')
+  // Skip the worktree the stream gives: work in its folder (deploys and the like).
+  const [inStreamFolder, setInStreamFolder] = useState(kept?.inStreamFolder ?? false)
   // Off every time; "+ Codex review" starts the way Settings has it.
   const [autopilot, setAutopilot] = useState<DeskAutopilot>({ ...AUTOPILOT_OFF, review: config.enableCodex && !!config.autopilotReview })
   // Null: the target project's current stream.
@@ -196,9 +199,13 @@ export default function NewTaskModal({
   const terminal = kind === 'terminal'
   const statuses = useAllTabStatuses()
   const stream = project?.streams.find(candidate => candidate.id === streamId)
+  // The Folder chip: only where the task would otherwise get a worktree of its own.
+  const offersFolder = !!project && startsInOwnWorktree(project, stream)
+  const inFolder = offersFolder && inStreamFolder
+  const folderLabel = stream?.workspace ? `${stream.name} worktree` : 'Project folder'
   const busy = useMemo(
-    () => (project && !terminal ? busyInSameFolder(project, stream, (tabId) => statuses[tabId]) : []),
-    [project, stream, terminal, statuses]
+    () => (project && !terminal ? busyInSameFolder(project, stream, (tabId) => statuses[tabId], inFolder) : []),
+    [project, stream, terminal, statuses, inFolder]
   )
   const [pickedChoice, setPickedChoice] = useState<BusyChoice | null>(null)
   // Shell-command projects run their own command in every terminal.
@@ -210,7 +217,8 @@ export default function NewTaskModal({
   const agent = terminal ? undefined : pickPromptAgent(picked ?? config.promptBoxAgent, agents)
   const takesMode = !!agent && agentTakesMode(agent)
   const canAutopilot = autopilotAvailable(project ?? undefined, agent ?? null)
-  const canLoop = canAutopilot && target?.kind === 'project' && loopAvailable(project ?? undefined, stream)
+  // A loop's checkpoints and resets need a worktree of its own.
+  const canLoop = canAutopilot && target?.kind === 'project' && !inFolder && loopAvailable(project ?? undefined, stream)
   // Without an agent to hand it to, there is no prompt — the task opens blank.
   const promptText = agent || takesCommand ? prompt.trim() : ''
   // Only the chat view takes images; switching away hides them rather than dropping them.
@@ -262,7 +270,7 @@ export default function NewTaskModal({
   // Read at close time: the Escape listener below keeps the requestClose of the render it was bound in.
   const latest = useRef<UnsentDraft | null>(null)
   latest.current = target
-    ? { prompt, images: attachments.images, target, streamId: pickedStreamId, kind, picked, mode, model, effort }
+    ? { prompt, images: attachments.images, target, streamId: pickedStreamId, kind, picked, mode, model, effort, inStreamFolder }
     : null
   // Kept under where the dialog opened (that is where it looks next time), and
   // under where it ended up when the destination was changed in it.
@@ -324,7 +332,10 @@ export default function NewTaskModal({
     forgetDraft()
     const run = canAutopilot && promptText && (forceAutopilot || autopilot.on) ? autopilot : null
     if (choice === 'queue' && !run) { handleQueue(); return }
-    const where = target.kind === 'project' && streamId ? { streamId } : {}
+    const where = {
+      ...(target.kind === 'project' && streamId ? { streamId } : {}),
+      ...(inFolder ? { inStreamFolder: true } : {})
+    }
     if (terminal) {
       onCreate({ target, ...where, terminal: takesCommand && promptText ? { command: promptText } : {} })
       return
@@ -360,6 +371,7 @@ export default function NewTaskModal({
     onCreate({
       target,
       ...(streamId ? { streamId } : {}),
+      ...(inFolder ? { inStreamFolder: true } : {}),
       start: { agent, prompt: { text: promptText, ...(takesMode && mode ? { mode } : {}) } },
       queue: true
     })
@@ -591,6 +603,16 @@ export default function NewTaskModal({
                 {agent === 'claude-chat' && (
                   <ChipMenu label={`Effort: ${effort || 'Default'}`} title="Thinking effort" placement="down" options={EFFORT_OPTIONS} value={effort} onChange={(v) => { setEffort(v); focusPrompt() }} />
                 )}
+                {offersFolder && (
+                  <ChipMenu
+                    label={`Folder: ${inFolder ? folderLabel : 'Own worktree'}`}
+                    title="Folder"
+                    placement="down"
+                    options={[{ value: 'own', label: 'Own worktree' }, { value: 'stream', label: folderLabel }]}
+                    value={inFolder ? 'stream' : 'own'}
+                    onChange={(v) => { setInStreamFolder(v === 'stream'); focusPrompt() }}
+                  />
+                )}
                 {canAutopilot && (
                   <span className="ml-1 flex items-center gap-1">
                     <AutopilotChips value={autopilot} onChange={(next) => { setAutopilot(next); focusPrompt() }} loop={canLoop} codex={config.enableCodex} />
@@ -633,6 +655,7 @@ export default function NewTaskModal({
                 : agent
                 ? `The first prompt names the task.${takesImages ? ' Paste or drop images to send them with it.' : ''}${canAutopilot ? ' ⌘↵ starts it on Autopilot.' : ''} Send it empty to open the task without starting an agent.`
                 : 'The task opens empty; add a terminal or browser tab from there.'}
+              {inFolder && ` It works in the ${stream?.workspace ? `${stream.name} worktree` : 'project folder'}, with no worktree of its own and nothing to land.`}
             </HelperText>
           )}
         </div>

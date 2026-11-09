@@ -1530,6 +1530,31 @@
           "projectId": "p1",
           "prompt": "Go"
         }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"prompt\":\"Deploy\",\"streamFolder\":true}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Deploy",
+          "streamId": "s-050",
+          "streamFolder": true
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Deploy\",\"streamFolder\":true,\"start\":\"queue\"}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Deploy",
+          "start": "queue",
+          "streamFolder": true
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"streamFolder\":false}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Go"
+        }
       }
     ],
     "results": [
@@ -1560,6 +1585,7 @@
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"start\":\"later\"}",
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"start\":\"queue\",\"images\":[{\"mediaType\":\"image/png\",\"data\":\"iVBORw0K\"}]}",
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":\"photo\"}",
+        "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"streamFolder\":true,\"start\":\"worktree\"}",
         "null"
       ],
       "results": [

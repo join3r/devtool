@@ -14,7 +14,7 @@ import { newLoop } from '../../shared/loop'
  */
 export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
   const { addTask, addTaskInDirectory, titleTaskFromPrompt, updateConfig } = useApp()
-  return useCallback(({ target, streamId, start, terminal, autopilot, queue, ownWorktree }: NewTaskSubmission) => {
+  return useCallback(({ target, streamId, start, terminal, autopilot, queue, ownWorktree, inStreamFolder }: NewTaskSubmission) => {
     if (queue && start && target.kind === 'project' && isChatTabType(start.agent)) {
       // No pending prompt: main sends it once the folder is free. Autopilot and
       // pictures don't wait in the queue.
@@ -25,7 +25,7 @@ export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
         ...(start.agent === 'claude-chat' && start.prompt.mode ? { mode: start.prompt.mode } : {}),
         at: Date.now()
       }
-      const task = addTask(target.projectId, name, [tab], streamId, { queued })
+      const task = addTask(target.projectId, name, [tab], streamId, { queued, ...(inStreamFolder ? { sharesStreamWorktree: true } : {}) })
       titleTaskFromPrompt(task.id, name, start.prompt.text)
       return task
     }
@@ -60,7 +60,8 @@ export function useFileNewTask(): (submission: NewTaskSubmission) => Task {
       ? addTaskInDirectory(target.directory, name, tabs)
       : addTask(target.projectId, name, tabs, streamId, {
         ...(autopilot && start && isChatTabType(start.agent) ? { autopilot: { phase: 'working', ...(autopilot.review ? { review: true } : {}) } } : {}),
-        ...(ownWorktree ? { ownWorktree: true } : {})
+        ...(ownWorktree ? { ownWorktree: true } : {}),
+        ...(inStreamFolder && !ownWorktree ? { sharesStreamWorktree: true } : {})
       })
     if (start) titleTaskFromPrompt(task.id, name, start.prompt.text)
     return task

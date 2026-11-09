@@ -33,6 +33,15 @@ import Testing
         #expect(project.busyInSameFolder(own).isEmpty)
     }
 
+    @Test func streamFolderWarnsAboutTheStreamsOwnFolder() {
+        let own = InboxStream(id: "main", name: "main", isMain: true, taskWorktrees: true)
+        let project = InboxProject(id: "p", name: "p", streams: [own, release], tasks: [
+            task("a", own), task("mine", own, branch: "main--mine"), task("x", release)
+        ])
+        #expect(project.busyInSameFolder(own, streamFolder: true).map(\.id) == ["a"])
+        #expect(project.busyInSameFolder(release, streamFolder: true).map(\.id) == ["x"])
+    }
+
     @Test func overSSHAWorktreeStreamIsShared() {
         let project = InboxProject(id: "p", name: "p", remote: true, streams: [main, release], tasks: [
             task("x", release), task("m", main)

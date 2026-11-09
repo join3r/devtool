@@ -233,6 +233,8 @@ public enum DesktopFeature {
     public static let sendImages = "send.images"
     /// The desktop's `task.new` takes `start`: queue it, or a worktree of its own (§8.4).
     public static let taskBusy = "task.busy"
+    /// The desktop's `task.new` takes `streamFolder`: no worktree of its own (§8.4).
+    public static let taskFolder = "task.folder"
     /// The desktop answers `queue.update` and `queue.run`, and sends `queue` (§8.16, §4.4).
     public static let queue = "queue"
     /// The desktop answers `schedule.update` and `schedule.run`, and sends `schedules` (§8.25, §4.4).

@@ -128,6 +128,16 @@ import Testing
         #expect(try ChatParams.parse(op: TaskOp.new, .object(["projectId": "p", "prompt": "Go"])) == nil)
     }
 
+    @Test func streamFolderIsAFlag() throws {
+        let parsed = try TaskNewParams.parse(.object(["projectId": "p", "prompt": "Go", "streamFolder": true]))
+        #expect(parsed.streamFolder)
+        #expect(parsed.json == .object(["projectId": "p", "prompt": "Go", "streamFolder": true]))
+        #expect(!(try TaskNewParams.parse(.object(["projectId": "p", "prompt": "Go", "streamFolder": false]))).streamFolder)
+        #expect(throws: ProtocolError.self) {
+            _ = try TaskNewParams.parse(.object(["projectId": "p", "prompt": "Go", "streamFolder": true, "start": "worktree"]))
+        }
+    }
+
     @Test func imagesAreCapped() throws {
         let png: JSONValue = .object(["mediaType": "image/png", "data": "iVBO"])
         let parsed = try TaskNewParams.parse(.object(["projectId": "p", "prompt": "Go", "images": .array([png])]))
@@ -614,7 +624,7 @@ import Testing
             DesktopFeature.taskClose, DesktopFeature.taskCloseChoice, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
-            DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.taskBusy, DesktopFeature.queue,
+            DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.taskBusy, DesktopFeature.taskFolder, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
             DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules, DesktopFeature.taskChildren,

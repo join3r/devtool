@@ -81,7 +81,10 @@ struct ProjectView: View {
             .task {
                 switch demoSheet {
                 case .newStream: newStream = NewStreamTarget(desktopId: ref.desktopId, projectId: project.id)
-                case .newTask: newTask = NewTaskTarget(desktopId: ref.desktopId, projectId: project.id, streamId: project.streams.last?.id)
+                case .newTask:
+                    let wanted = LaunchOptions.current.demoStream
+                    let stream = project.streams.first { $0.id == wanted } ?? project.streams.last
+                    newTask = NewTaskTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream?.id)
                 case .commands:
                     let wanted = LaunchOptions.current.demoStream
                     let stream = project.streams.first { $0.id == wanted }

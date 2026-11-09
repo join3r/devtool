@@ -116,4 +116,13 @@ describe('addTaskWithChat start (SPEC.md §8.4, feature task.busy)', () => {
     streams.projects[0] = { ...p, streams: [...p.streams, { id: 's2', name: 'side', tasks: [] }] }
     expect(addTaskWithChat(streams, 'p1', 'Go', 's2', counter(), 42, { start: 'worktree' })).toMatchObject({ ok: false, code: 'bad-request' })
   })
+
+  it('keeps a task in its stream folder with streamFolder (task.folder)', () => {
+    const on = data()
+    on.projects[0] = { ...on.projects[0], streams: on.projects[0].streams.map(s => (s.isMain ? { ...s, taskWorktrees: true as const } : s)) }
+    const result = addTaskWithChat(on, 'p1', 'Deploy', undefined, counter(), 42, { streamFolder: true })
+    expect(task(result)?.sharesStreamWorktree).toBe(true)
+    const queued = addTaskWithChat(on, 'p1', 'Deploy', undefined, counter(), 42, { start: 'queue', streamFolder: true })
+    expect(task(queued)).toMatchObject({ sharesStreamWorktree: true, queued: { prompt: 'Deploy' } })
+  })
 })
