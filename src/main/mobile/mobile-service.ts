@@ -77,6 +77,8 @@ import {
   parseChatTaskStopParams,
   parseChatPermissionsParams,
   parseChatPermissionsUpdateParams,
+  parseChatPluginsParams,
+  parseChatPluginsChangeParams,
   parsePushParams,
   PushOp,
   PROTOCOL_VERSION,
@@ -313,7 +315,9 @@ const CHAT_PARAM_PARSERS: Record<string, (params: unknown) => ChatParams> = {
   [AppOp.ChatQueue]: parseChatQueueParams,
   [AppOp.ChatTaskStop]: parseChatTaskStopParams,
   [AppOp.ChatPermissions]: parseChatPermissionsParams,
-  [AppOp.ChatPermissionsUpdate]: parseChatPermissionsUpdateParams
+  [AppOp.ChatPermissionsUpdate]: parseChatPermissionsUpdateParams,
+  [AppOp.ChatPlugins]: parseChatPluginsParams,
+  [AppOp.ChatPluginsChange]: parseChatPluginsChangeParams
 }
 
 /** Inbox events go out at most this often per phone, trailing edge included. */

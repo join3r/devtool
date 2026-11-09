@@ -4,6 +4,7 @@ import {
   LOGIN_COMMAND,
   LOGOUT_COMMAND,
   PERMISSIONS_COMMAND,
+  PLUGINS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
   type ChatAgent,
   type ChatEvent,
@@ -14,6 +15,7 @@ import {
   type ChatState
 } from '../../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../../shared/chat-permissions'
+import { isPluginId, searchCatalog, type PluginAction, type PluginCatalog } from '../../shared/claude-plugins'
 import {
   dismissQuestionResponse,
   planApprovalResponse,
@@ -56,6 +58,8 @@ import {
   CHAT_IMAGE_OP,
   CHAT_PERMISSIONS_OP,
   CHAT_PERMISSIONS_UPDATE_OP,
+  CHAT_PLUGINS_CHANGE_OP,
+  CHAT_PLUGINS_OP,
   CHAT_SETTINGS_OP,
   ChatLimits,
   ChatOp
@@ -79,6 +83,10 @@ import type {
   ChatPermissionSource,
   ChatPermissionsResult,
   ChatPermissionsUpdateParams,
+  ChatPluginsChangeParams,
+  ChatPluginsChangeResult,
+  ChatPluginsParams,
+  ChatPluginsResult,
   ChatSendParams,
   ChatSettingsParams,
   ChatTaskStopParams
@@ -115,6 +123,8 @@ export interface ChatBridgeChats {
   askSideQuestion?(tabId: string, question: string): Promise<ChatSideAnswer>
   /** `!command` (`chat.bash`, §8.17); settles once the command has finished. */
   runBash?(tabId: string, command: string): Promise<void>
+  /** `/plugins` (`chat.plugins.change`, §8.28): load the changed plugins into the running session. */
+  reloadPlugins?(tabId: string): Promise<{ reloaded: boolean; errorCount: number }>
   /** A task's Stop (`chat.task.stop`, §8.20); false when it couldn't (a notice says why). */
   stopTask?(tabId: string, taskId: string): Promise<boolean>
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean
@@ -150,7 +160,18 @@ export interface ChatBridgeDeps {
     read(cwd: string): Promise<PermissionSettingsSource[]>
     update(cwd: string, kind: PermissionSourceKind, behavior: PermissionBehavior, rule: string, action: 'add' | 'remove'): Promise<void>
   }
+  /**
+   * `/plugins` (§8.28): `claude plugin` run in a chat's folder, checked against the
+   * folders the user configured. Without it those ops answer `unsupported`.
+   */
+  plugins?: {
+    list(cwd: string): Promise<PluginCatalog>
+    change(cwd: string, action: PluginAction, id: string, scope?: string): Promise<void>
+  }
 }
+
+/** A phone types its search: the desktop lists the plugins once in this window, not per letter. */
+export const PLUGIN_CATALOG_TTL_MS = 60_000
 
 /**
  * One phone's live session. The bridge calls `send` for results and events; a new
@@ -200,6 +221,8 @@ class OpError extends Error {
 
 export class ChatBridge {
   private readonly phones = new Map<string, PhoneState>()
+  /** `chat.plugins` lists by folder, for {@link PLUGIN_CATALOG_TTL_MS}. */
+  private readonly pluginCatalogs = new Map<string, { at: number; catalog: PluginCatalog }>()
 
   constructor(private readonly deps: ChatBridgeDeps) {}
 
@@ -387,13 +410,17 @@ export class ChatBridge {
         await permissions.update(cwd, kind, behavior, rule, action)
         return this.readPermissions(resolved)
       }
+      case CHAT_PLUGINS_OP:
+        return this.listPlugins(resolved, (params as ChatPluginsParams).query ?? '')
+      case CHAT_PLUGINS_CHANGE_OP:
+        return this.changePlugin(resolved, params as ChatPluginsChangeParams)
       default:
         throw new OpError(AppErrorCode.Unsupported, `Unknown op ${op}`)
     }
   }
 
   /** Claude's own parts (/btw, /permissions) in another agent's chat: unsupported. */
-  private claudeOnly(resolved: ResolvedTab, feature: 'sideQuestion' | 'permissionsEditor', what: string): void {
+  private claudeOnly(resolved: ResolvedTab, feature: 'sideQuestion' | 'permissionsEditor' | 'plugins', what: string): void {
     const agent = resolved.config.agent ?? 'claude'
     if (!chatAgentFeatures(agent)[feature]) throw new OpError(AppErrorCode.Unsupported, `${chatAgentFeatures(agent).label} chats have no ${what}`)
   }
@@ -414,6 +441,73 @@ export class ChatBridge {
     const { permissions, cwd } = this.permissionsFor(resolved)
     const sources = await permissions.read(cwd)
     return { sources: sources.map(permissionSource) }
+  }
+
+  /** The folder the desktop's `/plugins` sheet runs `claude plugin` in: the chat's own, never a remote one. */
+  private pluginsFor(resolved: ResolvedTab): { plugins: NonNullable<ChatBridgeDeps['plugins']>; cwd: string } {
+    const plugins = this.deps.plugins
+    if (!plugins) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot manage plugins')
+    this.claudeOnly(resolved, 'plugins', 'plugins')
+    if (resolved.project.ssh) {
+      throw new OpError(AppErrorCode.Unsupported, "This project's Claude plugins live on the remote host. Run /plugin in a terminal there.")
+    }
+    if (!resolved.config.cwd) throw new OpError(AppErrorCode.Unsupported, 'This project has no folder for Claude plugins')
+    return { plugins, cwd: resolved.config.cwd }
+  }
+
+  private async pluginCatalog(plugins: NonNullable<ChatBridgeDeps['plugins']>, cwd: string): Promise<PluginCatalog> {
+    const now = this.deps.timers.now()
+    const cached = this.pluginCatalogs.get(cwd)
+    if (cached && now - cached.at < PLUGIN_CATALOG_TTL_MS) return cached.catalog
+    const catalog = await plugins.list(cwd).catch((err: unknown) => {
+      throw new OpError(AppErrorCode.Internal, err instanceof Error ? err.message : String(err))
+    })
+    this.pluginCatalogs.set(cwd, { at: now, catalog })
+    return catalog
+  }
+
+  /** `chat.plugins` (SPEC.md §8.28): what the desktop's sheet shows, the search done here. */
+  private async listPlugins(resolved: ResolvedTab, query: string): Promise<ChatPluginsResult> {
+    const { plugins, cwd } = this.pluginsFor(resolved)
+    const catalog = await this.pluginCatalog(plugins, cwd)
+    return {
+      installed: catalog.installed.map((p) => ({
+        id: p.id,
+        name: p.name,
+        marketplace: p.marketplace,
+        ...(p.version ? { version: p.version } : {}),
+        scope: p.scope,
+        enabled: p.enabled,
+        ...(p.notes?.length ? { notes: p.notes } : {})
+      })),
+      available: searchCatalog(catalog, query, ChatLimits.pluginMatches).map((p) => ({
+        id: p.id,
+        name: p.name,
+        marketplace: p.marketplace,
+        ...(p.description ? { description: p.description.length > ChatLimits.pluginDescription ? `${p.description.slice(0, ChatLimits.pluginDescription - 1)}…` : p.description } : {}),
+        ...(p.installCount !== undefined ? { installCount: p.installCount } : {}),
+        ...(p.installed ? { installed: true as const } : {})
+      })),
+      availableCount: catalog.available.length
+    }
+  }
+
+  /** `chat.plugins.change` (SPEC.md §8.28): as the sheet's buttons, then a reload into the running session. */
+  private async changePlugin(resolved: ResolvedTab, params: ChatPluginsChangeParams): Promise<ChatPluginsChangeResult> {
+    const { plugins, cwd } = this.pluginsFor(resolved)
+    if (!isPluginId(params.pluginId)) throw new OpError(AppErrorCode.BadRequest, `Not a plugin id: ${params.pluginId}`)
+    this.pluginCatalogs.delete(cwd)
+    try {
+      await plugins.change(cwd, params.action, params.pluginId, params.scope)
+    } catch (err) {
+      throw new OpError(AppErrorCode.Internal, err instanceof Error ? err.message : String(err))
+    }
+    const reload = await this.deps.chats.reloadPlugins?.(params.tabId).catch((err: unknown) => {
+      this.deps.log(`chat.plugins.change tab=${params.tabId} reload failed: ${err instanceof Error ? err.message : String(err)}`)
+      return null
+    })
+    if (!reload?.reloaded) return {}
+    return reload.errorCount > 0 ? { reloaded: true, pluginErrors: reload.errorCount } : { reloaded: true }
   }
 
   /** `chat.settings` (SPEC.md §8.5): what the composer's pickers do, in their order. */
@@ -607,7 +701,8 @@ export function searchChat(chat: ChatState, query: string): ChatSearchResult {
 
 /**
  * `chat.commands` (§8.14): the composer's `/` menu, as ClaudeChatTab builds it,
- * less the desktop's own /login and /logout. A Codex or Pi chat lists only its
+ * less the desktop's own /login and /logout. `/plugins` is terminal-only for a
+ * phone without the `chat.plugins` sheet; a phone with it runs it itself (§8.28). A Codex or Pi chat lists only its
  * own commands, none of them terminal-only.
  */
 export function chatCommands(chat: ChatState, agent: ChatAgent = 'claude'): ChatCommandsResult {
@@ -617,7 +712,7 @@ export function chatCommands(chat: ChatState, agent: ChatAgent = 'claude'): Chat
       const entry: ChatCommandEntry = { name: command.name }
       if (command.description) entry.description = command.description
       if (command.argumentHint) entry.argumentHint = command.argumentHint
-      if (claude && (TERMINAL_ONLY_COMMANDS.has(command.name) || DESKTOP_AUTH_COMMANDS.has(command.name)) && command.name !== PERMISSIONS_COMMAND.name) entry.terminalOnly = true
+      if (claude && (TERMINAL_ONLY_COMMANDS.has(command.name) || DESKTOP_AUTH_COMMANDS.has(command.name) || command.name === PLUGINS_COMMAND.name) && command.name !== PERMISSIONS_COMMAND.name) entry.terminalOnly = true
       return entry
     })
   }

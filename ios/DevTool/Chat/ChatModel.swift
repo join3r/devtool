@@ -510,6 +510,16 @@ final class ChatModel {
             .init(tabId: route.tabId, kind: kind, behavior: behavior, rule: rule, action: action))
     }
 
+    func plugins(query: String?) async throws -> ChatPluginsResult {
+        guard let connection = connection() else { throw DesktopConnectionError.notConnected }
+        return try await connection.chatPlugins(tabId: route.tabId, query: query)
+    }
+
+    func changePlugin(_ action: ChatPluginAction, _ pluginId: String, scope: ChatPluginScope?) async throws -> ChatPluginsChangeResult {
+        guard let connection = connection() else { throw DesktopConnectionError.notConnected }
+        return try await connection.changeChatPlugin(.init(tabId: route.tabId, action: action, pluginId: pluginId, scope: scope))
+    }
+
     func detail(for itemId: String) async throws -> ChatDetail {
         guard let connection = connection() else { throw DesktopConnectionError.notConnected }
         return try await connection.chatDetail(tabId: route.tabId, itemId: itemId)

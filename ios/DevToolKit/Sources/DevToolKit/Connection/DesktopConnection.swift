@@ -484,6 +484,22 @@ extension DesktopConnection {
         return try decode(result, ChatPermissionsResult.parse).sources
     }
 
+    /// `chat.plugins` (§8.28): the plugins installed for the chat's folder and the
+    /// marketplace plugins matching `query`. A remote project answers `.remote(code: "unsupported")`.
+    public func chatPlugins(tabId: String, query: String? = nil) async throws -> ChatPluginsResult {
+        let trimmed = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let search = trimmed.flatMap { $0.isEmpty ? nil : String($0.prefix(ChatOp.maxPluginQueryLength)) }
+        let result = try await request(ChatOp.plugins, params: ChatPluginsParams(tabId: tabId, query: search).json, timeout: .seconds(60))
+        return try decode(result, ChatPluginsResult.parse)
+    }
+
+    /// `chat.plugins.change` (§8.28): install, remove, enable or disable one plugin,
+    /// then the desktop reloads the chat's plugins. An install can clone a repository.
+    public func changeChatPlugin(_ params: ChatPluginsChangeParams) async throws -> ChatPluginsChangeResult {
+        let result = try await request(ChatOp.pluginsChange, params: params.json, timeout: .seconds(200))
+        return try decode(result, ChatPluginsChangeResult.parse)
+    }
+
     /// `chat.detail`: a tool's full input/result, or a truncated item's full text.
     public func chatDetail(tabId: String, itemId: String) async throws -> ChatDetail {
         let result = try await request(ChatOp.detail, params: .object(["tabId": .string(tabId), "itemId": .string(itemId)]))

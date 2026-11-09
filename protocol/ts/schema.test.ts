@@ -224,4 +224,13 @@ describe('JSON Schema', () => {
     for (const text of chat.permissions.invalid.results) expect(check('permissionsResult', JSON.parse(text)), text).not.toEqual([])
     for (const text of chat.permissions.invalid.updateParams) expect(check('permissionsUpdateParams', JSON.parse(text)), text).not.toEqual([])
   })
+
+  it('accepts the chat.plugins samples and rejects the invalid ones (§8.28)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `chat.schema.json#/$defs/${def}` }, value, 'chat.schema.json')
+    for (const s of chat.plugins.results) expect(check('pluginsResult', s.expected), s.json).toEqual([])
+    for (const s of chat.plugins.changeParams) expect(check('pluginsChangeParams', s.expected), s.json).toEqual([])
+    for (const s of chat.plugins.changeResults) expect(check('pluginsChangeResult', s.expected), s.json).toEqual([])
+    for (const text of (chat.plugins.invalid.results as string[]).filter((t) => t !== 'null')) expect(check('pluginsResult', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.plugins.invalid.changeParams) expect(check('pluginsChangeParams', JSON.parse(text)), text).not.toEqual([])
+  })
 })

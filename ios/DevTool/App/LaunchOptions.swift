@@ -38,7 +38,7 @@ import Foundation
 ///   (default "Hello from the phone") and answers each prompt after
 ///   `-demoAnswerDelay <seconds>` (default 6): Allow, the first option(s), Approve.
 ///   `-demoComposerText <text>` puts text in the composer (`/` shows the command
-///   menu), and `-demoCommandSheet btw|permissions|tasks|workflow` opens that sheet (`btw` asks
+///   menu), and `-demoCommandSheet btw|permissions|plugins|tasks|workflow` opens that sheet (`btw` asks
 ///   `-demoMessage`, or a canned question; `workflow` is the task list with the
 ///   first workflow's phases pushed). `-demoFind <query>` opens the find bar on
 ///   that query (§8.23) and `-demoFindSteps <n>` then goes n matches up.

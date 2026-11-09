@@ -21,6 +21,7 @@ function renderComposer(tabId = 'chat-1') {
       onSideQuestion={noop}
       onBash={noop}
       onPermissions={noop}
+      onPlugins={noop}
       onLogin={noop}
       onLogout={noop}
       onStop={noop}

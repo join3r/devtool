@@ -10,6 +10,7 @@ enum DemoChatScript {
     /// A sheet the `/` menu opens.
     enum Sheet {
         case permissions
+        case plugins
         case btw(String)
         /// The task list (§8.20), with that workflow's phases pushed when set.
         case tasks(workflow: String?)
@@ -38,6 +39,8 @@ enum DemoChatScript {
         switch options.demoCommandSheet {
         case "permissions":
             openSheet(.permissions)
+        case "plugins":
+            openSheet(.plugins)
         case "btw":
             openSheet(.btw(options.demoMessage ?? "Why does the expired-token test get a 500?"))
         case "tasks":

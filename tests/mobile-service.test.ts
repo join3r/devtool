@@ -622,6 +622,24 @@ describe('MobileService chat.commands, chat.btw and chat.permissions (SPEC.md §
   })
 })
 
+describe('MobileService chat.plugins (SPEC.md §8.28)', () => {
+  it('hands parsed params to the bridge and rejects bad ones', () => {
+    const requests: { op: string; params: unknown }[] = []
+    const env = pairedSetup({
+      chat: { request: (_phone, _id, op, params) => { requests.push({ op, params }) }, dropPhone: () => {}, dropAll: () => {}, projectsChanged: () => {} }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'chat.plugins', params: { tabId: 't', query: 'lsp' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 7, op: 'chat.plugins.change', params: { tabId: 't', action: 'install', pluginId: 'a@m', scope: 'local' } })
+    expect(requests).toEqual([
+      { op: 'chat.plugins', params: { tabId: 't', query: 'lsp' } },
+      { op: 'chat.plugins.change', params: { tabId: 't', action: 'install', pluginId: 'a@m', scope: 'local' } }
+    ])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 8, op: 'chat.plugins.change', params: { tabId: 't', action: 'update', pluginId: 'a@m' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 8, ok: false, error: { code: 'bad-request' } })
+    expect(requests).toHaveLength(2)
+  })
+})
+
 describe('MobileService chat.bash (SPEC.md §8.17)', () => {
   it('hands parsed params to the bridge and rejects a blank command', () => {
     const requests: { op: string; params: unknown }[] = []

@@ -243,6 +243,8 @@ public enum DesktopFeature {
     public static let chatBash = "chat.bash"
     /// The desktop answers `chat.fork` and marks `forkable` text items (§8.27).
     public static let chatFork = "chat.fork"
+    /// The desktop answers `chat.plugins` and `chat.plugins.change` (§8.28).
+    public static let chatPlugins = "chat.plugins"
     /// The desktop answers `chat.search` (§8.23).
     public static let chatSearch = "chat.search"
     /// The desktop's `chat.send` takes `mode`, its chats carry `queue`, and it

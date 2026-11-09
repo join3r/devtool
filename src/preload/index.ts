@@ -61,6 +61,7 @@ import type { TaskUsageSnapshot } from '../shared/task-usage'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { ChatQueueOp, ChatSendMode } from '../shared/chat-send-queue'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
+import type { PluginAction, PluginCatalog } from '../shared/claude-plugins'
 import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
 import type { SecretAnswer, SecretRequest } from '../shared/secrets'
 
@@ -345,6 +346,12 @@ const api = {
     action: 'add' | 'remove',
     projectId?: string
   ): Promise<void> => ipcRenderer.invoke('chat-permissions-update', cwd, kind, behavior, rule, action, projectId),
+  chatPluginsList: (cwd: string, projectId?: string): Promise<PluginCatalog> =>
+    ipcRenderer.invoke('chat-plugins-list', cwd, projectId),
+  chatPluginsChange: (cwd: string, action: PluginAction, id: string, scope?: string, projectId?: string): Promise<void> =>
+    ipcRenderer.invoke('chat-plugins-change', cwd, action, id, scope, projectId),
+  chatPluginsReload: (tabId: string): Promise<{ reloaded: boolean; errorCount: number }> =>
+    ipcRenderer.invoke('chat-plugins-reload', tabId),
   onChatEvent: (callback: (tabId: string, seq: number, event: ChatEvent) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, tabId: string, seq: number, event: ChatEvent) => callback(tabId, seq, event)
     ipcRenderer.on('chat-event', handler)

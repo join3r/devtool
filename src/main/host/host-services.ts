@@ -148,6 +148,7 @@ import {
   BRANCHES_LIST_FEATURE,
   CHAT_BASH_FEATURE,
   CHAT_FORK_FEATURE,
+  CHAT_PLUGINS_FEATURE,
   CHAT_SEARCH_FEATURE,
   CHAT_QUEUE_FEATURE,
   CHAT_TASKS_FEATURE,
@@ -719,6 +720,11 @@ export class HostServices {
         read: async (cwd) => readPermissionSettings(await this.resolveAllowedDirectory(cwd)),
         update: async (cwd, kind, behavior, rule, action) =>
           updatePermissionRule(await this.resolveAllowedDirectory(cwd), kind, behavior, rule, action)
+      },
+      // The same folder check as the chat tab's /plugins IPC.
+      plugins: {
+        list: async (cwd) => this.chatManager.listPlugins(await this.resolveAllowedDirectory(cwd)),
+        change: async (cwd, action, id, scope) => this.chatManager.changePlugin(await this.resolveAllowedDirectory(cwd), action, id, scope)
       }
     })
     push.start()
@@ -739,7 +745,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, TASK_FOLDER_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE, CHAT_FORK_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, TASK_FOLDER_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE, CHAT_FORK_FEATURE, CHAT_PLUGINS_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),

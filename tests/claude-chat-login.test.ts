@@ -23,11 +23,11 @@ describe('chat /login', () => {
   it('runs /login and /logout itself instead of handing them to a terminal', () => {
     expect(TERMINAL_ONLY_COMMANDS.has('login')).toBe(false)
     expect(TERMINAL_ONLY_COMMANDS.has('logout')).toBe(false)
-    expect(composerCommands([]).map((command) => command.name)).toEqual(['btw', 'permissions', 'login', 'logout'])
+    expect(composerCommands([]).map((command) => command.name)).toEqual(['btw', 'permissions', 'plugins', 'login', 'logout'])
   })
 
   it('keeps /login and /logout off the phone, or terminal only when the CLI lists them', () => {
-    expect(chatCommands(emptyChatState()).commands.map((command) => command.name)).toEqual(['btw', 'permissions'])
+    expect(chatCommands(emptyChatState()).commands.map((command) => command.name)).toEqual(['btw', 'permissions', 'plugins'])
     const listed = chatCommands({ ...emptyChatState(), commands: [{ name: 'login', description: 'Sign in' }] }).commands
     expect(listed.find((command) => command.name === 'login')).toEqual({ name: 'login', description: 'Sign in', terminalOnly: true })
   })

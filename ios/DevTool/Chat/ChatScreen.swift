@@ -18,6 +18,7 @@ struct ChatScreen: View {
     @State private var viewerImage: ChatImageRef?
     @State private var sideQuestion: SideQuestion?
     @State private var showingPermissions = false
+    @State private var showingPlugins = false
     @State private var showingTasks = false
     /// A workflow the task sheet opens on (demo launches only).
     @State private var tasksWorkflow: String?
@@ -128,6 +129,14 @@ struct ChatScreen: View {
                 )
                 .presentationDetents([.large])
             }
+            .sheet(isPresented: $showingPlugins) {
+                PluginsSheet(
+                    editable: !readOnly,
+                    load: { [model] query in try await model.plugins(query: query) },
+                    change: { [model] action, pluginId, scope in try await model.changePlugin(action, pluginId, scope: scope) }
+                )
+                .presentationDetents([.large])
+            }
             .onChange(of: commandQuery != nil) { _, typing in
                 if typing { Task { await model.loadCommands() } }
             }
@@ -149,6 +158,7 @@ struct ChatScreen: View {
                 }, openSheet: { sheet in
                     switch sheet {
                     case .permissions: showingPermissions = true
+                    case .plugins: showingPlugins = true
                     case .btw(let question): sideQuestion = SideQuestion(question: question)
                     case .tasks(let workflow):
                         tasksWorkflow = workflow
@@ -677,11 +687,28 @@ extension ChatScreen {
 
     private var suggestions: [ChatCommand]? {
         guard let query = commandQuery, let commands = model.commands else { return nil }
-        let matches = ChatCommandMenu.matches(commands, query: query)
+        // The desktop marks /plugins terminal-only for phones without the sheet.
+        let runnable = commands.map { command in
+            var command = command
+            if runsPlugins, ChatCommandMenu.isPlugins(command.name) { command.terminalOnly = false }
+            return command
+        }
+        let matches = ChatCommandMenu.matches(runnable, query: query)
         return matches.isEmpty ? nil : matches
     }
 
+    /// The desktop lists `chat.plugins` (§8.28), and this is a Claude chat.
+    private var runsPlugins: Bool {
+        isClaude && app.supports(DesktopFeature.chatPlugins, on: route.desktopId)
+    }
+
     private func pick(_ command: ChatCommand) {
+        if runsPlugins, ChatCommandMenu.isPlugins(command.name) {
+            draft = ""
+            composerFocused = false
+            showingPlugins = true
+            return
+        }
         guard !command.terminalOnly else { return }
         if isClaude, command.name == ChatCommandMenu.permissions {
             draft = ""
@@ -692,7 +719,7 @@ extension ChatScreen {
         draft = "/\(command.name) "
     }
 
-    /// `/permissions`, `/btw <question>` and terminal-only commands, which the
+    /// `/permissions`, `/plugins`, `/btw <question>` and terminal-only commands, which the
     /// composer handles itself rather than sending. True when `text` was one.
     private func runCommand(_ text: String) -> Bool {
         let command = ChatCommandMenu.command(in: text)
@@ -700,6 +727,12 @@ extension ChatScreen {
             draft = ""
             composerFocused = false
             showingPermissions = true
+            return true
+        }
+        if runsPlugins, ChatCommandMenu.isPlugins(command) {
+            draft = ""
+            composerFocused = false
+            showingPlugins = true
             return true
         }
         if let command, model.isTerminalOnly(command) {

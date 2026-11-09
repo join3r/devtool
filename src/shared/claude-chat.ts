@@ -1800,6 +1800,8 @@ export interface ChatAgentFeatures {
   login: boolean
   /** The `/permissions` rules editor. */
   permissionsEditor: boolean
+  /** The `/plugins` manager. */
+  plugins: boolean
   /** Background tasks (subagents, shells) with Stop and Background. */
   tasks: boolean
   /** "Allow, switch to Auto" on a permission card. */
@@ -1807,9 +1809,9 @@ export interface ChatAgentFeatures {
 }
 
 export const CHAT_AGENT_FEATURES: Record<ChatAgent, ChatAgentFeatures> = {
-  claude: { label: 'Claude', modes: CHAT_PERMISSION_MODES, sideQuestion: true, login: true, permissionsEditor: true, tasks: true, autoOffer: true },
-  codex: { label: 'Codex', modes: CODEX_CHAT_MODES, sideQuestion: false, login: false, permissionsEditor: false, tasks: false, autoOffer: false },
-  pi: { label: 'Pi', modes: [], sideQuestion: false, login: false, permissionsEditor: false, tasks: false, autoOffer: false }
+  claude: { label: 'Claude', modes: CHAT_PERMISSION_MODES, sideQuestion: true, login: true, permissionsEditor: true, plugins: true, tasks: true, autoOffer: true },
+  codex: { label: 'Codex', modes: CODEX_CHAT_MODES, sideQuestion: false, login: false, permissionsEditor: false, plugins: false, tasks: false, autoOffer: false },
+  pi: { label: 'Pi', modes: [], sideQuestion: false, login: false, permissionsEditor: false, plugins: false, tasks: false, autoOffer: false }
 }
 
 export function chatAgentFeatures(agent: ChatAgent | undefined): ChatAgentFeatures {
@@ -1850,6 +1852,17 @@ export const PERMISSIONS_COMMAND: ChatCommand = {
   description: 'View and edit allow, ask and deny rules'
 }
 
+/** `/plugins` (and the CLI's `/plugin`): the CLI's menu is terminal UI; the chat tab has its own plugin manager. */
+export const PLUGINS_COMMAND: ChatCommand = {
+  name: 'plugins',
+  description: 'Install, enable and remove Claude Code plugins'
+}
+
+/** The command names that open the plugin manager. */
+export function isPluginsCommand(name: string | undefined): boolean {
+  return name === PLUGINS_COMMAND.name || name === 'plugin'
+}
+
 /** `/login` and `/logout`: the chat tab runs `claude auth` itself. */
 export const LOGIN_COMMAND: ChatCommand = {
   name: 'login',
@@ -1879,12 +1892,12 @@ export const TERMINAL_ONLY_COMMANDS = new Set([
 ])
 
 /**
- * The composer's `/` menu: the CLI doesn't list /btw, /permissions, /login or
+ * The composer's `/` menu: the CLI doesn't list /btw, /permissions, /plugins, /login or
  * /logout to SDK clients, so the chat tab adds them (it runs them itself), then
  * what the CLI reported. Codex and Pi chats list only their own commands.
  */
 export function composerCommands(commands: ChatCommand[], agent: ChatAgent = 'claude'): ChatCommand[] {
   if (agent !== 'claude') return commands
-  const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND, LOGIN_COMMAND, LOGOUT_COMMAND].filter((command) => !commands.some((c) => c.name === command.name))
+  const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND, PLUGINS_COMMAND, LOGIN_COMMAND, LOGOUT_COMMAND].filter((command) => !commands.some((c) => c.name === command.name))
   return own.length > 0 ? [...own, ...commands] : commands
 }

@@ -114,6 +114,9 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'chat-list-files': projectAt(1),
   'chat-permissions-read': projectAt(1),
   'chat-permissions-update': projectAt(5),
+  'chat-plugins-list': projectAt(1),
+  'chat-plugins-change': projectAt(4),
+  'chat-plugins-reload': tab0,
 
   // terminals (ipc/terminals.ts)
   'scrollback-save': tab0,

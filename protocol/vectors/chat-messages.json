@@ -3519,5 +3519,177 @@
         "null"
       ]
     }
+  },
+  "plugins": {
+    "params": [
+      {
+        "json": "{\"tabId\":\"tab-chat\"}",
+        "expected": {
+          "tabId": "tab-chat"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"query\":\"lsp\"}",
+        "expected": {
+          "tabId": "tab-chat",
+          "query": "lsp"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"query\":\"   \"}",
+        "expected": {
+          "tabId": "tab-chat"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"query\":null,\"extra\":1}",
+        "expected": {
+          "tabId": "tab-chat"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"installed\":[{\"id\":\"feature-dev@claude-plugins-official\",\"name\":\"feature-dev\",\"marketplace\":\"claude-plugins-official\",\"version\":\"1.0.1\",\"scope\":\"user\",\"enabled\":true},{\"id\":\"swift-lsp@claude-plugins-official\",\"name\":\"swift-lsp\",\"marketplace\":\"claude-plugins-official\",\"scope\":\"local\",\"enabled\":false,\"notes\":[]},{\"id\":\"security-guidance@synced\",\"name\":\"security-guidance\",\"marketplace\":\"synced\",\"version\":null,\"scope\":\"synced\",\"enabled\":true,\"notes\":[\"Shadowed by the one on this machine\"]}],\"available\":[{\"id\":\"code-review@claude-plugins-official\",\"name\":\"code-review\",\"marketplace\":\"claude-plugins-official\",\"description\":\"Reviews pull requests\",\"installCount\":478000},{\"id\":\"feature-dev@claude-plugins-official\",\"name\":\"feature-dev\",\"marketplace\":\"claude-plugins-official\",\"installed\":true},{\"id\":\"tiny@acme\",\"name\":\"tiny\",\"marketplace\":\"acme\",\"description\":null,\"installCount\":null,\"installed\":false,\"extra\":1}],\"availableCount\":3907}",
+        "expected": {
+          "installed": [
+            {
+              "id": "feature-dev@claude-plugins-official",
+              "name": "feature-dev",
+              "marketplace": "claude-plugins-official",
+              "scope": "user",
+              "enabled": true,
+              "version": "1.0.1"
+            },
+            {
+              "id": "swift-lsp@claude-plugins-official",
+              "name": "swift-lsp",
+              "marketplace": "claude-plugins-official",
+              "scope": "local",
+              "enabled": false
+            },
+            {
+              "id": "security-guidance@synced",
+              "name": "security-guidance",
+              "marketplace": "synced",
+              "scope": "synced",
+              "enabled": true,
+              "notes": [
+                "Shadowed by the one on this machine"
+              ]
+            }
+          ],
+          "available": [
+            {
+              "id": "code-review@claude-plugins-official",
+              "name": "code-review",
+              "marketplace": "claude-plugins-official",
+              "description": "Reviews pull requests",
+              "installCount": 478000
+            },
+            {
+              "id": "feature-dev@claude-plugins-official",
+              "name": "feature-dev",
+              "marketplace": "claude-plugins-official",
+              "installed": true
+            },
+            {
+              "id": "tiny@acme",
+              "name": "tiny",
+              "marketplace": "acme"
+            }
+          ],
+          "availableCount": 3907
+        }
+      },
+      {
+        "json": "{\"installed\":[],\"available\":[],\"availableCount\":0}",
+        "expected": {
+          "installed": [],
+          "available": [],
+          "availableCount": 0
+        }
+      }
+    ],
+    "changeParams": [
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"action\":\"install\",\"pluginId\":\"code-review@claude-plugins-official\",\"scope\":\"project\"}",
+        "expected": {
+          "tabId": "tab-chat",
+          "action": "install",
+          "pluginId": "code-review@claude-plugins-official",
+          "scope": "project"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"action\":\"disable\",\"pluginId\":\"security-guidance@synced\",\"scope\":null}",
+        "expected": {
+          "tabId": "tab-chat",
+          "action": "disable",
+          "pluginId": "security-guidance@synced"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"action\":\"uninstall\",\"pluginId\":\"swift-lsp@claude-plugins-official\",\"scope\":\"local\",\"extra\":true}",
+        "expected": {
+          "tabId": "tab-chat",
+          "action": "uninstall",
+          "pluginId": "swift-lsp@claude-plugins-official",
+          "scope": "local"
+        }
+      }
+    ],
+    "changeResults": [
+      {
+        "json": "{}",
+        "expected": {}
+      },
+      {
+        "json": "{\"reloaded\":true}",
+        "expected": {
+          "reloaded": true
+        }
+      },
+      {
+        "json": "{\"reloaded\":true,\"pluginErrors\":2}",
+        "expected": {
+          "reloaded": true,
+          "pluginErrors": 2
+        }
+      },
+      {
+        "json": "{\"reloaded\":false,\"pluginErrors\":null}",
+        "expected": {}
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{}",
+        "{\"tabId\":\"tab-chat\",\"query\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "{\"tabId\":\"tab-chat\",\"query\":3}",
+        "null"
+      ],
+      "results": [
+        "{\"installed\":[],\"available\":[]}",
+        "{\"installed\":[{\"id\":\"a@m\",\"name\":\"a\",\"marketplace\":\"m\",\"scope\":\"user\"}],\"available\":[],\"availableCount\":1}",
+        "{\"installed\":[],\"available\":[{\"id\":\"a@m\",\"name\":\"a\"}],\"availableCount\":1}",
+        "{\"installed\":[],\"available\":[{\"id\":\"a@m\",\"name\":\"a\",\"marketplace\":\"m\",\"installCount\":-1}],\"availableCount\":1}",
+        "{\"installed\":[],\"available\":[],\"availableCount\":-1}",
+        "null"
+      ],
+      "changeParams": [
+        "{\"action\":\"install\",\"pluginId\":\"a@m\"}",
+        "{\"tabId\":\"tab-chat\",\"action\":\"update\",\"pluginId\":\"a@m\"}",
+        "{\"tabId\":\"tab-chat\",\"action\":\"install\",\"pluginId\":\"\"}",
+        "{\"tabId\":\"tab-chat\",\"action\":\"install\",\"pluginId\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "{\"tabId\":\"tab-chat\",\"action\":\"install\",\"pluginId\":\"a@m\",\"scope\":\"managed\"}",
+        "null"
+      ],
+      "changeResults": [
+        "{\"pluginErrors\":-1}",
+        "{\"pluginErrors\":\"two\"}",
+        "null"
+      ]
+    }
   }
 }

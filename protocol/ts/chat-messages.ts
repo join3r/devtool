@@ -474,6 +474,61 @@ export interface ChatForkResult {
 }
 
 /**
+ * `/plugins` (SPEC.md §8.28): `chat.plugins` lists the Claude Code plugins installed
+ * for the chat's folder and searches the marketplaces, and `chat.plugins.change`
+ * installs, removes, enables or disables one and reloads the chat's plugins.
+ */
+export const CHAT_PLUGINS_OP = 'chat.plugins'
+export const CHAT_PLUGINS_CHANGE_OP = 'chat.plugins.change'
+/** The handshake feature (§8.1) a desktop lists when it answers the two ops above. */
+export const CHAT_PLUGINS_FEATURE = 'chat.plugins'
+export const CHAT_PLUGIN_ACTIONS = ['install', 'uninstall', 'enable', 'disable'] as const
+export type ChatPluginAction = (typeof CHAT_PLUGIN_ACTIONS)[number]
+/** The scopes a plugin can be installed in. Installed plugins can also be in others (`managed`, `synced`). */
+export const CHAT_PLUGIN_SCOPES = ['user', 'project', 'local'] as const
+export type ChatPluginScope = (typeof CHAT_PLUGIN_SCOPES)[number]
+
+export interface ChatPluginsParams { tabId: string; query?: string }
+export interface ChatInstalledPlugin {
+  /** `name@marketplace`. */
+  id: string
+  name: string
+  marketplace: string
+  version?: string
+  /** One of {@link CHAT_PLUGIN_SCOPES}, or one the phone cannot change. */
+  scope: string
+  enabled: boolean
+  notes?: string[]
+}
+export interface ChatAvailablePlugin {
+  id: string
+  name: string
+  marketplace: string
+  description?: string
+  installCount?: number
+  installed?: true
+}
+export interface ChatPluginsResult {
+  installed: ChatInstalledPlugin[]
+  /** The best matches for `query`, or the most installed without one; at most {@link ChatLimits.pluginMatches}. */
+  available: ChatAvailablePlugin[]
+  /** All the marketplace plugins there are, before the search. */
+  availableCount: number
+}
+export interface ChatPluginsChangeParams {
+  tabId: string
+  action: ChatPluginAction
+  pluginId: string
+  scope?: ChatPluginScope
+}
+export interface ChatPluginsChangeResult {
+  /** The chat's running session loaded the change; absent: it applies from the next message. */
+  reloaded?: true
+  /** Plugins that failed to load in that reload. */
+  pluginErrors?: number
+}
+
+/**
  * Find in a chat thread (SPEC.md §8.23): the desktop searches every item of the
  * chat, not only the phone's window, and says which items match and how often.
  */
@@ -600,6 +655,12 @@ export const ChatLimits = {
   searchItems: 5000,
   /** `chat.permissions.update` rule (§8.14). */
   permissionRule: 2000,
+  /** `chat.plugins` (§8.28): the search, the matches listed, and each one's description. */
+  pluginQuery: 200,
+  pluginMatches: 50,
+  pluginDescription: 500,
+  /** `chat.plugins.change` plugin id (§8.28). */
+  pluginId: 300,
   /** A queued prompt's text (§8.16), as `chat.send`'s. */
   queueText: 32000,
   /** A schedule's name and prompt (§8.25). */
@@ -831,6 +892,8 @@ export type ChatParams =
   | ChatQueueParams
   | ChatTaskStopParams
   | ChatPermissionsUpdateParams
+  | ChatPluginsParams
+  | ChatPluginsChangeParams
 
 export interface ChatOpenResult { seq: number; view: ChatView }
 export interface ChatEarlierResult { items: ChatViewItem[]; hasEarlier: boolean }
@@ -1656,6 +1719,75 @@ export function parseChatPermissionsResult(value: unknown): ChatPermissionsResul
     sources.push(source)
   }
   return { sources }
+}
+
+/**
+ * `chat.plugins` params (the desktop's side). Throws ProtocolError — `bad-request` — on
+ * a missing `tabId` or a `query` over {@link ChatLimits.pluginQuery} characters. A blank
+ * `query` is absent.
+ */
+export function parseChatPluginsParams(params: unknown): ChatPluginsParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const query = optStr(o, 'query')
+  if (query !== undefined && query.length > ChatLimits.pluginQuery) fail(`query over ${ChatLimits.pluginQuery} characters`)
+  return query?.trim() ? { tabId, query } : { tabId }
+}
+
+/** `chat.plugins` result (the phone's side). `installed` other than `true` is absent. */
+export function parseChatPluginsResult(value: unknown): ChatPluginsResult {
+  const o = obj(value, 'result')
+  const installed = arr(o, 'installed').map((raw): ChatInstalledPlugin => {
+    const p = obj(raw, 'plugin')
+    const plugin: ChatInstalledPlugin = {
+      id: str(p, 'id'), name: str(p, 'name'), marketplace: str(p, 'marketplace'), scope: str(p, 'scope'), enabled: bool(p, 'enabled')
+    }
+    const version = optStr(p, 'version')
+    if (version !== undefined) plugin.version = version
+    if (!absent(p, 'notes')) {
+      const notes = strings(p, 'notes')
+      if (notes.length > 0) plugin.notes = notes
+    }
+    return plugin
+  })
+  const available = arr(o, 'available').map((raw): ChatAvailablePlugin => {
+    const p = obj(raw, 'plugin')
+    const plugin: ChatAvailablePlugin = { id: str(p, 'id'), name: str(p, 'name'), marketplace: str(p, 'marketplace') }
+    const description = optStr(p, 'description')
+    if (description !== undefined) plugin.description = description
+    const installCount = optInt(p, 'installCount')
+    if (installCount !== undefined) plugin.installCount = installCount
+    if (flag(p, 'installed')) plugin.installed = true
+    return plugin
+  })
+  return { installed, available, availableCount: int(o, 'availableCount') }
+}
+
+/**
+ * `chat.plugins.change` params (the desktop's side). Throws ProtocolError — `bad-request` —
+ * on a missing `tabId`, an unknown `action` or `scope`, or an empty `pluginId` or one over
+ * {@link ChatLimits.pluginId} characters.
+ */
+export function parseChatPluginsChangeParams(params: unknown): ChatPluginsChangeParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const action = oneOf(o, 'action', CHAT_PLUGIN_ACTIONS)
+  const pluginId = str(o, 'pluginId')
+  if (!pluginId) fail('pluginId is empty')
+  if (pluginId.length > ChatLimits.pluginId) fail(`pluginId over ${ChatLimits.pluginId} characters`)
+  const out: ChatPluginsChangeParams = { tabId, action, pluginId }
+  if (!absent(o, 'scope')) out.scope = oneOf(o, 'scope', CHAT_PLUGIN_SCOPES)
+  return out
+}
+
+/** `chat.plugins.change` result (the phone's side). `reloaded` other than `true` is absent. */
+export function parseChatPluginsChangeResult(value: unknown): ChatPluginsChangeResult {
+  const o = obj(value, 'result')
+  const out: ChatPluginsChangeResult = {}
+  if (flag(o, 'reloaded')) out.reloaded = true
+  const errors = optInt(o, 'pluginErrors')
+  if (errors !== undefined) out.pluginErrors = errors
+  return out
 }
 
 /** `task.new` result (the phone's side). */

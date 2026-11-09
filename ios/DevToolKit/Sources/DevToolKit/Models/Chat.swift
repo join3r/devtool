@@ -932,6 +932,9 @@ public enum ChatOp {
     public static let btw = "chat.btw"
     public static let permissions = "chat.permissions"
     public static let permissionsUpdate = "chat.permissions.update"
+    /// `/plugins` (§8.28); parsed by `ChatPluginsParams` and `ChatPluginsChangeParams`.
+    public static let plugins = "chat.plugins"
+    public static let pluginsChange = "chat.plugins.change"
     /// `!command` (§8.17); parsed by `ChatBashParams`, not `ChatParams`.
     public static let bash = "chat.bash"
     /// Fork the chat at an agent reply (§8.27); parsed by `ChatForkParams`, not `ChatParams`.
@@ -953,6 +956,10 @@ public enum ChatOp {
     public static let maxBashLength = 32_000
     /// §8.23 limit.
     public static let maxSearchLength = 200
+    /// §8.28 limits.
+    public static let maxPluginQueryLength = 200
+    public static let maxPluginIdLength = 300
+    public static let maxPluginMatches = 50
 }
 
 // MARK: - Parsing

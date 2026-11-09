@@ -302,6 +302,65 @@
         "action": { "enum": ["add", "remove"] }
       }
     },
+    "pluginsResult": {
+      "description": "chat.plugins (§8.28): the plugins installed for the chat's folder, and the marketplace plugins that match the search (at most 50).",
+      "type": "object",
+      "required": ["installed", "available", "availableCount"],
+      "properties": {
+        "installed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "marketplace", "scope", "enabled"],
+            "properties": {
+              "id": { "type": "string", "description": "name@marketplace" },
+              "name": { "type": "string" },
+              "marketplace": { "type": "string" },
+              "version": { "type": "string" },
+              "scope": { "type": "string", "description": "user, project or local; anything else the phone cannot change" },
+              "enabled": { "type": "boolean" },
+              "notes": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "available": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "marketplace"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "marketplace": { "type": "string" },
+              "description": { "type": "string", "maxLength": 500 },
+              "installCount": { "type": "integer", "minimum": 0 },
+              "installed": { "const": true }
+            }
+          }
+        },
+        "availableCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "pluginsChangeParams": {
+      "description": "chat.plugins.change params (§8.28).",
+      "type": "object",
+      "required": ["tabId", "action", "pluginId"],
+      "properties": {
+        "tabId": { "type": "string" },
+        "action": { "enum": ["install", "uninstall", "enable", "disable"] },
+        "pluginId": { "type": "string", "pattern": "\\S", "maxLength": 300 },
+        "scope": { "enum": ["user", "project", "local"] }
+      }
+    },
+    "pluginsChangeResult": {
+      "description": "chat.plugins.change (§8.28): reloaded when the chat's running session loaded the change.",
+      "type": "object",
+      "properties": {
+        "reloaded": { "const": true },
+        "pluginErrors": { "type": "integer", "minimum": 0 }
+      }
+    },
     "chatEvt": {
       "type": "object",
       "required": ["t", "e", "tabId", "seq", "upserts", "removes", "prompts", "busy", "process"],

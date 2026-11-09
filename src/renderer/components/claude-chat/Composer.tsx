@@ -9,6 +9,7 @@ import {
   PI_THINKING_LEVELS,
   PERMISSIONS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
+  isPluginsCommand,
   findModelOption,
   parseLoginCommand,
   parseSideQuestion,
@@ -47,6 +48,8 @@ interface Props {
   onBash: (command: string) => void
   /** `/permissions`: DevTool's own rules editor (the CLI's is terminal-only). */
   onPermissions: () => void
+  /** `/plugins` (or `/plugin`): DevTool's own plugin manager. */
+  onPlugins: () => void
   /** `/login [console|sso]`: sign in through `claude auth login`. */
   onLogin: (method: ChatLoginMethod) => void
   /** `/logout`: sign out through `claude auth logout`. */
@@ -128,7 +131,7 @@ function rankFiles(files: string[], query: string): string[] {
 }
 
 export default function Composer(props: Props): React.ReactElement {
-  const { agent = 'claude', busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onLogin, onLogout, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
+  const { agent = 'claude', busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onPlugins, onLogin, onLogout, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
   const features = chatAgentFeatures(agent)
   const isClaude = agent === 'claude'
   const [text, setText] = useState('')
@@ -199,7 +202,7 @@ export default function Composer(props: Props): React.ReactElement {
       .map((command) => ({
         value: command.name,
         label: `/${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ''}`,
-        description: TERMINAL_ONLY_COMMANDS.has(command.name) && command.name !== PERMISSIONS_COMMAND.name ? 'Terminal only — continues this task in a terminal' : command.description
+        description: TERMINAL_ONLY_COMMANDS.has(command.name) && command.name !== PERMISSIONS_COMMAND.name && !isPluginsCommand(command.name) ? 'Terminal only — continues this task in a terminal' : command.description
       }))
   }, [suggest, files, commands])
 
@@ -217,6 +220,12 @@ export default function Composer(props: Props): React.ReactElement {
       setSuggest(null)
       setText('')
       onPermissions()
+      return
+    }
+    if (isClaude && suggest.kind === 'command' && isPluginsCommand(value)) {
+      setSuggest(null)
+      setText('')
+      onPlugins()
       return
     }
     if (isClaude && suggest.kind === 'command' && value === LOGOUT_COMMAND.name) {
@@ -256,6 +265,12 @@ export default function Composer(props: Props): React.ReactElement {
     const command = isClaude ? /^\/(\S+)/.exec(trimmed)?.[1] : undefined
     if (command === PERMISSIONS_COMMAND.name) {
       onPermissions()
+      setText('')
+      setSuggest(null)
+      return
+    }
+    if (isPluginsCommand(command)) {
+      onPlugins()
       setText('')
       setSuggest(null)
       return

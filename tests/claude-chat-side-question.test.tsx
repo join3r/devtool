@@ -43,6 +43,7 @@ function renderComposer() {
     onSideQuestion: vi.fn(),
     onBash: vi.fn(),
     onPermissions: vi.fn(),
+    onPlugins: vi.fn(),
     onLogin: vi.fn(),
     onLogout: vi.fn(),
     onStop: vi.fn(),
@@ -106,6 +107,14 @@ describe('Composer ! and /permissions', () => {
     const { props, submit } = renderComposer()
     submit('/permissions')
     expect(props.onPermissions).toHaveBeenCalled()
+    expect(props.onOpenInTerminal).not.toHaveBeenCalled()
+    expect(props.onSend).not.toHaveBeenCalled()
+  })
+
+  it.each(['/plugins', '/plugin'])('opens the plugin manager for %s rather than a terminal', (command) => {
+    const { props, submit } = renderComposer()
+    submit(command)
+    expect(props.onPlugins).toHaveBeenCalled()
     expect(props.onOpenInTerminal).not.toHaveBeenCalled()
     expect(props.onSend).not.toHaveBeenCalled()
   })

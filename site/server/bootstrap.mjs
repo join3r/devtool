@@ -640,6 +640,8 @@ var CHAT_PERMISSIONS_OP = "chat.permissions";
 var CHAT_PERMISSIONS_UPDATE_OP = "chat.permissions.update";
 var CHAT_BASH_OP = "chat.bash";
 var CHAT_FORK_OP = "chat.fork";
+var CHAT_PLUGINS_OP = "chat.plugins";
+var CHAT_PLUGINS_CHANGE_OP = "chat.plugins.change";
 var CHAT_SEARCH_OP = "chat.search";
 var CHAT_QUEUE_OP = "chat.queue";
 var CHAT_TASK_STOP_OP = "chat.task.stop";
@@ -684,6 +686,8 @@ var AppOp = {
   ChatTaskStop: CHAT_TASK_STOP_OP,
   ChatPermissions: CHAT_PERMISSIONS_OP,
   ChatPermissionsUpdate: CHAT_PERMISSIONS_UPDATE_OP,
+  ChatPlugins: CHAT_PLUGINS_OP,
+  ChatPluginsChange: CHAT_PLUGINS_CHANGE_OP,
   PushRegister: PushOp.Register,
   PushUnregister: PushOp.Unregister
 };

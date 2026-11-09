@@ -7,6 +7,7 @@ import type { SshConfig } from '../../shared/types'
 import type { ClaudeChatManager } from '../claude-chat/chat-manager'
 import { readPermissionSettings, updatePermissionRule } from '../claude-chat/permission-settings'
 import { PERMISSION_BEHAVIORS } from '../../shared/chat-permissions'
+import { isPluginId, PLUGIN_ACTIONS, PLUGIN_SCOPES } from '../../shared/claude-plugins'
 import type { CodexSessionManager } from '../codex-session-manager'
 import type { HookInjector } from '../hook-injector'
 import { spawnCdCommand, type SshConnectionManager } from '../ssh-connection-manager'
@@ -256,4 +257,18 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
     optSafeId
   ], async (_event, cwd, kind, behavior, rule, action) =>
     updatePermissionRule(await deps.assertAllowedDirectory(cwd), kind, behavior, rule, action))
+  // `/plugins`: the CLI reads the project's settings for its project and local scopes.
+  ipc.handle('chat-plugins-list', [v.string({ nonEmpty: true }), optSafeId], async (_event, cwd) =>
+    deps.chatManager().listPlugins(await deps.assertAllowedDirectory(cwd)))
+  ipc.handle('chat-plugins-change', [
+    v.string({ nonEmpty: true }),
+    v.literal(...PLUGIN_ACTIONS),
+    v.string({ nonEmpty: true, max: 300 }),
+    v.optional(v.string({ max: 32 })),
+    optSafeId
+  ], async (_event, cwd, action, id, scope) => {
+    if (!isPluginId(id)) throw new Error(`Not a plugin id: ${id}`)
+    await deps.chatManager().changePlugin(await deps.assertAllowedDirectory(cwd), action, id, scope && (PLUGIN_SCOPES as readonly string[]).includes(scope) ? scope : undefined)
+  })
+  ipc.handle('chat-plugins-reload', [safeId], (_event, tabId) => deps.chatManager().reloadPlugins(tabId))
 }

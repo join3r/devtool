@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseChatForkParams, parseChatForkResult, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseChatForkParams, parseChatForkResult, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseChatPluginsParams, parseChatPluginsResult, parseChatPluginsChangeParams, parseChatPluginsChangeResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -1344,6 +1344,62 @@ function chatMessages(): unknown {
           text({ tabId: 'tab-chat', kind: 'localSettings', behavior: 'allow', action: 'add' }),
           'null'
         ]
+      }
+    },
+    // §8.28: /plugins.
+    plugins: {
+      params: [
+        text({ tabId: 'tab-chat' }),
+        text({ tabId: 'tab-chat', query: 'lsp' }),
+        text({ tabId: 'tab-chat', query: '   ' }),
+        text({ tabId: 'tab-chat', query: null, extra: 1 })
+      ].map((json) => ({ json, expected: parseChatPluginsParams(JSON.parse(json)) })),
+      results: [
+        text({
+          installed: [
+            { id: 'feature-dev@claude-plugins-official', name: 'feature-dev', marketplace: 'claude-plugins-official', version: '1.0.1', scope: 'user', enabled: true },
+            { id: 'swift-lsp@claude-plugins-official', name: 'swift-lsp', marketplace: 'claude-plugins-official', scope: 'local', enabled: false, notes: [] },
+            { id: 'security-guidance@synced', name: 'security-guidance', marketplace: 'synced', version: null, scope: 'synced', enabled: true, notes: ['Shadowed by the one on this machine'] }
+          ],
+          available: [
+            { id: 'code-review@claude-plugins-official', name: 'code-review', marketplace: 'claude-plugins-official', description: 'Reviews pull requests', installCount: 478000 },
+            { id: 'feature-dev@claude-plugins-official', name: 'feature-dev', marketplace: 'claude-plugins-official', installed: true },
+            { id: 'tiny@acme', name: 'tiny', marketplace: 'acme', description: null, installCount: null, installed: false, extra: 1 }
+          ],
+          availableCount: 3907
+        }),
+        text({ installed: [], available: [], availableCount: 0 })
+      ].map((json) => ({ json, expected: parseChatPluginsResult(JSON.parse(json)) })),
+      changeParams: [
+        text({ tabId: 'tab-chat', action: 'install', pluginId: 'code-review@claude-plugins-official', scope: 'project' }),
+        text({ tabId: 'tab-chat', action: 'disable', pluginId: 'security-guidance@synced', scope: null }),
+        text({ tabId: 'tab-chat', action: 'uninstall', pluginId: 'swift-lsp@claude-plugins-official', scope: 'local', extra: true })
+      ].map((json) => ({ json, expected: parseChatPluginsChangeParams(JSON.parse(json)) })),
+      changeResults: [
+        text({}),
+        text({ reloaded: true }),
+        text({ reloaded: true, pluginErrors: 2 }),
+        text({ reloaded: false, pluginErrors: null })
+      ].map((json) => ({ json, expected: parseChatPluginsChangeResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), text({ tabId: 'tab-chat', query: 'x'.repeat(201) }), text({ tabId: 'tab-chat', query: 3 }), 'null'],
+        results: [
+          text({ installed: [], available: [] }),
+          text({ installed: [{ id: 'a@m', name: 'a', marketplace: 'm', scope: 'user' }], available: [], availableCount: 1 }),
+          text({ installed: [], available: [{ id: 'a@m', name: 'a' }], availableCount: 1 }),
+          text({ installed: [], available: [{ id: 'a@m', name: 'a', marketplace: 'm', installCount: -1 }], availableCount: 1 }),
+          text({ installed: [], available: [], availableCount: -1 }),
+          'null'
+        ],
+        changeParams: [
+          text({ action: 'install', pluginId: 'a@m' }),
+          text({ tabId: 'tab-chat', action: 'update', pluginId: 'a@m' }),
+          text({ tabId: 'tab-chat', action: 'install', pluginId: '' }),
+          text({ tabId: 'tab-chat', action: 'install', pluginId: 'x'.repeat(301) }),
+          text({ tabId: 'tab-chat', action: 'install', pluginId: 'a@m', scope: 'managed' }),
+          'null'
+        ],
+        changeResults: [text({ pluginErrors: -1 }), text({ pluginErrors: 'two' }), 'null']
       }
     }
   }

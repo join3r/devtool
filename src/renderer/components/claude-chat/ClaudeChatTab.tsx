@@ -20,6 +20,7 @@ import SideQuestion, { type SideQuestionState } from './SideQuestion'
 import ColdCacheNotice from './ColdCacheNotice'
 import LoginCard from './LoginCard'
 import PermissionsDialog from './PermissionsDialog'
+import PluginsDialog from './PluginsDialog'
 import Composer from './Composer'
 import ChatFindBar from './ChatFindBar'
 import { useChatFind } from './useChatFind'
@@ -85,6 +86,7 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
   const sideSeq = useRef(0)
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const [permissionsOpen, setPermissionsOpen] = useState(false)
+  const [pluginsOpen, setPluginsOpen] = useState(false)
   // A server chat waits for its server, and attaches again (a fresh snapshot) each
   // time the server comes back: the server let go of this window when the link dropped.
   const serverOnline = useServerOnline(serverId)
@@ -551,6 +553,7 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
           onSideQuestion={askSideQuestion}
           onBash={runBash}
           onPermissions={() => setPermissionsOpen(true)}
+          onPlugins={() => setPluginsOpen(true)}
           onLogin={login}
           onLogout={logout}
           onStop={() => { void window.api.chatInterrupt(tabId) }}
@@ -573,6 +576,15 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
           projectId={projectId}
           permissionMode={state.info.permissionMode}
           onClose={() => setPermissionsOpen(false)}
+          onOpenInTerminal={openInTerminal}
+        />
+      )}
+      {pluginsOpen && features.plugins && (
+        <PluginsDialog
+          tabId={tabId}
+          cwd={sshConfig ? null : projectDir}
+          projectId={projectId}
+          onClose={() => setPluginsOpen(false)}
           onOpenInTerminal={openInTerminal}
         />
       )}

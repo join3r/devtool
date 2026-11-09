@@ -365,6 +365,7 @@ extension MockChats {
     static let commands: [ChatCommand] = [
         ChatCommand(name: "btw", description: "Ask a quick side question — the answer stays out of the conversation", argumentHint: "<question>"),
         ChatCommand(name: "permissions", description: "View and edit allow, ask and deny rules"),
+        ChatCommand(name: "plugins", description: "Install, enable and remove Claude Code plugins", terminalOnly: true),
         ChatCommand(name: "clear", description: "Clear conversation history and free up context"),
         ChatCommand(name: "compact", description: "Clear conversation history but keep a summary in context",
                     argumentHint: "<optional custom summarization instructions>"),
@@ -425,6 +426,37 @@ extension MockChats {
         (You asked: “\(question)”)
         """
     }
+
+    static func installedPlugins() -> [ChatInstalledPlugin] {
+        [
+            ChatInstalledPlugin(pluginId: "feature-dev@claude-plugins-official", name: "feature-dev", marketplace: "claude-plugins-official",
+                                version: "1.0.1", scope: "user", enabled: true),
+            ChatInstalledPlugin(pluginId: "security-guidance@synced", name: "security-guidance", marketplace: "synced", scope: "synced", enabled: true,
+                                notes: ["From claude.ai; the copy on this machine takes precedence"]),
+            ChatInstalledPlugin(pluginId: "swift-lsp@claude-plugins-official", name: "swift-lsp", marketplace: "claude-plugins-official",
+                                version: "1.0.0", scope: "local", enabled: false),
+        ]
+    }
+
+    /// The mock marketplaces, the most installed first.
+    static let marketplacePlugins: [ChatAvailablePlugin] = [
+        ChatAvailablePlugin(id: "superpowers@claude-plugins-official", name: "superpowers", marketplace: "claude-plugins-official",
+                            description: "Brainstorming, subagent-driven development with built-in code review, systematic debugging and red/green TDD.", installCount: 1_124_000),
+        ChatAvailablePlugin(id: "code-review@claude-plugins-official", name: "code-review", marketplace: "claude-plugins-official",
+                            description: "Automated code review for pull requests using several specialized agents with confidence-based scoring.", installCount: 478_000),
+        ChatAvailablePlugin(id: "context7@claude-plugins-official", name: "context7", marketplace: "claude-plugins-official",
+                            description: "Up-to-date documentation lookup through the Context7 MCP server.", installCount: 441_000),
+        ChatAvailablePlugin(id: "playwright@claude-plugins-official", name: "playwright", marketplace: "claude-plugins-official",
+                            description: "Browser automation and end-to-end testing through Microsoft's MCP server.", installCount: 358_000),
+        ChatAvailablePlugin(id: "commit-commands@claude-plugins-official", name: "commit-commands", marketplace: "claude-plugins-official",
+                            description: "Commands for git commits, pushes and pull requests.", installCount: 204_000),
+        ChatAvailablePlugin(id: "typescript-lsp@claude-plugins-official", name: "typescript-lsp", marketplace: "claude-plugins-official",
+                            description: "TypeScript and JavaScript language server for code intelligence.", installCount: 96_500),
+        ChatAvailablePlugin(id: "explanatory-output-style@claude-plugins-official", name: "explanatory-output-style", marketplace: "claude-plugins-official",
+                            description: "Adds educational insights about the choices Claude makes.", installCount: 41_000),
+        ChatAvailablePlugin(id: "release-notes@acme-tools", name: "release-notes", marketplace: "acme-tools",
+                            description: "Writes release notes from the commits since the last tag.", installCount: 950),
+    ]
 
     static func permissionSources() -> [ChatPermissionSource] {
         [

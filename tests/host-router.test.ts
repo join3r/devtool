@@ -103,11 +103,11 @@ describe('step 7 routes (files, editor, Git panel, chat, conda, notebooks, agent
       'fb-rename': 3, 'fb-delete': 2, 'fb-git-status': 1, 'fb-git-diff': 2, 'fb-git-stage': 3, 'fb-git-unstage': 3,
       'fb-git-discard': 3, 'fb-git-pull': 2, 'fb-git-commit': 3, 'fb-git-push': 2, 'git-project-posture': 1,
       'git-commit-history': 1, 'git-branch-graph': 3, 'conda-list-envs': 0, 'chat-list-files': 1, 'chat-permissions-read': 1,
-      'chat-permissions-update': 5, 'claude-session-exists': 2
+      'chat-permissions-update': 5, 'chat-plugins-list': 1, 'chat-plugins-change': 4, 'claude-session-exists': 2
     }
     for (const [channel, at] of Object.entries(byProject)) expect(routeKeys(channel), channel).toEqual([{ project: at }])
     for (const channel of ['chat-detach', 'chat-bash', 'chat-login', 'chat-login-code', 'chat-login-dismiss', 'chat-logout',
-      'chat-respond', 'chat-interrupt', 'chat-set-mode', 'notebook-kernel-execute', 'notebook-kernel-interrupt']) {
+      'chat-respond', 'chat-interrupt', 'chat-set-mode', 'chat-plugins-reload', 'notebook-kernel-execute', 'notebook-kernel-interrupt']) {
       expect(routeKeys(channel), channel).toEqual([{ tab: 0 }])
     }
     expect(HOST_ROUTES['chat-send']).toEqual({ by: [{ tab: 0 }], remote: 'custom' })

@@ -25,6 +25,7 @@ import {
   type ChatPromptResponse,
   type ChatSideAnswer,
   type ChatAccount,
+  type ChatCommand,
   type ChatColdCache,
   type ChatUsage
 } from '../../shared/claude-chat'
@@ -398,6 +399,13 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
  * the terminal UI. Permission prompts arrive as `canUseTool` calls and are held
  * open until a window answers them.
  */
+/** The CLI's commands for the `/` menu. Names can repeat (a user skill and a plugin one); the first row is the one /name runs. */
+function menuCommands(commands: { name: string; description: string; argumentHint: string }[]): ChatCommand[] {
+  return commands
+    .filter((c, index) => commands.findIndex((other) => other.name === c.name) === index)
+    .map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint }))
+}
+
 export class ChatSession {
   private readonly input = new MessageQueue()
   private query: Query | null = null
@@ -732,10 +740,7 @@ export class ChatSession {
           description: m.description,
           supportedEffortLevels: m.supportedEffortLevels
         })),
-        // Names can repeat (a user skill and a plugin one); the first row is the one /name runs.
-        commands: commands
-          .filter((c, index) => commands.findIndex((other) => other.name === c.name) === index)
-          .map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint }))
+        commands: menuCommands(commands)
       })
     } catch {
       // Pickers fall back to free text.
@@ -931,6 +936,17 @@ export class ChatSession {
     for (const [id, held] of [...this.held]) {
       if (bypassAllows(mode, held.prompt.toolName)) this.respond(id, { behavior: 'allow' })
     }
+  }
+
+  /**
+   * Load the plugins on disk again after `/plugins` changed them, and send the
+   * new `/` menu. False when the CLI is not up: the next start reads them anyway.
+   */
+  async reloadPlugins(): Promise<{ reloaded: boolean; errorCount: number }> {
+    if (!this.query || this.ended) return { reloaded: false, errorCount: 0 }
+    const result = await this.query.reloadPlugins()
+    if (!this.ended) this.options.onEvent({ t: 'meta', commands: menuCommands(result.commands) })
+    return { reloaded: true, errorCount: result.error_count }
   }
 
   async setEffort(effort: string | undefined): Promise<void> {

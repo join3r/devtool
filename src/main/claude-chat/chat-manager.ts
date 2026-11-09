@@ -34,6 +34,8 @@ import { accountFromStatus, loginArgs, loginUrlFrom, outputTail, startLogin, typ
 import { createRemoteSpawner, type RemoteCommand } from './remote-spawn'
 import { TAB_OWNER_ENV } from '../tab-processes'
 import { readLocalTranscript, readRemoteTranscript, SESSION_ID_RE } from './transcript'
+import { changePlugin, listPlugins } from './plugins'
+import type { PluginAction, PluginCatalog } from '../../shared/claude-plugins'
 
 /** What a window tells main about the chat tab it mounts. */
 export interface ChatTabConfig {
@@ -553,6 +555,27 @@ export class ClaudeChatManager {
     runtime.effort = effort
     if (runtime.session && !runtime.session.isEnded()) await runtime.session.setEffort(effort)
     else this.emit(runtime, { t: 'meta', info: { effort } })
+  }
+
+  /** `/plugins`: what the user's own `claude` has installed and can install, seen from `cwd`. */
+  listPlugins(cwd: string): Promise<PluginCatalog> {
+    return listPlugins(this.pluginCli(), cwd)
+  }
+
+  changePlugin(cwd: string, action: PluginAction, id: string, scope?: string): Promise<void> {
+    return changePlugin(this.pluginCli(), cwd, action, id, scope)
+  }
+
+  /** Load the changed plugins into the tab's running session. */
+  async reloadPlugins(tabId: string): Promise<{ reloaded: boolean; errorCount: number }> {
+    const session = this.runtimes.get(tabId)?.session
+    // Codex and Pi chats have no Claude plugins.
+    if (!(session instanceof ChatSession) || session.isEnded()) return { reloaded: false, errorCount: 0 }
+    return session.reloadPlugins()
+  }
+
+  private pluginCli(): { executable: () => string; env: () => Record<string, string | undefined> } {
+    return { executable: () => this.deps.resolveLocalClaude(), env: () => this.deps.localEnv() }
   }
 
   /** End the process but keep the timeline (e.g. before the tab turns into a terminal). */

@@ -36,6 +36,8 @@ public actor MockDesktopConnection: DesktopConnection {
     private var taskTickers: [String: Task<Void, Never>] = [:]
     /// `/permissions` rules (§8.14), shared by every mock chat.
     private var permissionSources = MockChats.permissionSources()
+    /// `/plugins` (§8.28), shared by every mock chat.
+    private var installedPlugins = MockChats.installedPlugins()
     /// Worktree tasks whose close stops on a conflict until the agent fixes it (§8.15).
     private var conflicting: Set<String> = MockInbox.conflictingTasks
     /// The "agent" fixing a conflict, by task.
@@ -128,6 +130,56 @@ public actor MockDesktopConnection: DesktopConnection {
         case .allow: permissionSources[index].allow = rules
         case .ask: permissionSources[index].ask = rules
         case .deny: permissionSources[index].deny = rules
+        }
+    }
+
+    /// `chat.plugins`: the installed ones, and a search as the desktop does it (names first).
+    private func pluginList(_ query: String?) -> ChatPluginsResult {
+        let installedIds = Set(installedPlugins.map(\.pluginId))
+        let all = MockChats.marketplacePlugins
+        let matches: [ChatAvailablePlugin]
+        if let query = query?.lowercased(), !query.isEmpty {
+            func rank(_ p: ChatAvailablePlugin) -> Int {
+                let name = p.name.lowercased()
+                if name == query { return 0 }
+                if name.hasPrefix(query) { return 1 }
+                if name.contains(query) { return 2 }
+                return p.description?.lowercased().contains(query) == true ? 3 : 4
+            }
+            matches = all.enumerated().map { ($0.offset, $0.element, rank($0.element)) }
+                .filter { $0.2 < 4 }
+                .sorted { ($0.2, $0.0) < ($1.2, $1.0) }
+                .map(\.1)
+        } else {
+            matches = all
+        }
+        let available = matches.prefix(ChatOp.maxPluginMatches).map { plugin in
+            var plugin = plugin
+            plugin.installed = installedIds.contains(plugin.id)
+            return plugin
+        }
+        return ChatPluginsResult(installed: installedPlugins, available: Array(available), availableCount: Int64(all.count))
+    }
+
+    private func changePlugin(_ change: ChatPluginsChangeParams) throws {
+        let scope = change.scope?.rawValue
+        let index = installedPlugins.firstIndex { $0.pluginId == change.pluginId && (scope == nil || $0.scope == scope) }
+        switch change.action {
+        case .install:
+            guard let plugin = MockChats.marketplacePlugins.first(where: { $0.id == change.pluginId }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "Plugin \"\(change.pluginId)\" not found in any marketplace")
+            }
+            if index == nil {
+                installedPlugins.append(ChatInstalledPlugin(pluginId: plugin.id, name: plugin.name, marketplace: plugin.marketplace,
+                                                            version: "1.0.0", scope: scope ?? "user", enabled: true))
+                installedPlugins.sort { $0.name < $1.name }
+            }
+        case .uninstall:
+            guard let index else { throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "Plugin \"\(change.pluginId)\" is not installed") }
+            installedPlugins.remove(at: index)
+        case .enable, .disable:
+            guard let index else { throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "Plugin \"\(change.pluginId)\" is not installed") }
+            installedPlugins[index].enabled = change.action == .enable
         }
     }
 
@@ -486,6 +538,27 @@ public actor MockDesktopConnection: DesktopConnection {
             guard chats[parsed.tabId] != nil else { throw notFound() }
             updatePermission(parsed)
             return ChatPermissionsResult(sources: permissionSources).json
+        case ChatOp.plugins:
+            let parsed: ChatPluginsParams
+            do {
+                parsed = try ChatPluginsParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard chats[parsed.tabId] != nil else { throw notFound() }
+            return pluginList(parsed.query).json
+        case ChatOp.pluginsChange:
+            let parsed: ChatPluginsChangeParams
+            do {
+                parsed = try ChatPluginsChangeParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard chats[parsed.tabId] != nil else { throw notFound() }
+            // An install takes a moment, as on a desktop.
+            if parsed.action == .install { try? await Task.sleep(for: streamStep * 20) }
+            try changePlugin(parsed)
+            return ChatPluginsChangeResult(reloaded: true).json
         case ChatOp.interrupt:
             let tabId = try string("tabId")
             guard chats[tabId] != nil else { throw notFound() }
@@ -1389,7 +1462,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
             DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules, DesktopFeature.taskChildren,
-            DesktopFeature.chatFork,
+            DesktopFeature.chatFork, DesktopFeature.chatPlugins,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

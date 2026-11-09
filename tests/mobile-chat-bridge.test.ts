@@ -447,6 +447,7 @@ describe('ChatBridge', () => {
       result: {
         commands: [
           { name: 'btw', description: 'Ask a quick side question — the answer stays out of the conversation', argumentHint: '<question>' },
+          { name: 'plugins', description: 'Install, enable and remove Claude Code plugins', terminalOnly: true },
           { name: 'compact', description: 'Summarize the conversation', argumentHint: '<instructions>' },
           { name: 'permissions', description: 'Manage permissions' },
           { name: 'config', description: 'Open config panel', terminalOnly: true },
@@ -559,6 +560,72 @@ describe('ChatBridge', () => {
     const remote = await req('chat.permissions', { tabId: 'tab-chat' })
     expect(remote).toMatchObject({ ok: false, error: { code: 'unsupported', message: expect.stringContaining('remote host') } })
     expect(calls).toHaveLength(3)
+  })
+
+  it('lists, searches and changes /plugins in the chat\'s folder, then reloads the session (§8.28)', async () => {
+    expect(await req('chat.plugins', { tabId: 'tab-chat' })).toMatchObject({ ok: false, error: { code: 'unsupported' } })
+    const calls: unknown[] = []
+    let now = 1000
+    const catalog = {
+      installed: [
+        { id: 'feature-dev@official', name: 'feature-dev', marketplace: 'official', version: '1.0.1', scope: 'user', enabled: true },
+        { id: 'helper@synced', name: 'helper', marketplace: 'synced', scope: 'synced', enabled: true, notes: ['Shadowed'] }
+      ],
+      available: [
+        { id: 'code-review@official', name: 'code-review', marketplace: 'official', description: 'x'.repeat(600), installCount: 9000 },
+        { id: 'swift-lsp@official', name: 'swift-lsp', marketplace: 'official', installCount: 10 }
+      ]
+    }
+    bridge = new ChatBridge({
+      chats,
+      projects: { peek: () => data },
+      timers: { now: () => now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+      log: (m) => logs.push(m),
+      plugins: {
+        list: async (cwd) => {
+          calls.push(['list', cwd])
+          return catalog
+        },
+        change: async (cwd, action, id, scope) => {
+          calls.push(['change', cwd, action, id, scope])
+          if (id === 'broken@official') throw new Error('Plugin "broken" not found')
+        }
+      }
+    })
+    const all = await req('chat.plugins', { tabId: 'tab-chat' })
+    expect(all).toMatchObject({ ok: true, result: { availableCount: 2 } })
+    const result = (all as { result: { installed: unknown[]; available: { id: string; description?: string; installed?: true }[] } }).result
+    expect(result.installed).toEqual([
+      { id: 'feature-dev@official', name: 'feature-dev', marketplace: 'official', version: '1.0.1', scope: 'user', enabled: true },
+      { id: 'helper@synced', name: 'helper', marketplace: 'synced', scope: 'synced', enabled: true, notes: ['Shadowed'] }
+    ])
+    expect(result.available.map((p) => p.id)).toEqual(['code-review@official', 'swift-lsp@official'])
+    expect(result.available[0].description).toHaveLength(500)
+    // A search finds an installed plugin too, marked; the list is cached meanwhile.
+    expect(await req('chat.plugins', { tabId: 'tab-chat', query: 'feature' })).toMatchObject({
+      ok: true, result: { available: [{ id: 'feature-dev@official', installed: true }] }
+    })
+    expect(calls).toEqual([['list', '/wt/fix/pkg']])
+
+    expect(await req('chat.plugins.change', { tabId: 'tab-chat', action: 'install', pluginId: 'swift-lsp@official', scope: 'local' }))
+      .toMatchObject({ ok: true, result: { reloaded: true } })
+    expect(chats.pluginReloads).toEqual(['tab-chat'])
+    chats.pluginReload = { reloaded: false, errorCount: 0 }
+    expect(await req('chat.plugins.change', { tabId: 'tab-chat', action: 'disable', pluginId: 'helper@synced' })).toEqual(expect.objectContaining({ ok: true, result: {} }))
+    chats.pluginReload = { reloaded: true, errorCount: 2 }
+    expect(await req('chat.plugins.change', { tabId: 'tab-chat', action: 'enable', pluginId: 'helper@synced' }))
+      .toMatchObject({ ok: true, result: { reloaded: true, pluginErrors: 2 } })
+    expect(await req('chat.plugins.change', { tabId: 'tab-chat', action: 'install', pluginId: 'broken@official' }))
+      .toMatchObject({ ok: false, error: { code: 'internal', message: 'Plugin "broken" not found' } })
+    expect(await req('chat.plugins.change', { tabId: 'tab-chat', action: 'install', pluginId: '-y' }))
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    // A change dropped the cache: the next list asks again.
+    now += 1
+    await req('chat.plugins', { tabId: 'tab-chat' })
+    expect(calls.filter((c) => (c as string[])[0] === 'list')).toHaveLength(2)
+
+    data.projects[0].ssh = { host: 'box', remoteDir: '/srv/api' } as NonNullable<ProjectsData['projects'][number]['ssh']>
+    expect(await req('chat.plugins', { tabId: 'tab-chat' })).toMatchObject({ ok: false, error: { code: 'unsupported', message: expect.stringContaining('remote host') } })
   })
 
   it('sends the task pill\'s rows on the item throttle, and stops a task (§8.20)', async () => {

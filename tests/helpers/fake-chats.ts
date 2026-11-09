@@ -112,6 +112,14 @@ export class FakeChats implements ChatBridgeChats {
     return this.stopTaskResult
   }
 
+  readonly pluginReloads: string[] = []
+  pluginReload = { reloaded: true, errorCount: 0 }
+
+  async reloadPlugins(tabId: string): Promise<{ reloaded: boolean; errorCount: number }> {
+    this.pluginReloads.push(tabId)
+    return this.pluginReload
+  }
+
     respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean {
     const runtime = this.runtimes.get(tabId)
     if (!runtime || !runtime.state.pending.some((p) => p.id === promptId)) return false
