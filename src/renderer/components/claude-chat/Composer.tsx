@@ -1,8 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ListPlus, Navigation, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ListPlus, Navigation, Sparkles, Square, SquareTerminal } from 'lucide-react'
 import {
   CHAT_EFFORT_LEVELS,
   chatAgentFeatures,
+  chatPromptKeywords,
   CODEX_CHAT_MODES,
   DEFAULT_CODEX_MODE,
   LOGOUT_COMMAND,
@@ -356,6 +357,7 @@ export default function Composer(props: Props): React.ReactElement {
   const modeHelp = isClaude ? MODE_HELP : CODEX_MODE_HELP
   const canSend = !disabled && (text.trim().length > 0 || images.length > 0)
   const bashMode = text.trimStart().startsWith('!')
+  const keywords = isClaude && !bashMode ? chatPromptKeywords(text) : []
   const otherMode: ChatSendMode = busyMode === 'queue' ? 'steer' : 'queue'
   const modeHelpText = (mode: ChatSendMode): string => mode === 'queue'
     ? `queues it: sent when ${features.label} finishes this turn`
@@ -415,6 +417,12 @@ export default function Composer(props: Props): React.ReactElement {
             Shell command
           </span>
         )}
+        {keywords.map((k) => (
+          <span key={k.word} className="inline-flex items-center gap-1 px-1.5 text-xs text-accent" title={k.description}>
+            <Sparkles size={11} />
+            {k.label}
+          </span>
+        ))}
         <ChipMenu
           label={modelLabel}
           title="Model"

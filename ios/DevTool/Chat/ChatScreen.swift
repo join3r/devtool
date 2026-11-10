@@ -430,6 +430,9 @@ struct ChatScreen: View {
                 }
                 .transition(.opacity)
             }
+            if !draftKeywords.isEmpty {
+                keywordLabels
+            }
             composer
         }
         .padding(.horizontal, 12)
@@ -542,6 +545,24 @@ struct ChatScreen: View {
     /// The draft is a shell command, as the desktop composer's bash mode.
     private var bashMode: Bool {
         supportsBash && !readOnly && ChatBashMode.isOn(draft)
+    }
+
+    /// Words in the draft that Claude Code reacts to (`ultrathink`, `ultracode`), as the desktop composer shows them.
+    private var draftKeywords: [ChatPromptKeyword] {
+        isClaude && !bashMode ? ChatPromptKeyword.found(in: draft) : []
+    }
+
+    private var keywordLabels: some View {
+        HStack(spacing: 10) {
+            ForEach(draftKeywords, id: \.word) { keyword in
+                Label(keyword.label, systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHint(keyword.description)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The desktop takes pictures with `chat.send`.

@@ -1833,6 +1833,26 @@ export const SIDE_QUESTION_COMMAND: ChatCommand = {
   argumentHint: '<question>'
 }
 
+/**
+ * Words in a prompt that the Claude Code CLI reacts to. The composer shows a
+ * label for each one in the draft. The iOS app keeps the same list (ChatKeywords.swift).
+ */
+export interface ChatPromptKeyword {
+  word: string
+  label: string
+  description: string
+}
+
+export const CHAT_PROMPT_KEYWORDS: readonly ChatPromptKeyword[] = [
+  { word: 'ultrathink', label: 'Ultrathink', description: 'Claude thinks more deeply on this turn' },
+  { word: 'ultracode', label: 'Workflow', description: 'Claude can run a multi-agent workflow for this message' }
+]
+
+/** The keywords in `text`, in list order: whole words, any case. */
+export function chatPromptKeywords(text: string): ChatPromptKeyword[] {
+  return CHAT_PROMPT_KEYWORDS.filter((k) => new RegExp(`(^|[^\\p{L}\\p{N}_])${k.word}(?![\\p{L}\\p{N}_])`, 'iu').test(text))
+}
+
 /** The question in `/btw <question>`; '' for a bare `/btw`, null for anything else. */
 export function parseSideQuestion(text: string): string | null {
   const match = /^\/btw(?:\s+([\s\S]*))?$/.exec(text.trim())
