@@ -129,13 +129,13 @@ describe('suggestWorktreeConfig', () => {
   it('links node_modules and installs from the lockfile when there is nothing to link', () => {
     fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}')
     const suggested = suggestWorktreeConfig(dir)
-    expect(suggested?.config).toEqual({ symlink: ['node_modules'], setup: ['[ -e node_modules ] || npm ci'], copy: [] })
+    expect(suggested?.config).toEqual({ symlink: ['node_modules'], setup: ['[ -e node_modules ] || npm ci --prefer-offline'], copy: [] })
     expect(parseWorktreeConfig(JSON.parse(suggested!.text))).toEqual({ ok: true, config: suggested!.config })
   })
 
   it('uses the package manager whose lockfile is there', () => {
     fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '')
-    expect(suggestWorktreeConfig(dir)?.config.setup).toEqual(['[ -e node_modules ] || pnpm install --frozen-lockfile'])
+    expect(suggestWorktreeConfig(dir)?.config.setup).toEqual(['[ -e node_modules ] || pnpm install --frozen-lockfile --prefer-offline'])
   })
 
   it('suggests nothing without a lockfile or with a config already', () => {

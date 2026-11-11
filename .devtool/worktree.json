@@ -3,6 +3,6 @@
     "node_modules"
   ],
   "setup": [
-    "[ -e node_modules ] || npm ci"
+    "[ -e node_modules ] || npm ci --prefer-offline"
   ]
 }

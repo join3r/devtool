@@ -111,11 +111,11 @@ export function readWorktreeConfig(sourceRoot: string): LoadedWorktreeConfig {
 
 /** Lockfile at a checkout's root → the install that reproduces it. First match wins. */
 const INSTALLS: { lockfile: string; install: string }[] = [
-  { lockfile: 'pnpm-lock.yaml', install: 'pnpm install --frozen-lockfile' },
-  { lockfile: 'yarn.lock', install: 'yarn install --frozen-lockfile' },
+  { lockfile: 'pnpm-lock.yaml', install: 'pnpm install --frozen-lockfile --prefer-offline' },
+  { lockfile: 'yarn.lock', install: 'yarn install --frozen-lockfile --prefer-offline' },
   { lockfile: 'bun.lock', install: 'bun install --frozen-lockfile' },
   { lockfile: 'bun.lockb', install: 'bun install --frozen-lockfile' },
-  { lockfile: 'package-lock.json', install: 'npm ci' }
+  { lockfile: 'package-lock.json', install: 'npm ci --prefer-offline' }
 ]
 
 export interface SuggestedWorktreeConfig {

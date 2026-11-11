@@ -72,7 +72,8 @@ function sharedLines(links: SharedLink[]): string[] {
   for (const link of links) {
     lines.push(
       `- ${code(link.entry)} here is a symlink to ${code(link.target)}, shared with other tasks. Never install, update or delete into it (no npm/pnpm/yarn install or ci through the link). ` +
-      `To change dependencies, first replace the link with this worktree's own copy (${code(`rm ${link.entry}`)}, then install).`
+      `Replace it with this worktree's own copy (${code(`rm ${link.entry}`)}, then install) only when this task adds, removes or upgrades a dependency, or its lockfile differs from the one in ${code(path.dirname(link.target))}; ` +
+      `not to fix an unrelated build or test failure. Avoid needless downloads: install from the local package cache (${code('pnpm install --prefer-offline')}, ${code('npm ci --prefer-offline')}, ${code('yarn install --prefer-offline')}) so only packages missing from it are downloaded.`
     )
   }
   lines.push(

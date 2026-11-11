@@ -294,7 +294,7 @@ describe('TaskWorktreeManager', () => {
   })
 
   describe('setup offer for a repo without a config', () => {
-    const offer = ['[ -e node_modules ] || npm ci']
+    const offer = ['[ -e node_modules ] || npm ci --prefer-offline']
 
     beforeEach(() => {
       const stream = streamWorkspace.worktreePath
