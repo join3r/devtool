@@ -58,7 +58,8 @@ commandRegistry.register({
   aliases: ['home', 'project home', 'map'],
   when: ctx => !!ctx.actions.selectedProjectId,
   run: ctx => {
-    if (ctx.actions.selectedProjectId) ctx.actions.setSelectedTaskId(null)
+    // Home, not just "no task": a closed task shown read-only gives way too.
+    if (ctx.actions.selectedProjectId) ctx.actions.selectProjectHome(ctx.actions.selectedProjectId)
   }
 })
 

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, RotateCcw } from 'lucide-react'
+import { Archive, ArrowLeft, RotateCcw } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { isAgentTabType, type Project, type Tab, type Task } from '../../shared/types'
 import { visibleArchive, type ArchivedTask } from '../../shared/archive'
 import { emptyChatState, reduceChat } from '../../shared/claude-chat'
 import { taskTabs } from '../../shared/streams'
 import { useProjectArchive } from '../hooks/archiveStore'
-import { closeArchivedView, type ArchivedViewTarget } from './archivedViewTarget'
+import type { ArchivedViewTarget } from './archivedViewTarget'
 import { reopenStreamWithSetup } from './sidebar/doneActions'
 import Timeline from './claude-chat/Timeline'
 import { GrpHead, FormGroup, PrimaryButton } from './ui'
@@ -139,7 +139,7 @@ function Header({ title, subtitle, onReopen, busy }: { title: string; subtitle: 
  * and Reopen. Shown in place of the project's Home page.
  */
 export function ArchivedView({ target }: { target: ArchivedViewTarget }): React.ReactElement | null {
-  const { projects, reopenTask, reopenStream } = useApp()
+  const { projects, reopenTask, reopenStream, selectProjectHome } = useApp()
   const project = projects.find(candidate => candidate.id === target.projectId)
   const raw = useProjectArchive(target.projectId, true)
   const archive = raw && project ? visibleArchive(raw, project) : null
@@ -147,19 +147,22 @@ export function ArchivedView({ target }: { target: ArchivedViewTarget }): React.
   const [shownTaskId, setShownTaskId] = useState<string | null>(null)
 
   if (!project) return null
+  // The view stands in for the project's page: this is the way back to it.
+  const back = <BackToProject name={project.name} onBack={() => selectProjectHome(project.id)} />
   if (!archive) return <div className="flex-1 flex items-center justify-center text-text-muted text-md">Loading…</div>
 
   const reopenFailed = (err: unknown) => window.alert(`Couldn't reopen: ${err instanceof Error ? err.message : String(err)}`)
 
   if (target.kind === 'task') {
     const entry = archive.tasks.find(candidate => candidate.task.id === target.id)
-    if (!entry) return <Gone />
+    if (!entry) return <Gone onBack={() => selectProjectHome(project.id)} />
     const onReopen = () => {
       setBusy(true)
       reopenTask(project.id, entry.task.id).catch(reopenFailed).finally(() => setBusy(false))
     }
     return (
       <Page testId="archived-view">
+        {back}
         <Header
           title={entry.task.name}
           subtitle={`Archived ${formatDate(entry.archivedAt)} from ${entry.streamName || 'its stream'} · reopens ${project.streams.some(s => s.id === entry.streamId) ? `in ${entry.streamName}` : 'in main (its stream is closed)'}`}
@@ -175,7 +178,7 @@ export function ArchivedView({ target }: { target: ArchivedViewTarget }): React.
   }
 
   const entry = archive.streams.find(candidate => candidate.stream.id === target.id)
-  if (!entry) return <Gone />
+  if (!entry) return <Gone onBack={() => selectProjectHome(project.id)} />
   const tasks: { task: Task; done?: ArchivedTask }[] = [
     ...entry.stream.tasks.map(task => ({ task })),
     ...entry.doneTasks.map(done => ({ task: done.task, done }))
@@ -191,6 +194,7 @@ export function ArchivedView({ target }: { target: ArchivedViewTarget }): React.
   const workspace = entry.stream.workspace
   return (
     <Page testId="archived-view">
+      {back}
       <Header
         title={entry.stream.name}
         subtitle={`Stream archived ${formatDate(entry.archivedAt)}${workspace ? ` · branch ${workspace.branchName} (Reopen checks it out again)` : ' · project folder'}`}
@@ -231,11 +235,25 @@ function Page({ children, testId }: { children: React.ReactNode; testId: string 
   )
 }
 
-function Gone(): React.ReactElement {
+function BackToProject({ name, onBack }: { name: string; onBack: () => void }): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className="self-start flex items-center gap-1 bg-transparent border-0 p-0 text-sm text-text-muted hover:text-text cursor-pointer"
+      onClick={onBack}
+      title={`Back to ${name}`}
+      data-testid="archived-view-back"
+    >
+      <ArrowLeft size={14} />{name}
+    </button>
+  )
+}
+
+function Gone({ onBack }: { onBack: () => void }): React.ReactElement {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted text-md">
       <span>This item is no longer archived.</span>
-      <button type="button" className="bg-transparent border-0 text-accent cursor-pointer" onClick={closeArchivedView}>Close</button>
+      <button type="button" className="bg-transparent border-0 text-accent cursor-pointer" onClick={onBack}>Back to the project</button>
     </div>
   )
 }
