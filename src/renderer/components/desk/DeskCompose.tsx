@@ -8,7 +8,7 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { composeTarget } from './deskInbox'
 import { deskEvents } from './deskEvents'
-import { autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, writeLastWhere, type WhereOption } from './deskStart'
+import { autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, whereScope, writeLastWhere, type WhereOption } from './deskStart'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import SameFolderWarning from './SameFolderWarning'
@@ -106,7 +106,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   /** Aim at the option and take its `@word` out of the text. */
   const pick = (option: WhereOption | undefined): void => {
     if (!option || !mention) return
-    setOverride(option.stream ? { projectId: option.project.id, streamId: option.stream.id } : { projectId: option.project.id })
+    setOverride(whereScope(option))
     const rest = text.slice(caret).replace(/^ /, '')
     const head = text.slice(0, mention.start)
     edit(head + rest, head.length)

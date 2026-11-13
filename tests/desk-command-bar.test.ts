@@ -13,7 +13,7 @@ import {
 import { createMainStream } from '../src/shared/types'
 import type { Project, Stream, Task } from '../src/shared/types'
 import { singlePane } from '../src/shared/streams'
-import { AUTOPILOT_OFF, autopilotAvailable, deskSubmission, mentionAt, whereOptions } from '../src/renderer/components/desk/deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, deskSubmission, mentionAt, whereOptions, whereScope } from '../src/renderer/components/desk/deskStart'
 
 const NOW = new Date('2026-10-30T12:00:00').getTime()
 
@@ -226,6 +226,23 @@ describe('whereOptions (the compose box where picker)', () => {
     expect(whereOptions(projects, 'stem').map(option => option.key)).toContain('st')
     expect(whereOptions(projects, 'stem').map(option => option.key)).not.toContain('dt')
     expect(whereOptions(projects, 'dev 0.7').map(option => option.key)).toEqual(['dt:beta'])
+  })
+})
+
+describe('whereScope (what a picked where row aims at)', () => {
+  it('aims a project row at its main stream, not the stream last worked in', () => {
+    const recent = project('st', 'Stem App', [task('t-stem', 'Ship the relay')], [
+      stream('st-new', '0.8.0', [{ ...task('t-new', 'New'), lastInteractedAt: 20 }])
+    ])
+    const [row] = whereOptions([recent], 'stem')
+    expect(row.stream).toBeUndefined()
+    const main = recent.streams.find(s => s.isMain)!
+    expect(whereScope(row)).toEqual({ projectId: 'st', streamId: main.id })
+  })
+
+  it('aims a stream row at that stream', () => {
+    const option = whereOptions(projects, 'dev 0.7')[0]
+    expect(whereScope(option)).toEqual({ projectId: 'dt', streamId: 'beta' })
   })
 })
 

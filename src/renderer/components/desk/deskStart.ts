@@ -226,6 +226,16 @@ export interface WhereOption {
 }
 
 /**
+ * Where a picked row aims the compose box: a stream row its stream, a project
+ * row its main stream (the row that was highlighted), never the stream last
+ * fired into, which the bare project would fall back to.
+ */
+export function whereScope(option: WhereOption): DeskScope {
+  const stream = option.stream ?? findMainStream(option.project)
+  return stream ? { projectId: option.project.id, streamId: stream.id } : { projectId: option.project.id }
+}
+
+/**
  * The where picker's rows, most recently worked in first, each project
  * followed by its non-main streams.
  * Typed text narrows them (a stream matches on "project stream"), best first.
