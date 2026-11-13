@@ -10,7 +10,7 @@ import { isNewTaskDraftValid, matchProjects } from './newTask'
 import type { NewTaskKind, NewTaskSubmission, NewTaskTarget } from './newTask'
 import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickPromptAgent } from './promptBox'
 import { currentStreamId } from '../../shared/streams'
-import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
+import { AgentMenu, EFFORT_OPTIONS, MODE_OPTIONS, modeLabel, nextMode, useModelOptions } from './promptChips'
 import AutopilotChips from './desk/AutopilotChips'
 import { normalizeLoopSettings } from '../../shared/loop'
 import { AUTOPILOT_OFF, autopilotAvailable, loopAvailable, startsInOwnWorktree, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, type DeskAutopilot } from './desk/deskStart'
@@ -135,6 +135,7 @@ export default function NewTaskModal({
   const [restored, setRestored] = useState(() => kept !== null)
   const [picked, setPicked] = useState<PromptBoxAgent | null>(kept?.picked ?? null)
   const [mode, setMode] = useState(kept?.mode ?? config.promptBoxMode ?? '')
+  const modelOptions = useModelOptions()
   const [model, setModel] = useState(kept?.model ?? '')
   const [effort, setEffort] = useState(kept?.effort ?? '')
   const [kind, setKind] = useState<NewTaskKind>(kept?.kind ?? 'agent')
@@ -595,7 +596,7 @@ export default function NewTaskModal({
               <div className="flex-1 min-w-0 flex items-center gap-0.5 flex-wrap">
                 {agent && <AgentMenu agents={agents} value={agent} onChange={(a) => { setPicked(a); focusPrompt() }} placement="down" />}
                 {agent === 'claude-chat' && (
-                  <ChipMenu label={`Model: ${MODEL_OPTIONS.find((m) => m.value === model)?.label ?? model}`} title="Model" placement="down" options={MODEL_OPTIONS} value={model} onChange={(v) => { setModel(v); focusPrompt() }} />
+                  <ChipMenu label={`Model: ${modelOptions.find((m) => m.value === model)?.label ?? model}`} title="Model" placement="down" options={modelOptions} value={model} onChange={(v) => { setModel(v); focusPrompt() }} />
                 )}
                 {takesMode && (
                   <ChipMenu label={`Mode: ${modeLabel(mode)}`} title="Permission mode (Shift+Tab cycles)" placement="down" options={MODE_OPTIONS} value={mode} onChange={(v) => { setMode(v); focusPrompt() }} />

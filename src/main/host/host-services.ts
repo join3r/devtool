@@ -66,6 +66,8 @@ import { registerGitHandlers } from '../ipc/git'
 import { TaskDiffWatch } from '../task-diff-watch'
 import { PlanLimits } from '../plan-limits'
 import { registerPlanLimitsHandlers } from '../ipc/plan-limits'
+import { ClaudeModels } from '../claude-models'
+import { registerClaudeModelsHandlers } from '../ipc/claude-models'
 import { registerTaskUsageHandlers } from '../ipc/task-usage'
 import { registerOutputStyleHandlers } from '../ipc/output-style'
 import { outputStyleNote, type OutputStyle } from '../../shared/output-style'
@@ -356,6 +358,8 @@ export class HostServices {
   private readonly phones: HostServicesOptions['phones']
   /** Plan windows per claude.ai login, for the status bar and the phone's inbox; a desktop adds its servers'. */
   readonly planLimits: PlanLimits
+  /** The models Claude Code last offered, for the New task box's model chip. */
+  private readonly claudeModels: ClaudeModels
 
   constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus, remoteClients, phones }: HostServicesOptions) {
     this.env = env
@@ -370,6 +374,7 @@ export class HostServices {
     })
     this.onTaskArchived = onTaskArchived ?? (() => {})
     const configDir = env.configDir
+    this.claudeModels = new ClaudeModels(path.join(configDir, 'claude-models.json'))
     const identity = new IdentityStore(path.join(configDir, 'mobile'), env.secrets, (message) => this.logDebug(message))
     this.identity = identity
     this.secretStore = new SecretStore(configDir, env.secrets, (message) => this.logDebug(message))
@@ -653,6 +658,8 @@ export class HostServices {
     })
     this.chatManager = this.createChatManager()
     this.chatManager.watch((tabId, event, state) => this.planLimits.observe(tabId, event, state))
+    this.chatManager.watch((tabId, event, state) => this.claudeModels.observe(tabId, event, state))
+    this.claudeModels.subscribe(() => this.clients.broadcast('claude-models-changed', this.claudeModels.list()))
     this.planLimits.subscribe(() => {
       this.clients.broadcast(this.isServer ? SERVER_PLAN_LIMITS_CHANNEL : 'plan-limits-changed', this.isServer ? this.planLimits.own() : this.planLimits.accounts())
     })
@@ -2204,6 +2211,7 @@ export class HostServices {
     registerTokenUsageHandlers(ipc, { projectUsage: (projectId) => this.projectTokenUsage(projectId) })
     // A server answers its own logins (its desktop merges them); a desktop every one it knows.
     registerPlanLimitsHandlers(ipc, { accounts: () => this.isServer ? this.planLimits.own() : this.planLimits.accounts() })
+    registerClaudeModelsHandlers(ipc, { list: () => this.claudeModels.list() })
     // A server answers its own machine (its desktop merges it); a desktop every host it knows.
     registerTaskUsageHandlers(ipc, { snapshot: () => this.isServer ? this.taskUsage.own() : this.taskUsage.snapshot() })
     registerOutputStyleHandlers(ipc, {

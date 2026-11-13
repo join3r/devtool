@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext'
 import { isChatTabType, type Project, type PromptBoxAgent, type TabType } from '../../shared/types'
 import ChipMenu from './claude-chat/ChipMenu'
 import { AttachmentStrip, toChatImages, useImageAttachments } from './claude-chat/imageAttachments'
-import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
+import { AgentMenu, EFFORT_OPTIONS, MODE_OPTIONS, modeLabel, nextMode, useModelOptions } from './promptChips'
 import {
   PROMPT_BOX_AGENT_LABEL,
   agentTakesMode,
@@ -39,6 +39,7 @@ export default function TaskPromptBox({ project, taskId, taskName, projectDir, v
   const agent = pickPromptAgent(picked ?? config?.promptBoxAgent, agents)
   const [mode, setMode] = useState<string | null>(null)
   const currentMode = mode ?? config?.promptBoxMode ?? ''
+  const modelOptions = useModelOptions()
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
   const [draft, setDraft] = useState('')
@@ -146,7 +147,7 @@ export default function TaskPromptBox({ project, taskId, taskName, projectDir, v
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5 flex-wrap">
             <AgentMenu agents={agents} value={agent} onChange={pick(setPicked)} />
             {agent === 'claude-chat' && (
-              <ChipMenu label={`Model: ${MODEL_OPTIONS.find((m) => m.value === model)?.label ?? model}`} title="Model" options={MODEL_OPTIONS} value={model} onChange={pick(setModel)} />
+              <ChipMenu label={`Model: ${modelOptions.find((m) => m.value === model)?.label ?? model}`} title="Model" options={modelOptions} value={model} onChange={pick(setModel)} />
             )}
             {takesMode && (
               <ChipMenu label={`Mode: ${modeLabel(currentMode)}`} title="Permission mode (Shift+Tab cycles)" options={MODE_OPTIONS} value={currentMode} onChange={pick(setMode)} />

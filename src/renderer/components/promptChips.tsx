@@ -1,5 +1,6 @@
-import React from 'react'
-import { CHAT_PERMISSION_MODES } from '../../shared/claude-chat'
+import React, { useMemo } from 'react'
+import { CHAT_PERMISSION_MODES, type ChatModelOption } from '../../shared/claude-chat'
+import { useClaudeModels } from '../claudeModels'
 import { isChatTabType, type PromptBoxAgent } from '../../shared/types'
 import ChipMenu from './claude-chat/ChipMenu'
 import { MODE_HELP } from './claude-chat/Composer'
@@ -10,14 +11,27 @@ import { PROMPT_BOX_AGENT_LABEL } from './promptBox'
  * empty task's prompt box and the New task composer.
  */
 
-// Models aren't known until a session runs (`supportedModels()`), so the box offers
-// the aliases every Claude Code version accepts.
-export const MODEL_OPTIONS = [
-  { value: '', label: 'Default' },
-  { value: 'opus', label: 'Opus' },
-  { value: 'sonnet', label: 'Sonnet' },
-  { value: 'haiku', label: 'Haiku' }
+// Before any Claude chat has run, Claude Code's own list (`supportedModels()`) is
+// unknown, so the box offers the aliases every version accepts.
+const ALIAS_MODELS: ChatModelOption[] = [
+  { value: 'opus', displayName: 'Opus' },
+  { value: 'sonnet', displayName: 'Sonnet' },
+  { value: 'haiku', displayName: 'Haiku' }
 ]
+
+/** The model chip's options: Default, then every model Claude Code last offered (as the chat's picker lists them). */
+export function modelOptions(models: ChatModelOption[]): { value: string; label: string; description?: string }[] {
+  const pickable = models.filter((m) => m.value !== 'default')
+  return [
+    { value: '', label: 'Default', description: 'What your Claude settings pick' },
+    ...(pickable.length ? pickable : ALIAS_MODELS).map((m) => ({ value: m.value, label: m.displayName, ...(m.description ? { description: m.description } : {}) }))
+  ]
+}
+
+export function useModelOptions(): { value: string; label: string; description?: string }[] {
+  const models = useClaudeModels()
+  return useMemo(() => modelOptions(models), [models])
+}
 export const EFFORT_OPTIONS = [
   { value: '', label: 'Default' },
   ...['low', 'medium', 'high', 'xhigh', 'max'].map((level) => ({ value: level, label: level }))

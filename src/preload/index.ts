@@ -58,7 +58,7 @@ import type { ScheduleRunResult, ScheduleUpdateRequest } from '../shared/schedul
 import type { TokenUsageReport } from '../shared/token-usage'
 import type { PlanAccount } from '../shared/plan-limits'
 import type { TaskUsageSnapshot } from '../shared/task-usage'
-import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
+import type { ChatEvent, ChatImage, ChatLoginMethod, ChatModelOption, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { ChatQueueOp, ChatSendMode } from '../shared/chat-send-queue'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 import type { PluginAction, PluginCatalog } from '../shared/claude-plugins'
@@ -737,6 +737,13 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, accounts: PlanAccount[]) => callback(accounts)
     ipcRenderer.on('plan-limits-changed', handler)
     return () => ipcRenderer.removeListener('plan-limits-changed', handler)
+  },
+  /** The models Claude Code last offered on this machine (empty until a Claude chat has run once). */
+  claudeModelsGet: (): Promise<ChatModelOption[]> => ipcRenderer.invoke('claude-models-get'),
+  onClaudeModelsChanged: (callback: (models: ChatModelOption[]) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, models: ChatModelOption[]) => callback(models)
+    ipcRenderer.on('claude-models-changed', handler)
+    return () => ipcRenderer.removeListener('claude-models-changed', handler)
   },
   /** CPU and memory per tab on this machine. */
   taskUsageGet: (): Promise<TaskUsageSnapshot> => ipcRenderer.invoke('task-usage-get'),
