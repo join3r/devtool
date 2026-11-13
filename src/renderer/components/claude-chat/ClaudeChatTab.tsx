@@ -10,7 +10,8 @@ import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
 import { findTaskInProject, taskTabs } from '../../../shared/streams'
-import { openBench } from '../desk/benchState'
+import { focusBrowser } from '../desk/browserSide'
+import FocusReplyCard from './FocusReplyCard'
 import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState } from './chatStore'
 import Timeline, { type TimelineFocus } from './Timeline'
 import TaskIndicator from './TaskIndicator'
@@ -50,6 +51,11 @@ interface Props {
   serverId?: string
   /** The project's extra CLI args for the agent (shared with the terminal tab). */
   extraArgs?: string
+  /**
+   * A browser page has the task (Focus): the chat folds to its prompt, with
+   * the agent's state or last reply above it, floating at the bottom.
+   */
+  compact?: boolean
 }
 
 /**
@@ -64,7 +70,7 @@ interface Props {
  * state machine as the terminal tab — main sends the SDK's in-process hooks on
  * the channels the curl hooks use.
  */
-export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
+export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs, compact = false }: Props): React.ReactElement {
   const features = chatAgentFeatures(agent)
   const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab, leaveAfterSend, projects, setActiveTab, switchToTask } = useApp()
   const statusStore = useTabStatusStore()
@@ -310,9 +316,8 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
   }, [tabId, projectId, taskId, markTaskInteracted])
 
   const openLink = useCallback((url: string) => {
+    // The desk shows a browser tab that just opened (`DeskTaskBody`).
     addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: normalizeBrowserUrl(url) })
-    // Browser tabs live in the Bench: show the one just opened.
-    openBench(taskId, 'panes')
   }, [addTab, projectId, taskId, tabId])
 
   const openContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -373,18 +378,32 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
   const coldCache = state.coldCache && state.coldCache !== dismissedCache ? state.coldCache : null
 
   const artifacts = useMemo(() => chatArtifacts(state.items), [state.items])
-  // An artifact opens beside the chat on its local copy; a tab already showing it comes to the front.
+  // An artifact opens over the whole task (Focus) on its local copy; a tab already showing it
+  // takes Focus. A new tab gets Focus from the desk as it opens (`DeskTaskBody`).
   const openArtifact = useCallback((url: string) => {
     const task = findTaskInProject(projects.find((p) => p.id === projectId), taskId)
     const existing = task && taskTabs(task).find((tab) => tab.artifact?.url === url && tab.artifact.chatTabId === tabId)
     if (existing) {
       setActiveTab(projectId, taskId, existing.id)
+      focusBrowser(taskId, existing.id)
     } else {
       const title = artifacts.find((a) => a.url === url)?.title
       addTab(projectId, taskId, { withTab: tabId }, 'browser', { artifact: { chatTabId: tabId, url }, ...(title ? { title } : {}) })
     }
-    openBench(taskId, 'panes')
   }, [projects, projectId, taskId, tabId, artifacts, addTab, setActiveTab])
+  // A republished artifact: its open tabs read the new local copy.
+  const publishCounts = useRef<Map<string, number> | null>(null)
+  useEffect(() => {
+    const counts = new Map(artifacts.map((a) => [a.url, a.publishes]))
+    const before = publishCounts.current
+    publishCounts.current = counts
+    if (!before) return
+    for (const [url, publishes] of counts) {
+      if (publishes > (before.get(url) ?? publishes)) {
+        window.dispatchEvent(new CustomEvent('artifact-republished', { detail: { chatTabId: tabId, url } }))
+      }
+    }
+  }, [artifacts, tabId])
   // A link to one of this chat's artifacts opens the same way.
   const openChatLink = useCallback((url: string) => {
     if (artifacts.some((a) => a.url === url)) openArtifact(url)
@@ -435,13 +454,14 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
     <div
       ref={rootRef}
       data-chat-tab={tabId}
-      className="absolute inset-0 flex-col bg-bg"
+      className={compact ? 'absolute inset-x-0 bottom-0 max-h-[75%] flex-col pointer-events-auto drop-shadow-[0_8px_24px_rgba(0,0,0,0.22)]' : 'absolute inset-0 flex-col bg-bg'}
       style={{ display: visible ? 'flex' : 'none' }}
+      data-compact={compact || undefined}
       onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}
       onClick={(e) => { if (handleCodeCopyClick(e.target) || handleCodeRunClick(e.target, runBash)) e.preventDefault() }}
       onContextMenu={openContextMenu}
     >
-      <div className="flex-1 min-h-0 relative">
+      <div className="flex-1 min-h-0 relative" hidden={compact}>
         <div className="absolute top-2 right-3 z-(--z-sticky) flex items-start gap-1.5">
           <ArtifactIndicator artifacts={artifacts} onOpen={openArtifact} onOpenExternal={openExternal} />
           <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
@@ -502,8 +522,9 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
       </div>
       {/* Capped at half the tab so a tall prompt card can't push the conversation out of
           view: the prompt stack is what gives (its cards scroll inside); the composer keeps its size. */}
-      <div className="max-w-[860px] w-full max-h-[50%] min-h-0 mx-auto px-5 pb-3 flex flex-col gap-2 relative">
-        {!atBottom && (
+      <div className={`max-w-[860px] w-full min-h-0 mx-auto px-5 pb-3 flex flex-col gap-2 relative ${compact ? '' : 'max-h-[50%]'}`}>
+        {compact && <FocusReplyCard items={state.items} busy={state.busy} label={features.label} onOpenLink={openChatLink} />}
+        {!atBottom && !compact && (
           <button
             type="button"
             onClick={jumpToBottom}

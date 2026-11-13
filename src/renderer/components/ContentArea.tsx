@@ -12,6 +12,7 @@ import DeskTaskBody from './desk/DeskTaskBody'
 import DeskProjectMap from './desk/DeskProjectMap'
 import { DeskDoneButton, DeskTaskTools } from './desk/DeskTaskHeader'
 import { getBench, openBench } from './desk/benchState'
+import { browserSideLayout, getBrowserSide, showInSide } from './desk/browserSide'
 import { benchTabClosable, conversationTabId } from './desk/benchLayout'
 import TaskLandingBanner from './TaskLandingBanner'
 import TaskSecretBanner from './TaskSecretBanner'
@@ -222,8 +223,10 @@ export default function ContentArea(): React.ReactElement {
       if (tab) {
         e.preventDefault()
         setActiveTab(selectedProjectId, selectedTaskId, tab.id)
-        // Every tab but the conversation is in the Bench: show the one picked.
-        if (tab.id !== conversationTabId(task)) openBench(task.id, 'panes')
+        // Every tab but the conversation is in the Bench, or a browser tab in the Side: show the one picked.
+        const chatTabId = conversationTabId(task)
+        if (chatTabId && tab.type === 'browser') showInSide(task.id, tab.id)
+        else if (tab.id !== chatTabId) openBench(task.id, 'panes')
       }
     }
 
@@ -266,7 +269,7 @@ export default function ContentArea(): React.ReactElement {
       const info = getActiveTabInfo()
       // The main tab has no close: the task closes from the inbox. Nor does a tab you can't see in the Bench.
       if (selectedProjectId && info?.activeTabId && info.activeTabId !== info.task.mainTabId
-        && benchTabClosable(info.task, getBench(info.task.id), info.activeTabId)) {
+        && benchTabClosable(info.task, getBench(info.task.id), info.activeTabId, sideShows(info.task, info.activeTabId))) {
         // May park on the unsaved-changes dialog before anything is removed.
         void removeTab(selectedProjectId, info.task.id, info.activeTabId)
       }
@@ -570,4 +573,10 @@ function NothingOpen(): React.ReactElement {
       </div>
     </div>
   )
+}
+
+/** Whether the task's browser Side (or Focus) is on screen showing `tabId`. */
+function sideShows(task: Task, tabId: string): boolean {
+  const side = browserSideLayout(task, conversationTabId(task), getBrowserSide(task.id))
+  return side.open && side.tabId === tabId
 }

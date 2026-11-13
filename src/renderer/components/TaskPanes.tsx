@@ -26,12 +26,16 @@ import { useTaskClosing } from '../taskLanding'
 import type { Tab, AiTabType, Project, Task, WorktreeSetupOfferAnswer } from '../../shared/types'
 import { paneIndexOfElement, setFocusedPane, useFocusedPane } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
-import { benchDividerShown, benchGridColumns, benchPanes, dragBenchDivider, type BenchView } from './desk/benchLayout'
+import { benchDividerShown, benchGridColumns, benchPanes, dragBenchDivider, withSideColumn, type BenchView } from './desk/benchLayout'
+import { setSideShare, type BrowserSideLayout } from './desk/browserSide'
+import BrowserSideBar, { SIDE_BAR_HEIGHT } from './desk/BrowserSideBar'
 
 /**
  * The desk's task view (`DeskTaskBody`): the conversation tab on top, full
  * width, and the other tabs in the Bench drawer under the strip. Grid rows:
- * conversation, strip, the Bench's tab bars, the Bench's bodies.
+ * conversation, strip, the Bench's tab bars, the Bench's bodies. Browser tabs
+ * show in the Side, a last column spanning every row, or over the whole grid
+ * in Focus, with the conversation folded to its prompt on top.
  */
 export interface DeskPanesLayout {
   /** The conversation (`conversationTabId`); none shows the Bench full size. */
@@ -46,6 +50,10 @@ export interface DeskPanesLayout {
   strip: (trailing: React.ReactNode) => React.ReactNode
   /** Files, Changes or Notes, shown in place of the panes when `view` is one of them. */
   panel: React.ReactNode
+  /** The browser tabs, right of the conversation (the Side), or one of them over the whole task (Focus). */
+  side: BrowserSideLayout
+  /** The Side's share of the width. */
+  sideShare: number
 }
 
 interface Props {
@@ -90,12 +98,20 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
   const focusedPane = useFocusedPane(task.id)
   const gridRef = useRef<HTMLDivElement | null>(null)
   const [dragWidths, setDragWidths] = useState<number[] | null>(null)
+  const [sideResizing, setSideResizing] = useState(false)
   const [tabDragState, setTabDragState] = useState<TabDragState | null>(null)
   const [tabDropTarget, setTabDropTarget] = useState<TabDropTarget | null>(null)
 
   const projectId = project.id
   const worktree = useTaskWorktreeGate(project, task, visible)
   const chatTabId = desk?.chatTabId ?? null
+  const side = desk && chatTabId ? desk.side : null
+  const focusTabId = side?.focusTabId ?? null
+  // The Side's column, right of the Bench's: its divider sits on the column before it.
+  const sideShown = !!side?.open && !focusTabId
+  const sideColumn = task.panes.length * 2 + 1
+  // What spans the conversation's width: every column but the Side's.
+  const leftSpan = sideShown ? `1 / ${sideColumn - 1}` : '1 / -1'
   const bench = desk ? benchPanes(task, chatTabId) : null
   // Without a conversation the Bench is the whole task, always open.
   const benchOpen = !!desk && (!chatTabId || desk.open)
@@ -109,7 +125,7 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
   const bodyRow = desk ? 4 : showBars ? 2 : 1
   const widths = dragWidths && dragWidths.length === task.panes.length ? dragWidths : task.panes.map(pane => pane.width)
   const gridTemplateColumns = bench
-    ? benchGridColumns(widths, bench)
+    ? sideShown && desk ? withSideColumn(widths, bench, desk.sideShare) : benchGridColumns(widths, bench)
     : widths.length === 0
       ? 'minmax(0, 1fr)'
       : widths.map(width => `minmax(0, ${width}fr)`).join(' 3px ')
@@ -132,7 +148,9 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
     let latest = start
     const widthsAt = (clientX: number): number[] => {
       const rect = grid.getBoundingClientRect()
-      const x = (clientX - rect.left) / rect.width
+      // With the Side open the Bench has only its share of the width.
+      const benchWidth = sideShown && desk ? rect.width * (1 - desk.sideShare) : rect.width
+      const x = (clientX - rect.left) / benchWidth
       return bench ? dragBenchDivider(start, bench, divider, x) : dragDivider(start, divider, x)
     }
     const onMouseMove = (ev: MouseEvent): void => {
@@ -151,7 +169,29 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
     setDragWidths(start)
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [projectId, task.id, task.panes, setPaneWidths, bench])
+  }, [projectId, task.id, task.panes, setPaneWidths, bench, sideShown, desk])
+
+  const handleSideDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const grid = gridRef.current
+    if (!grid) return
+    const shareAt = (clientX: number): number => {
+      const rect = grid.getBoundingClientRect()
+      return (rect.right - clientX) / rect.width
+    }
+    const onMouseMove = (ev: MouseEvent): void => setSideShare(shareAt(ev.clientX))
+    const onMouseUp = (ev: MouseEvent): void => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+      setSideShare(shareAt(ev.clientX))
+      setSideResizing(false)
+    }
+    document.body.style.cursor = 'col-resize'
+    setSideResizing(true)
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [])
 
   const rememberFocus = useCallback((e: React.SyntheticEvent) => {
     const pane = paneIndexOfElement(e.target as Element)
@@ -186,7 +226,7 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
       if (!featureAvailable(project, 'chat')) {
         return <ChatUnavailable agent={agent} visible={tabVisible} onSwitch={() => convertClaudeTab(projectId, task.id, tab.id, agent)} />
       }
-      return <ClaudeChatTab agent={agent} tabId={tab.id} visible={tabVisible} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} serverId={project.host} extraArgs={project.aiToolArgs?.[agent]} />
+      return <ClaudeChatTab agent={agent} tabId={tab.id} visible={tabVisible} compact={tab.id === chatTabId && !!focusTabId} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} serverId={project.host} extraArgs={project.aiToolArgs?.[agent]} />
     }
     if (tab.type === 'diff' && tab.filePath) {
       return <DiffTab tabId={tab.id} visible={tabVisible} filePath={tab.filePath} projectDir={projectDir} projectId={projectId} effectiveTheme={effectiveTheme} />
@@ -208,12 +248,29 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
     .flatMap((pane, paneIndex) => pane.tabs.map(tab => ({
       tab,
       paneIndex,
-      active: bench ? tab.id === chatTabId || (benchShowsPanes && tab.id === bench[paneIndex].activeTabId) : tab.id === pane.activeTabId
+      active: side && tab.type === 'browser'
+        ? (focusTabId ?? (sideShown ? side.tabId : null)) === tab.id
+        : bench ? tab.id === chatTabId || (benchShowsPanes && tab.id === bench[paneIndex].activeTabId) : tab.id === pane.activeTabId
     })))
     .sort((a, b) => (a.tab.id < b.tab.id ? -1 : a.tab.id > b.tab.id ? 1 : 0))
 
   const dropOverlay = tabDragState && tabDropTarget?.inBody ? tabDropTarget : null
-  const isResizing = dragWidths !== null
+  const isResizing = dragWidths !== null || sideResizing
+
+  /** Where a tab body sits: the conversation on top, a browser tab in the Side or in Focus, the rest on the Bench. */
+  const bodyStyle = (tab: Tab, paneIndex: number, active: boolean): React.CSSProperties => {
+    if (tab.id === chatTabId) {
+      // In Focus the conversation folds to its prompt, floating over the page: only it takes clicks.
+      return focusTabId
+        ? { gridColumn: '1 / -1', gridRow: '1 / -1', display: 'block', zIndex: 3, pointerEvents: 'none' }
+        : { gridColumn: leftSpan, gridRow: 1, display: 'block' }
+    }
+    if (side && tab.type === 'browser') {
+      if (tab.id === focusTabId) return { gridColumn: '1 / -1', gridRow: '1 / -1', marginTop: SIDE_BAR_HEIGHT, display: 'block', zIndex: 2 }
+      return { gridColumn: sideColumn, gridRow: '1 / -1', marginTop: SIDE_BAR_HEIGHT, display: active ? 'block' : 'none' }
+    }
+    return { gridColumn: paneColumn(paneIndex), gridRow: bodyRow, display: active ? 'block' : 'none' }
+  }
 
   return (
     <div
@@ -251,7 +308,7 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
         />
       ))}
       {desk && task.panes.length > 0 && (
-        <div className="min-w-0" style={{ gridColumn: '1 / -1', gridRow: 2 }}>
+        <div className="min-w-0" style={{ gridColumn: leftSpan, gridRow: 2 }}>
           {desk.strip(benchShowsPanes && soloTab ? (
             <span className="flex items-center gap-0.5" data-testid="bench-solo-tab">
               <span className="px-1.5 flex items-center"><TabStatusIndicator tabId={soloTab.id} /></span>
@@ -272,12 +329,12 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
         </div>
       )}
       {desk && benchOpen && desk.view !== 'panes' && (
-        <div className="min-w-0 min-h-0 flex flex-col overflow-hidden bg-surface" style={{ gridColumn: '1 / -1', gridRow: `${barRow} / -1` }}>
+        <div className="min-w-0 min-h-0 flex flex-col overflow-hidden bg-surface" style={{ gridColumn: leftSpan, gridRow: `${barRow} / -1` }}>
           {desk.panel}
         </div>
       )}
       {benchShowsPanes && benchEmpty && task.panes.length > 0 && (
-        <div className="min-w-0 min-h-0 flex items-center justify-center text-sm text-text-muted bg-surface" style={{ gridColumn: '1 / -1', gridRow: `${barRow} / -1` }}>
+        <div className="min-w-0 min-h-0 flex items-center justify-center text-sm text-text-muted bg-surface" style={{ gridColumn: leftSpan, gridRow: `${barRow} / -1` }}>
           Nothing on the Bench yet. Open a terminal or a browser from the strip above.
         </div>
       )}
@@ -348,9 +405,7 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
           // task moves to another worktree; see `useTasks.moveTask`.
           key={bodyKey(tab, projectDir, project.host)}
           className="relative min-w-0 min-h-0 overflow-hidden"
-          style={tab.id === chatTabId
-            ? { gridColumn: '1 / -1', gridRow: 1, display: 'block' }
-            : { gridColumn: paneColumn(paneIndex), gridRow: bodyRow, display: active ? 'block' : 'none' }}
+          style={bodyStyle(tab, paneIndex, active)}
           data-tab-body={tab.id}
           data-project-id={projectId}
           data-task-id={task.id}
@@ -359,6 +414,25 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
           {worktree.waiting && waitsForTaskWorktree(tab) ? null : renderTab(tab, visible && active)}
         </div>
       ))}
+      {side && chatTabId && side.tabId && (sideShown || focusTabId) && (
+        <BrowserSideBar
+          projectId={projectId}
+          taskId={task.id}
+          chatTabId={chatTabId}
+          tabs={side.tabs}
+          activeTabId={side.tabId}
+          focused={!!focusTabId}
+          style={focusTabId ? { gridColumn: '1 / -1', gridRow: '1 / -1', zIndex: 2 } : { gridColumn: sideColumn, gridRow: '1 / -1' }}
+        />
+      )}
+      {sideShown && (
+        <div
+          className="bg-border cursor-col-resize hover:bg-accent active:bg-accent transition-colors duration-(--motion-fast)"
+          style={{ gridColumn: sideColumn - 1, gridRow: '1 / -1' }}
+          onMouseDown={handleSideDividerMouseDown}
+          data-testid="browser-side-divider"
+        />
+      )}
       {dropOverlay && (
         <div
           className="relative pointer-events-none z-(--z-sticky)"

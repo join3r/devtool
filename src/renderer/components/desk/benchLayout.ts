@@ -33,10 +33,14 @@ export interface BenchPane {
   activeTabId: string | null
 }
 
-/** Each pane as the Bench shows it, index for index with `task.panes`. */
+/**
+ * Each pane as the Bench shows it, index for index with `task.panes`. With a
+ * conversation, browser tabs aren't on the Bench either: they show in the
+ * Side, right of the conversation (`browserSide`).
+ */
 export function benchPanes(task: Task, chatTabId: string | null): BenchPane[] {
   return task.panes.map(pane => {
-    const tabs = chatTabId ? pane.tabs.filter(tab => tab.id !== chatTabId) : pane.tabs
+    const tabs = chatTabId ? pane.tabs.filter(tab => tab.id !== chatTabId && tab.type !== 'browser') : pane.tabs
     const activeTabId = tabs.some(tab => tab.id === pane.activeTabId) ? pane.activeTabId : tabs[0]?.id ?? null
     return { hidden: tabs.length === 0, tabs, activeTabId }
   })
@@ -106,6 +110,18 @@ export function benchCurrentItem(panes: readonly BenchPane[], view: BenchView, f
   return type === 'terminal' || type === 'browser' ? type : null
 }
 
+/**
+ * CSS grid columns with the Side right of the Bench's: a 3px divider, then
+ * the Side at `share` of the width. The Bench's columns are `fr`, so the
+ * Side's `fr` is set against their total.
+ */
+export function withSideColumn(widths: readonly number[], panes: readonly BenchPane[], share: number): string {
+  const all = panes.every(pane => pane.hidden)
+  const total = widths.reduce((sum, width, i) => sum + (all || !panes[i]?.hidden ? width : 0), 0) || 1
+  const side = total * share / (1 - share)
+  return `${benchGridColumns(widths, panes)} 3px minmax(0, ${side}fr)`
+}
+
 /** Ids of every tab in the task, for noticing one that just opened. */
 export function taskTabIds(task: Task): string[] {
   return task.panes.flatMap(pane => pane.tabs.map(tab => tab.id))
@@ -117,9 +133,11 @@ export function taskTabIds(task: Task): string[] {
  * conversation, and never a tab hidden in a closed drawer or behind Files,
  * Changes, Notes or a run log: a dev server's terminal must not go unseen.
  */
-export function benchTabClosable(task: Task, bench: { open: boolean; view: BenchView; run: unknown }, tabId: string): boolean {
+export function benchTabClosable(task: Task, bench: { open: boolean; view: BenchView; run: unknown }, tabId: string, sideOpen = false): boolean {
   const chatTabId = conversationTabId(task)
   if (tabId === chatTabId) return false
+  // A browser tab of a task with a conversation is in the Side: closable while it shows.
+  if (chatTabId && task.panes.some(pane => pane.tabs.some(tab => tab.id === tabId && tab.type === 'browser'))) return sideOpen
   const showsPanes = bench.view === 'panes' || (bench.view === 'run' && !bench.run)
   return (!chatTabId || bench.open) && showsPanes
 }

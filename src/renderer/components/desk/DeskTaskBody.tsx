@@ -22,6 +22,7 @@ import {
   type BenchView
 } from './benchLayout'
 import { closeBenchRun, getBench, openBench, openBenchRun, setBench, useBench } from './benchState'
+import { browserSideLayout, exitBrowserFocus, focusBrowser, setBrowserSide, showInSide, useBrowserSide, useSideShare } from './browserSide'
 
 const ITEM_LABEL: Record<BenchItem, string> = {
   terminal: 'Terminal',
@@ -45,7 +46,9 @@ const ITEM_ICON: Record<BenchItem, typeof Globe> = {
  * drawer under it, closed by default, behind the strip "▴ Terminal Browser
  * Files Changes Notes". Files, Changes (the git panel) and Notes are Bench
  * tabs, and a run opened from the status bar shows its log here too. A task
- * without a chat tab shows the Bench full size.
+ * without a chat tab shows the Bench full size. Browser tabs of a task with a
+ * conversation aren't on the Bench: they show in the Side, right of the
+ * conversation, or one takes the whole task (Focus); see `browserSide`.
  */
 export default function DeskTaskBody({ project, task, visible, projectDir }: {
   project: Project
@@ -63,23 +66,62 @@ export default function DeskTaskBody({ project, task, visible, projectDir }: {
     ? 'panes'
     : bench.view
   const open = !chatTabId || bench.open
+  const sideState = useBrowserSide(task.id)
+  const sideShare = useSideShare()
+  const side = browserSideLayout(task, chatTabId, sideState)
 
   // A file, diff or note opened from a Bench panel shows in its pane right away.
+  // A browser tab that opens shows in the Side; an artifact takes the whole task (Focus).
   const tabIdsKey = taskTabIds(task).join('|')
   const knownTabs = useRef<string>(tabIdsKey)
+  const taskRef = useRef(task)
+  taskRef.current = task
   useEffect(() => {
     const before = new Set(knownTabs.current.split('|'))
     knownTabs.current = tabIdsKey
-    if (!tabIdsKey.split('|').some(id => id && !before.has(id))) return
-    const state = getBench(task.id)
-    if (state.open && state.view !== 'panes') setBench(task.id, { view: 'panes' })
+    const added = tabIdsKey.split('|').filter(id => id && !before.has(id))
+    if (added.length === 0) return
+    const current = taskRef.current
+    const tabs = current.panes.flatMap(pane => pane.tabs).filter(tab => added.includes(tab.id))
+    const browser = conversationTabId(current) ? tabs.filter(tab => tab.type === 'browser').pop() : undefined
+    if (browser) {
+      if (browser.artifact) focusBrowser(task.id, browser.id)
+      else showInSide(task.id, browser.id)
+    }
+    if (tabs.some(tab => tab !== browser)) {
+      const state = getBench(task.id)
+      if (state.open && state.view !== 'panes') setBench(task.id, { view: 'panes' })
+    }
   }, [tabIdsKey, task.id])
+
+  // Esc leaves Focus, unless you're typing (the prompt keeps its own Esc).
+  const focused = !!side.focusTabId
+  useEffect(() => {
+    if (!visible || !focused) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      exitBrowserFocus(task.id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [visible, focused, task.id])
 
   const pick = (item: BenchItem): void => {
     const current = open ? benchCurrentItem(panes, view, focusedPane) : null
     // The lit item again closes the drawer.
     if (chatTabId && current === item) {
       setBench(task.id, { open: false })
+      return
+    }
+    // With a conversation the browser is the Side: the item shows or hides it.
+    if (item === 'browser' && chatTabId) {
+      if (side.open && !side.focusTabId) setBrowserSide(task.id, { open: false })
+      else if (side.tabId) {
+        setActiveTab(project.id, task.id, side.tabId)
+        showInSide(task.id, side.tabId)
+      } else addTab(project.id, task.id, { withTab: chatTabId }, 'browser')
       return
     }
     if (item === 'terminal' || item === 'browser') {
@@ -111,6 +153,8 @@ export default function DeskTaskBody({ project, task, visible, projectDir }: {
         open: bench.open,
         height: bench.height,
         view,
+        side,
+        sideShare,
         strip: (trailing) => (
           <BenchStrip
             trailing={trailing}
@@ -120,6 +164,8 @@ export default function DeskTaskBody({ project, task, visible, projectDir }: {
             items={items}
             current={current}
             panes={panes}
+            browserCount={chatTabId ? side.tabs.length : null}
+            sideOpen={side.open && !side.focusTabId}
             onPick={pick}
             run={bench.run}
             runShown={open && view === 'run'}
@@ -158,13 +204,16 @@ export default function DeskTaskBody({ project, task, visible, projectDir }: {
 }
 
 /** The Bench's strip: chevron, the items, the shortcut. Its top edge resizes the open drawer. */
-function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, run, runShown, onRun, onCloseRun, trailing }: {
+function BenchStrip({ taskId, collapsible, open, items, current, panes, browserCount, sideOpen, onPick, run, runShown, onRun, onCloseRun, trailing }: {
   taskId: string
   collapsible: boolean
   open: boolean
   items: BenchItem[]
   current: BenchItem | null
   panes: BenchPane[]
+  /** Browser tabs in the Side, when the task has one (it has a conversation); else they're on the Bench. */
+  browserCount: number | null
+  sideOpen: boolean
   onPick: (item: BenchItem) => void
   /** The run log the Bench holds, an entry of its own after the items. */
   run: StreamRunLogsTarget | null
@@ -179,6 +228,7 @@ function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, 
   for (const pane of panes) {
     for (const tab of pane.tabs) if (tab.type === 'terminal' || tab.type === 'browser') counts[tab.type]++
   }
+  if (browserCount !== null) counts.browser = browserCount
 
   const startResize = (e: React.MouseEvent<HTMLDivElement>): void => {
     e.preventDefault()
@@ -226,15 +276,19 @@ function BenchStrip({ taskId, collapsible, open, items, current, panes, onPick, 
       )}
       {items.map(item => {
         const count = item === 'terminal' || item === 'browser' ? counts[item] : 0
+        const lit = browserCount !== null && item === 'browser' ? sideOpen : item === current
+        const title = item === 'browser' && browserCount !== null
+          ? sideOpen ? 'Hide the browser' : count > 0 ? 'Show the browser beside the conversation' : 'Open a browser beside the conversation'
+          : item === 'terminal' || item === 'browser'
+            ? count > 0 ? `Show the ${ITEM_LABEL[item].toLowerCase()}` : `Open a ${ITEM_LABEL[item].toLowerCase()} in the Bench`
+            : `${ITEM_LABEL[item]} in the Bench`
         return (
           <button
             key={item}
             type="button"
-            className={`h-6 px-2 inline-flex items-center gap-1.5 rounded-md border-0 cursor-pointer text-sm font-medium transition-colors duration-(--motion-fast) ${item === current ? 'bg-field text-text shadow-(--shadow-raise)' : 'bg-transparent text-text-muted hover:text-text hover:bg-sel'}`}
-            aria-pressed={item === current}
-            title={item === 'terminal' || item === 'browser'
-              ? count > 0 ? `Show the ${ITEM_LABEL[item].toLowerCase()}` : `Open a ${ITEM_LABEL[item].toLowerCase()} in the Bench`
-              : `${ITEM_LABEL[item]} in the Bench`}
+            className={`h-6 px-2 inline-flex items-center gap-1.5 rounded-md border-0 cursor-pointer text-sm font-medium transition-colors duration-(--motion-fast) ${lit ? 'bg-field text-text shadow-(--shadow-raise)' : 'bg-transparent text-text-muted hover:text-text hover:bg-sel'}`}
+            aria-pressed={lit}
+            title={title}
             onClick={() => onPick(item)}
           >
             {React.createElement(ITEM_ICON[item], { size: 13, 'aria-hidden': true, className: 'opacity-80' })}

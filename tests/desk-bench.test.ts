@@ -33,20 +33,26 @@ describe('the conversation and the Bench', () => {
   })
 
   it('leaves the conversation out of the Bench and shows another tab where it was active', () => {
-    const t = task([pane([tab('chat', 'claude-chat'), tab('term', 'terminal'), tab('web', 'browser')], 'chat')])
+    const t = task([pane([tab('chat', 'claude-chat'), tab('term', 'terminal'), tab('web', 'editor')], 'chat')])
     const [bench] = benchPanes(t, 'chat')
     expect(bench.tabs.map(x => x.id)).toEqual(['term', 'web'])
     expect(bench.activeTabId).toBe('term')
     expect(bench.hidden).toBe(false)
   })
 
+  it('leaves browser tabs to the Side when there is a conversation, and keeps them without one', () => {
+    const t = task([pane([tab('chat', 'claude-chat'), tab('web', 'browser'), tab('term', 'terminal')], 'web')])
+    expect(benchPanes(t, 'chat')[0]).toMatchObject({ tabs: [expect.objectContaining({ id: 'term' })], activeTabId: 'term' })
+    expect(benchPanes(t, null)[0].tabs.map(x => x.id)).toEqual(['chat', 'web', 'term'])
+  })
+
   it('keeps the active tab when it is not the conversation', () => {
-    const t = task([pane([tab('chat', 'claude-chat'), tab('term', 'terminal'), tab('web', 'browser')], 'web')])
+    const t = task([pane([tab('chat', 'claude-chat'), tab('term', 'terminal'), tab('web', 'editor')], 'web')])
     expect(benchPanes(t, 'chat')[0].activeTabId).toBe('web')
   })
 
   it('hides a pane holding only the conversation, and the dividers beside it', () => {
-    const t = task([pane([tab('chat', 'claude-chat')], 'chat', 2), pane([tab('a', 'terminal')]), pane([tab('b', 'browser')])])
+    const t = task([pane([tab('chat', 'claude-chat')], 'chat', 2), pane([tab('a', 'terminal')]), pane([tab('b', 'editor')])])
     const bench = benchPanes(t, 'chat')
     expect(bench.map(p => p.hidden)).toEqual([true, false, false])
     expect(benchGridColumns([2, 1, 1], bench)).toBe('0px 0px minmax(0, 1fr) 3px minmax(0, 1fr)')
@@ -60,12 +66,12 @@ describe('the conversation and the Bench', () => {
   })
 
   it('without a conversation shows every pane', () => {
-    const t = task([pane([tab('a', 'terminal')]), pane([tab('b', 'browser')])])
+    const t = task([pane([tab('a', 'terminal')]), pane([tab('b', 'editor')])])
     expect(benchGridColumns([1, 1], benchPanes(t, null))).toBe('minmax(0, 1fr) 3px minmax(0, 1fr)')
   })
 
   it('drags a divider as a share of the panes the Bench shows', () => {
-    const t = task([pane([tab('chat', 'claude-chat')], 'chat', 0.5), pane([tab('a', 'terminal')], 'a', 0.25), pane([tab('b', 'browser')], 'b', 0.25)])
+    const t = task([pane([tab('chat', 'claude-chat')], 'chat', 0.5), pane([tab('a', 'terminal')], 'a', 0.25), pane([tab('b', 'editor')], 'b', 0.25)])
     const bench = benchPanes(t, 'chat')
     // Pointer at a quarter of the Bench: the shown panes split 1:3, the hidden one keeps its width.
     const next = dragBenchDivider([0.5, 0.25, 0.25], bench, 1, 0.25)
@@ -77,16 +83,16 @@ describe('the conversation and the Bench', () => {
 
 describe('the Bench strip', () => {
   const t = task([
-    pane([tab('chat', 'claude-chat'), tab('t1', 'terminal'), tab('w1', 'browser')], 'chat'),
+    pane([tab('chat', 'claude-chat'), tab('t1', 'terminal'), tab('w1', 'editor')], 'chat'),
     pane([tab('t2', 'terminal')])
   ])
   const bench = benchPanes(t, 'chat')
 
   it('picks the shown tab of a type before the first one', () => {
     expect(benchTabOfType(bench, 'terminal')).toBe('t1')
-    const other = benchPanes(task([pane([tab('chat', 'claude-chat'), tab('t1', 'terminal')], 'chat'), pane([tab('w', 'browser'), tab('t2', 'terminal')], 't2')]), 'chat')
+    const other = benchPanes(task([pane([tab('chat', 'claude-chat'), tab('t1', 'terminal')], 'chat'), pane([tab('w', 'editor'), tab('t2', 'terminal')], 't2')]), 'chat')
     expect(benchTabOfType(other, 'terminal')).toBe('t1')
-    expect(benchTabOfType(other, 'browser')).toBe('w')
+    expect(benchTabOfType(other, 'editor')).toBe('w')
     expect(benchTabOfType(other, 'note')).toBeNull()
   })
 
@@ -100,7 +106,8 @@ describe('the Bench strip', () => {
   it('lights the panel, or the type of the tab the focused pane shows', () => {
     expect(benchCurrentItem(bench, 'changes', 0)).toBe('changes')
     expect(benchCurrentItem(bench, 'panes', 0)).toBe('terminal')
-    const web = benchPanes(task([pane([tab('chat', 'claude-chat'), tab('w', 'browser')], 'chat')]), 'chat')
+    // Without a conversation a browser tab is on the Bench.
+    const web = benchPanes(task([pane([tab('w', 'browser')], 'w')]), null)
     expect(benchCurrentItem(web, 'panes', 0)).toBe('browser')
     const editor = benchPanes(task([pane([tab('chat', 'claude-chat'), tab('e', 'editor')], 'e')]), 'chat')
     expect(benchCurrentItem(editor, 'panes', 0)).toBeNull()

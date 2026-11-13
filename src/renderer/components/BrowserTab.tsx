@@ -165,12 +165,25 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     const handleReload = (e: Event) => {
       const detail = (e as CustomEvent).detail
       if (detail?.tabId === tabId) {
-        webviewRef.current?.reload()
+        // The local copy reloads from what Claude published, like the toolbar's Reload.
+        if (showingCopy) void showCopy()
+        else webviewRef.current?.reload()
       }
     }
     window.addEventListener('reload-browser-tab', handleReload)
     return () => window.removeEventListener('reload-browser-tab', handleReload)
-  }, [tabId])
+  }, [tabId, showingCopy, showCopy])
+
+  // Claude published the artifact again: a tab on its local copy shows the new one.
+  useEffect(() => {
+    if (!artifact) return
+    const handleRepublished = (e: Event) => {
+      const detail = (e as CustomEvent<{ chatTabId: string; url: string }>).detail
+      if (detail?.chatTabId === artifact.chatTabId && detail.url === artifact.url && showingCopy && activated) void showCopy()
+    }
+    window.addEventListener('artifact-republished', handleRepublished)
+    return () => window.removeEventListener('artifact-republished', handleRepublished)
+  }, [artifact, showingCopy, activated, showCopy])
 
   // Apply browser zoom factor
   useEffect(() => {
