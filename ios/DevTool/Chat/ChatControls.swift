@@ -37,7 +37,7 @@ struct ChatControlsBar: View {
                 }
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            if let usage = status.usage, usage.fiveHour != nil || usage.sevenDay != nil || usage.contextTokens != nil {
+            if let usage = status.usage, usage.hasPlanWindows || usage.contextTokens != nil {
                 Button { showingUsage = true } label: { UsageMeter(usage: usage) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Usage and limits")
@@ -305,6 +305,9 @@ private struct UsageDetails: View {
                 }
                 if let week = usage.sevenDay {
                     LimitRow(title: "Weekly limit", window: week, now: context.date)
+                }
+                ForEach(usage.models) { model in
+                    LimitRow(title: "Weekly · \(model.name)", window: model.window.current(now: context.date), now: context.date)
                 }
                 if let tokens = usage.contextTokens {
                     row("Context") {

@@ -384,7 +384,8 @@ extension Inbox {
         guard let account = try o.optNonEmpty("account") else { throw ProtocolError("account must be a string") }
         return InboxPlanLimit(account: account, plan: try optStr(o, "plan"),
                               fiveHour: o.isUnset("fiveHour") ? nil : try ChatLimitWindow.parse(o["fiveHour"]),
-                              sevenDay: o.isUnset("sevenDay") ? nil : try ChatLimitWindow.parse(o["sevenDay"]))
+                              sevenDay: o.isUnset("sevenDay") ? nil : try ChatLimitWindow.parse(o["sevenDay"]),
+                              models: ChatModelLimitWindow.parseList(o, "models"))
     }
 
     private static func parsePin(_ value: JSONValue) throws(ProtocolError) -> InboxPin {
@@ -532,6 +533,7 @@ extension InboxPlanLimit {
         if let plan { o["plan"] = .string(plan) }
         if let fiveHour { o["fiveHour"] = fiveHour.json }
         if let sevenDay { o["sevenDay"] = sevenDay.json }
+        if !models.isEmpty { o["models"] = .array(models.map(\.json)) }
         return .object(o)
     }
 }

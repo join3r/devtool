@@ -70,12 +70,16 @@ public struct InboxPlanLimit: Codable, Sendable, Equatable {
     public var plan: String?
     public var fiveHour: ChatLimitWindow?
     public var sevenDay: ChatLimitWindow?
+    /// Per-model weekly windows (Fable…), in claude.ai's order.
+    public var models: [ChatModelLimitWindow]
 
-    public init(account: String, plan: String? = nil, fiveHour: ChatLimitWindow? = nil, sevenDay: ChatLimitWindow? = nil) {
+    public init(account: String, plan: String? = nil, fiveHour: ChatLimitWindow? = nil, sevenDay: ChatLimitWindow? = nil,
+                models: [ChatModelLimitWindow] = []) {
         self.account = account
         self.plan = plan
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
+        self.models = models
     }
 
     public init(from decoder: any Decoder) throws {
@@ -87,7 +91,19 @@ public struct InboxPlanLimit: Codable, Sendable, Equatable {
         plan = try c.decodeIfPresent(String.self, forKey: .plan)
         fiveHour = try c.decodeIfPresent(ChatLimitWindow.self, forKey: .fiveHour)
         sevenDay = try c.decodeIfPresent(ChatLimitWindow.self, forKey: .sevenDay)
+        models = ((try? c.decodeIfPresent([LossyModelLimit].self, forKey: .models)) ?? []).compactMap(\.value)
     }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(account, forKey: .account)
+        try c.encodeIfPresent(plan, forKey: .plan)
+        try c.encodeIfPresent(fiveHour, forKey: .fiveHour)
+        try c.encodeIfPresent(sevenDay, forKey: .sevenDay)
+        if !models.isEmpty { try c.encode(models, forKey: .models) }
+    }
+
+    private enum CodingKeys: String, CodingKey { case account, plan, fiveHour, sevenDay, models }
 
     /// The part of the email before "@", or the whole email when another
     /// account in `all` shares that part.
@@ -131,6 +147,14 @@ extension InboxPlanLimit {
 }
 
 /// Decodes an account this build can't read as nil, so one bad entry drops only itself.
+struct LossyModelLimit: Decodable {
+    let value: ChatModelLimitWindow?
+    init(from decoder: any Decoder) throws {
+        let model = try? ChatModelLimitWindow(from: decoder)
+        value = model?.name.isEmpty == false ? model : nil
+    }
+}
+
 struct LossyPlanLimit: Decodable {
     let value: InboxPlanLimit?
     init(from decoder: any Decoder) throws { value = try? InboxPlanLimit(from: decoder) }

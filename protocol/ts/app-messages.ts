@@ -1,7 +1,7 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_FORK_OP, CHAT_SEARCH_OP, CHAT_QUEUE_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_PLUGINS_OP, CHAT_PLUGINS_CHANGE_OP, CHAT_SETTINGS_OP, CHAT_TASK_STOP_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_COMMANDS_GET_OP, STREAM_COMMANDS_SET_OP, STREAM_COMMANDS_SUGGEST_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, TOKENS_USAGE_OP, parseChatViewEvent, parseLimitWindow, parseTaskLanding, SCHEDULE_RUN_OP, SCHEDULE_UPDATE_OP } from './chat-messages.ts'
-import type { ChatViewEvent, ChatViewLimitWindow, TaskLanding } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_FORK_OP, CHAT_SEARCH_OP, CHAT_QUEUE_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_PLUGINS_OP, CHAT_PLUGINS_CHANGE_OP, CHAT_SETTINGS_OP, CHAT_TASK_STOP_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_COMMANDS_GET_OP, STREAM_COMMANDS_SET_OP, STREAM_COMMANDS_SUGGEST_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, TOKENS_USAGE_OP, parseChatViewEvent, parseLimitWindow, parseModelLimitWindows, parseTaskLanding, SCHEDULE_RUN_OP, SCHEDULE_UPDATE_OP } from './chat-messages.ts'
+import type { ChatViewEvent, ChatViewLimitWindow, ChatViewModelLimitWindow, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
 /**
@@ -261,6 +261,8 @@ export interface InboxPlanLimit {
   plan?: string
   fiveHour?: ChatViewLimitWindow
   sevenDay?: ChatViewLimitWindow
+  /** Per-model weekly windows (Fable…), in claude.ai's order. */
+  models?: ChatViewModelLimitWindow[]
 }
 
 export interface ReqMessage {
@@ -679,6 +681,7 @@ function parsePlanLimit(value: unknown): InboxPlanLimit {
   if (plan !== undefined) limit.plan = plan
   if (o.fiveHour !== undefined && o.fiveHour !== null) limit.fiveHour = parseLimitWindow(o.fiveHour)
   if (o.sevenDay !== undefined && o.sevenDay !== null) limit.sevenDay = parseLimitWindow(o.sevenDay)
+  if (o.models !== undefined && o.models !== null) limit.models = parseModelLimitWindows(o.models)
   return limit
 }
 

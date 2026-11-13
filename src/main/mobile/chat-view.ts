@@ -2,7 +2,7 @@ import { firstLine, summarizeTool } from '../../shared/agent-activity'
 import { editPairs, diffLines } from '../../shared/chat-diff'
 import { canAlwaysAllow, planText, promptQuestions } from '../../shared/chat-prompts'
 import { CHAT_EFFORT_LEVELS, chatAgentFeatures, findModelOption, PI_THINKING_LEVELS, visibleTasks } from '../../shared/claude-chat'
-import type { ChatImage, ChatItem, ChatTask, ChatWorkflow, ChatWorkflowAgent, ChatLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
+import type { ChatImage, ChatItem, ChatTask, ChatWorkflow, ChatWorkflowAgent, ChatLimitWindow, ChatModelLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
 import { ChatLimits, capText } from '../../../protocol/ts/index.ts'
 import type {
   ChatDetailResult,
@@ -11,6 +11,7 @@ import type {
   ChatViewItem,
   ChatViewPrompt,
   ChatViewLimitWindow,
+  ChatViewModelLimitWindow,
   ChatViewQuestion,
   ChatViewSettings,
   ChatViewStatus,
@@ -271,6 +272,15 @@ export function limitWindow(window: ChatLimitWindow | undefined): ChatViewLimitW
   return out
 }
 
+/** Per-model weekly windows on the wire (§6.2 `models`, the inbox's too); undefined when none has a number. */
+export function modelLimitWindows(models: readonly ChatModelLimitWindow[] | undefined): ChatViewModelLimitWindow[] | undefined {
+  const out = (Array.isArray(models) ? models : []).flatMap(model => {
+    const window = typeof model?.name === 'string' && model.name ? limitWindow(model) : undefined
+    return window ? [{ name: model.name, ...window }] : []
+  })
+  return out.length > 0 ? out : undefined
+}
+
 function count(value: number | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined
 }
@@ -288,6 +298,8 @@ export function viewUsage(usage: ChatUsage): ChatViewUsage | undefined {
   if (fiveHour) out.fiveHour = fiveHour
   const sevenDay = limitWindow(usage.sevenDay)
   if (sevenDay) out.sevenDay = sevenDay
+  const models = modelLimitWindows(usage.models)
+  if (models) out.models = models
   return Object.keys(out).length > 0 ? out : undefined
 }
 

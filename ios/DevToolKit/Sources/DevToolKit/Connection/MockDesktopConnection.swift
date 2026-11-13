@@ -1726,7 +1726,8 @@ public enum MockInbox {
             limits: [
                 InboxPlanLimit(account: "me@personal.dev", plan: "max",
                                fiveHour: ChatLimitWindow(used: 42, resetsAt: ahead(130)),
-                               sevenDay: ChatLimitWindow(used: 61, resetsAt: ahead(2 * 1440 + 300))),
+                               sevenDay: ChatLimitWindow(used: 61, resetsAt: ahead(2 * 1440 + 300)),
+                               models: [ChatModelLimitWindow(name: "Fable", used: 22, resetsAt: ahead(2 * 1440 + 300))]),
                 InboxPlanLimit(account: "ops@company.dev", plan: "team",
                                fiveHour: ChatLimitWindow(used: 88, resetsAt: ahead(47)),
                                sevenDay: ChatLimitWindow(used: 34, resetsAt: ahead(4 * 1440 + 600))),

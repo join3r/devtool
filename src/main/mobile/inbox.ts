@@ -17,7 +17,7 @@ import { childProgress, delegationTree, waitingOnChildren, type DelegationTree }
 import { promptQueue, promptQueueWatchedTask, queuedPromptStream } from '../../shared/prompt-queue'
 import { projectSchedules, scheduleStreamId } from '../../shared/schedules'
 import type { PlanAccount } from '../../shared/plan-limits'
-import { limitWindow as wireLimitWindow } from './chat-view'
+import { limitWindow as wireLimitWindow, modelLimitWindows as wireModelLimitWindows } from './chat-view'
 import { INBOX_TAB_TYPES, TaskLandingLimits } from '../../../protocol/ts/index.ts'
 import type {
   TaskLanding as WireLanding,
@@ -370,6 +370,8 @@ export function wirePlanLimit(account: PlanAccount): MobileInboxPlanLimit {
   if (fiveHour) out.fiveHour = fiveHour
   const sevenDay = wireLimitWindow(account.sevenDay)
   if (sevenDay) out.sevenDay = sevenDay
+  const models = wireModelLimitWindows(account.models)
+  if (models) out.models = models
   return out
 }
 

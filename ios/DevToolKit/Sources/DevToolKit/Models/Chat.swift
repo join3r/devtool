@@ -338,6 +338,24 @@ public struct ChatLimitWindow: Codable, Sendable, Equatable {
     }
 }
 
+/// A plan's weekly window for one model (Fable…), named as claude.ai labels it.
+public struct ChatModelLimitWindow: Codable, Sendable, Equatable, Identifiable {
+    public var name: String
+    /// Percent used, 0–100.
+    public var used: Int
+    /// Unix ms.
+    public var resetsAt: Int64?
+
+    public init(name: String, used: Int, resetsAt: Int64? = nil) {
+        self.name = name
+        self.used = used
+        self.resetsAt = resetsAt
+    }
+
+    public var id: String { name }
+    public var window: ChatLimitWindow { ChatLimitWindow(used: used, resetsAt: resetsAt) }
+}
+
 /// The composer's meter (§6.2). Each part is there once the desktop has read it.
 public struct ChatUsage: Sendable, Equatable {
     public var contextTokens: Int64?
@@ -347,15 +365,21 @@ public struct ChatUsage: Sendable, Equatable {
     /// claude.ai plan windows; nil for API-key sessions.
     public var fiveHour: ChatLimitWindow?
     public var sevenDay: ChatLimitWindow?
+    /// Per-model weekly windows (Fable…), in claude.ai's order; empty when the plan has none.
+    public var models: [ChatModelLimitWindow]
 
     public init(contextTokens: Int64? = nil, contextMax: Int64? = nil, costCents: Int64? = nil,
-                fiveHour: ChatLimitWindow? = nil, sevenDay: ChatLimitWindow? = nil) {
+                fiveHour: ChatLimitWindow? = nil, sevenDay: ChatLimitWindow? = nil, models: [ChatModelLimitWindow] = []) {
         self.contextTokens = contextTokens
         self.contextMax = contextMax
         self.costCents = costCents
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
+        self.models = models
     }
+
+    /// Whether any plan window is known.
+    public var hasPlanWindows: Bool { fiveHour != nil || sevenDay != nil || !models.isEmpty }
 }
 
 /// `chat.open` result's `view`.
@@ -1075,6 +1099,26 @@ extension ChatLimitWindow {
     }
 }
 
+extension ChatModelLimitWindow {
+    static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatModelLimitWindow {
+        let f = try Fields(value, "model limit")
+        guard let name = try f.optNonEmpty("name") else { throw ProtocolError("model limit name must be a string") }
+        return ChatModelLimitWindow(name: name, used: Int(try f.int("used")), resetsAt: try f.optInt("resetsAt"))
+    }
+
+    /// A `models` list, skipping entries this phone can't read.
+    static func parseList(_ f: Fields, _ key: String) -> [ChatModelLimitWindow] {
+        guard !f.isUnset(key), let rows = try? f.array(key) else { return [] }
+        return rows.compactMap { try? parse($0) }
+    }
+
+    var json: JSONValue {
+        var o: JSONObject = ["name": .string(name), "used": .int(Int64(used))]
+        if let resetsAt { o["resetsAt"] = .int(resetsAt) }
+        return .object(o)
+    }
+}
+
 extension ChatUsage {
     static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatUsage {
         let f = try Fields(value, "usage")
@@ -1083,7 +1127,8 @@ extension ChatUsage {
             contextMax: try f.optInt("contextMax"),
             costCents: try f.optInt("costCents"),
             fiveHour: f.isUnset("fiveHour") ? nil : try ChatLimitWindow.parse(f["fiveHour"]),
-            sevenDay: f.isUnset("sevenDay") ? nil : try ChatLimitWindow.parse(f["sevenDay"])
+            sevenDay: f.isUnset("sevenDay") ? nil : try ChatLimitWindow.parse(f["sevenDay"]),
+            models: ChatModelLimitWindow.parseList(f, "models")
         )
     }
 
@@ -1094,6 +1139,7 @@ extension ChatUsage {
         if let costCents { o["costCents"] = .int(costCents) }
         if let fiveHour { o["fiveHour"] = fiveHour.json }
         if let sevenDay { o["sevenDay"] = sevenDay.json }
+        if !models.isEmpty { o["models"] = .array(models.map(\.json)) }
         return .object(o)
     }
 }

@@ -49,7 +49,16 @@
         "contextMax": { "type": "integer", "minimum": 0 },
         "costCents": { "type": "integer", "minimum": 0 },
         "fiveHour": { "$ref": "#/$defs/limit" },
-        "sevenDay": { "$ref": "#/$defs/limit" }
+        "sevenDay": { "$ref": "#/$defs/limit" },
+        "models": {
+          "type": "array",
+          "description": "Per-model weekly windows (Fable…), in claude.ai's order",
+          "items": {
+            "type": "object",
+            "required": ["name", "used"],
+            "properties": { "name": { "type": "string", "description": "Non-empty: the model as claude.ai labels it" }, "used": { "type": "integer", "minimum": 0 }, "resetsAt": { "$ref": "#/$defs/ms" } }
+          }
+        }
       }
     },
     "task": {

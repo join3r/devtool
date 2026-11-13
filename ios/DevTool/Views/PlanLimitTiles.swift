@@ -2,7 +2,7 @@ import DevToolKit
 import SwiftUI
 
 /// The Inbox's top row (§4.4 `limits`): one tile per Claude account with its
-/// 5-hour and weekly windows. Two tiles share the width; more scroll sideways.
+/// 5-hour and weekly windows (per-model weekly ones such as Fable's in the details). Two tiles share the width; more scroll sideways.
 struct PlanLimitTiles: View {
     let limits: [InboxPlanLimit]
     let now: Date
@@ -82,6 +82,7 @@ private struct PlanLimitTile: View {
         var parts = ["Claude limits for \(limit.account)"]
         if let five { parts.append("5-hour \(five.used)% used") }
         if let week { parts.append("weekly \(week.used)% used") }
+        for model in limit.models { parts.append("\(model.name) weekly \(model.window.current(now: now).used)% used") }
         if let reset { parts.append("resets in \(UsageFormat.resetIn(reset, now: now))") }
         return parts.joined(separator: ", ")
     }
@@ -108,7 +109,10 @@ private struct PlanLimitDetails: View {
                 if let week = limit.sevenDay {
                     LimitRow(title: "Weekly limit", window: week.current(now: context.date), now: context.date)
                 }
-                if limit.fiveHour == nil && limit.sevenDay == nil {
+                ForEach(limit.models) { model in
+                    LimitRow(title: "Weekly · \(model.name)", window: model.window.current(now: context.date), now: context.date)
+                }
+                if limit.fiveHour == nil && limit.sevenDay == nil && limit.models.isEmpty {
                     Text("No limits read yet.")
                         .foregroundStyle(.secondary)
                 }

@@ -29,18 +29,19 @@ export class PlanLimits {
 
   /** A chat event (ClaudeChatManager.watch): only a `meta` naming the account or carrying windows counts. */
   observe(tabId: string, event: ChatEvent, state: ChatState): void {
-    if (event.t !== 'meta' || !(event.info?.account || event.usage?.fiveHour || event.usage?.sevenDay)) return
+    if (event.t !== 'meta' || !(event.info?.account || event.usage?.fiveHour || event.usage?.sevenDay || event.usage?.models)) return
     const account = state.info.account
     if (!account?.email) return
     this.hostEmail.set(this.deps.hostOfTab(tabId) ?? this.deps.selfLabel, account.email)
     const seen = this.entries.get(account.email)
-    const { fiveHour, sevenDay } = state.usage
+    const { fiveHour, sevenDay, models } = state.usage
     const entry: Entry = {
       email: account.email,
       ...(account.plan ? { plan: account.plan } : seen?.plan ? { plan: seen.plan } : {}),
       ...(fiveHour ? { fiveHour } : seen?.fiveHour ? { fiveHour: seen.fiveHour } : {}),
       ...(sevenDay ? { sevenDay } : seen?.sevenDay ? { sevenDay: seen.sevenDay } : {}),
-      readAt: fiveHour || sevenDay ? (this.deps.now ?? Date.now)() : seen?.readAt ?? 0
+      ...(models ? { models } : seen?.models ? { models: seen.models } : {}),
+      readAt: fiveHour || sevenDay || models ? (this.deps.now ?? Date.now)() : seen?.readAt ?? 0
     }
     this.entries.set(account.email, entry)
     this.changed()
@@ -63,7 +64,7 @@ export class PlanLimits {
 
   /** Every login: this host's and its servers'. Only logins whose windows were read. */
   accounts(): PlanAccount[] {
-    return mergePlanAccounts([this.own(), ...this.foreign.values()]).filter(a => a.fiveHour || a.sevenDay)
+    return mergePlanAccounts([this.own(), ...this.foreign.values()]).filter(a => a.fiveHour || a.sevenDay || a.models?.length)
   }
 
   subscribe(listener: () => void): () => void {

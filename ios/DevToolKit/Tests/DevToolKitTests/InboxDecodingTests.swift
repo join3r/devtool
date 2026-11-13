@@ -12,7 +12,8 @@ import Testing
       "desktop": { "id": "d1", "name": "mbp" }, "generatedAt": 1, "projects": [],
       "limits": [
         { "account": "me@personal.dev", "plan": "max",
-          "fiveHour": { "used": 42, "resetsAt": 1793412000000 }, "sevenDay": { "used": 61, "resetsAt": 1793700000000 } },
+          "fiveHour": { "used": 42, "resetsAt": 1793412000000 }, "sevenDay": { "used": 61, "resetsAt": 1793700000000 },
+          "models": [{ "name": "Fable", "used": 22, "resetsAt": 1793700000000 }, { "name": "", "used": 1 }, { "used": 3 }] },
         { "account": "ops@company.dev", "sevenDay": { "used": 34 } },
         { "account": "", "plan": "pro" },
         { "plan": "pro" },
@@ -27,7 +28,8 @@ import Testing
         let expected = [
             InboxPlanLimit(account: "me@personal.dev", plan: "max",
                            fiveHour: ChatLimitWindow(used: 42, resetsAt: 1_793_412_000_000),
-                           sevenDay: ChatLimitWindow(used: 61, resetsAt: 1_793_700_000_000)),
+                           sevenDay: ChatLimitWindow(used: 61, resetsAt: 1_793_700_000_000),
+                           models: [ChatModelLimitWindow(name: "Fable", used: 22, resetsAt: 1_793_700_000_000)]),
             InboxPlanLimit(account: "ops@company.dev", sevenDay: ChatLimitWindow(used: 34)),
         ]
         #expect(try decode(Self.limitsJSON).limits == expected)

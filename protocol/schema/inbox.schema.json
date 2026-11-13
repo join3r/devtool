@@ -35,7 +35,20 @@
         "account": { "type": "string", "minLength": 1, "description": "The login's email." },
         "plan": { "type": "string", "description": "max, pro, team… as Claude Code reports it." },
         "fiveHour": { "$ref": "#/$defs/limitWindow" },
-        "sevenDay": { "$ref": "#/$defs/limitWindow" }
+        "sevenDay": { "$ref": "#/$defs/limitWindow" },
+        "models": {
+          "type": "array",
+          "description": "Per-model weekly windows (Fable…), in claude.ai's order.",
+          "items": {
+            "type": "object",
+            "required": ["name", "used"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "description": "The model as claude.ai labels it (Fable…)." },
+              "used": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Percent used." },
+              "resetsAt": { "$ref": "#/$defs/unixMs" }
+            }
+          }
+        }
       }
     },
     "deviceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },

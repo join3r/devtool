@@ -10,7 +10,7 @@ import { formatResetAt, formatResetIn, limitTone } from '../claude-chat/UsageMet
  * Claude tabs run on (this Mac, its SSH boxes and its servers). It shows the
  * login nearest its limit: the 5-hour bar over the weekly one and the 5-hour
  * share used, plus the countdown once it runs hot. Hovering shows each login's
- * windows, their resets and the hosts on it.
+ * windows (per-model weekly ones such as Fable's too), their resets and the hosts on it.
  */
 
 const TONE_TEXT = { success: 'text-success', warn: 'text-warn', danger: 'text-danger' } as const
@@ -82,13 +82,22 @@ export default function PlanLimitChips(): React.ReactElement | null {
   )
 }
 
+/** The account's per-model weekly windows (Fable…) as they stand at `now`. */
+function modelWindows(account: PlanAccount, now: number): Array<{ name: string; window: ChatLimitWindow }> {
+  return (Array.isArray(account.models) ? account.models : []).flatMap(model => {
+    const window = typeof model?.utilization === 'number' ? currentWindow(model, now) : undefined
+    return window && model.name ? [{ name: model.name, window }] : []
+  })
+}
+
 /** The window's share in words, for a screen reader. */
 function spoken(account: PlanAccount, now: number): string {
   const fiveHour = currentWindow(account.fiveHour, now)
   const sevenDay = currentWindow(account.sevenDay, now)
   const parts = [
     fiveHour && `5-hour limit ${Math.round(fiveHour.utilization)}% used`,
-    sevenDay && `weekly limit ${Math.round(sevenDay.utilization)}% used`
+    sevenDay && `weekly limit ${Math.round(sevenDay.utilization)}% used`,
+    ...modelWindows(account, now).map(({ name, window }) => `${name} weekly limit ${Math.round(window.utilization)}% used`)
   ].filter(Boolean)
   return `${account.email}: ${parts.join(', ')}`
 }
@@ -151,6 +160,9 @@ function Details({ accounts, rect, now }: { accounts: readonly PlanAccount[]; re
             </div>
             {fiveHour && <WindowRow label="5-hour limit" window={fiveHour} now={now} />}
             {sevenDay && <WindowRow label="Weekly limit" window={sevenDay} now={now} />}
+            {modelWindows(account, now).map(({ name, window }) => (
+              <WindowRow key={name} label={`Weekly · ${name}`} window={window} now={now} />
+            ))}
             {account.hosts.length > 0 && <div className="text-text-muted">Used by {account.hosts.join(', ')}</div>}
           </div>
         )

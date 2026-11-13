@@ -35,7 +35,8 @@ struct MockChatTranscript: Sendable {
                                     efforts: ["low", "medium", "high", "xhigh", "max"])
         let usage = ChatUsage(contextTokens: 64_000, contextMax: 200_000, costCents: 412,
                               fiveHour: ChatLimitWindow(used: 38, resetsAt: now + 2 * 3_600_000 + 16 * 60_000),
-                              sevenDay: ChatLimitWindow(used: 81, resetsAt: now + 3 * 86_400_000))
+                              sevenDay: ChatLimitWindow(used: 81, resetsAt: now + 3 * 86_400_000),
+                              models: [ChatModelLimitWindow(name: "Fable", used: 22, resetsAt: now + 3 * 86_400_000)])
         return (settings, usage)
     }
 

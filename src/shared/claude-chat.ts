@@ -223,6 +223,11 @@ export interface ChatLimitWindow {
   resetsAt?: string
 }
 
+/** A plan's weekly window for one model (Fable…), named as claude.ai labels it. */
+export interface ChatModelLimitWindow extends ChatLimitWindow {
+  name: string
+}
+
 /** What the composer's meter shows; each part appears once main has read it. */
 export interface ChatUsage {
   /** Tokens in context now, and the model's window (as `/context` counts them). */
@@ -233,6 +238,8 @@ export interface ChatUsage {
   /** claude.ai plan windows; absent for API-key and cloud-provider sessions. */
   fiveHour?: ChatLimitWindow
   sevenDay?: ChatLimitWindow
+  /** Per-model weekly windows (Fable…), in the server's order; absent when the plan has none. */
+  models?: ChatModelLimitWindow[]
 }
 
 /**

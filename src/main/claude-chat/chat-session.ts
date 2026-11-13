@@ -27,7 +27,8 @@ import {
   type ChatAccount,
   type ChatCommand,
   type ChatColdCache,
-  type ChatUsage
+  type ChatUsage,
+  type ChatModelLimitWindow
 } from '../../shared/claude-chat'
 
 /**
@@ -140,6 +141,48 @@ const CONTEXT_REFRESH_MS = 20_000
 function limitWindow(raw: { utilization: number | null; resets_at: string | null } | null | undefined): ChatUsage['fiveHour'] {
   if (!raw || typeof raw.utilization !== 'number') return undefined
   return { utilization: raw.utilization, ...(raw.resets_at ? { resetsAt: raw.resets_at } : {}) }
+}
+
+type RawWindow = { utilization: number | null; resets_at: string | null } | null | undefined
+
+/** A server usage row (`rate_limits.limits[]`, not in the SDK's types yet). */
+interface RawLimitRow {
+  kind?: string
+  percent?: number | null
+  resets_at?: string | null
+  scope?: { model?: { display_name?: string } | null; surface?: { display_name?: string } | null } | null
+}
+
+/**
+ * The plan's scoped weekly windows (Fable…) from `/usage`'s answer: the server's
+ * `limits[]` rows that name a model or surface, else its `model_scoped` list,
+ * else the older Opus/Sonnet fields. Undefined when none has a number.
+ */
+export function modelLimitWindows(raw: {
+  limits?: unknown
+  model_scoped?: Array<{ display_name: string; utilization: number | null; resets_at: string | null }>
+  seven_day_opus?: RawWindow
+  seven_day_sonnet?: RawWindow
+} | null | undefined): ChatModelLimitWindow[] | undefined {
+  if (!raw) return undefined
+  const scoped = Array.isArray(raw.limits)
+    ? (raw.limits as RawLimitRow[]).flatMap((row): Array<[string, RawWindow]> => {
+        const name = row?.scope?.model?.display_name || row?.scope?.surface?.display_name
+        if (!name || row.kind === 'session' || row.kind === 'weekly_all') return []
+        return [[name, { utilization: typeof row.percent === 'number' ? row.percent : null, resets_at: row.resets_at ?? null }]]
+      })
+    : []
+  const rows: Array<[string, RawWindow]> = scoped.length > 0
+    ? scoped
+    : raw.model_scoped
+      ? raw.model_scoped.map(row => [row.display_name, row])
+      : [['Opus', raw.seven_day_opus], ['Sonnet', raw.seven_day_sonnet]]
+  const out: ChatModelLimitWindow[] = []
+  for (const [name, row] of rows) {
+    const window = limitWindow(row)
+    if (window && name) out.push({ name, ...window })
+  }
+  return out.length > 0 ? out : undefined
 }
 
 /** One live background task from a `background_tasks_changed` level. */
@@ -707,6 +750,7 @@ export class ChatSession {
           if (!this.sawResultCost && typeof cost === 'number' && cost > 0) usage.costUsd = cost
           usage.fiveHour = limitWindow(plan.rate_limits?.five_hour)
           usage.sevenDay = limitWindow(plan.rate_limits?.seven_day)
+          usage.models = modelLimitWindows(plan.rate_limits)
         }
       }
       if (!this.ended && (Object.keys(usage).length > 0 || account)) {

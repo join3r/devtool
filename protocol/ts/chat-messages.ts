@@ -767,6 +767,11 @@ export interface ChatViewLimitWindow {
   resetsAt?: number
 }
 
+/** A plan's weekly window for one model (Fable…), named as claude.ai labels it. */
+export interface ChatViewModelLimitWindow extends ChatViewLimitWindow {
+  name: string
+}
+
 /** The composer's meter (§6.2); each part appears once the desktop has read it. */
 export interface ChatViewUsage {
   contextTokens?: number
@@ -776,6 +781,8 @@ export interface ChatViewUsage {
   /** claude.ai plan windows; absent for API-key sessions. */
   fiveHour?: ChatViewLimitWindow
   sevenDay?: ChatViewLimitWindow
+  /** Per-model weekly windows (Fable…), in claude.ai's order; absent when the plan has none. */
+  models?: ChatViewModelLimitWindow[]
 }
 
 export type ChatViewTaskKind = 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'hook' | 'other'
@@ -1113,6 +1120,17 @@ export function parseLimitWindow(value: unknown): ChatViewLimitWindow {
   return window
 }
 
+/** A `models` list (§6.2, §4.4): each entry a limit window with a non-empty `name`. */
+export function parseModelLimitWindows(value: unknown): ChatViewModelLimitWindow[] {
+  if (!Array.isArray(value)) fail('models must be an array')
+  return value.map((raw) => {
+    const o = obj(raw, 'model limit')
+    const name = str(o, 'name')
+    if (name === '') fail('model limit name is empty')
+    return { name, ...parseLimitWindow(o) }
+  })
+}
+
 function parseUsage(value: unknown): ChatViewUsage {
   const o = obj(value, 'usage')
   const usage: ChatViewUsage = {}
@@ -1122,6 +1140,7 @@ function parseUsage(value: unknown): ChatViewUsage {
   }
   if (!absent(o, 'fiveHour')) usage.fiveHour = parseLimitWindow(o.fiveHour)
   if (!absent(o, 'sevenDay')) usage.sevenDay = parseLimitWindow(o.sevenDay)
+  if (!absent(o, 'models')) usage.models = parseModelLimitWindows(o.models)
   return usage
 }
 

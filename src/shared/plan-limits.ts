@@ -1,4 +1,4 @@
-import type { ChatLimitWindow } from './claude-chat'
+import type { ChatLimitWindow, ChatModelLimitWindow } from './claude-chat'
 
 /**
  * Claude plan limits per account, app-wide rather than per task: every host
@@ -14,6 +14,8 @@ export interface PlanAccount {
   plan?: string
   fiveHour?: ChatLimitWindow
   sevenDay?: ChatLimitWindow
+  /** Per-model weekly windows (Fable…). */
+  models?: ChatModelLimitWindow[]
   /** When a host last read the windows (ms). */
   readAt: number
   /** The hosts whose Claude tabs last ran on this login, by their status-bar label. */

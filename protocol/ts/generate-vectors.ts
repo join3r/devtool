@@ -563,7 +563,8 @@ function chatMessages(): unknown {
   }
   const view = {
     tabId: 'tab-chat', title: 'Claude', busy: true, turnStartedAt: 1790000000000, process: 'running',
-    permissionMode: 'default', model: 'claude-opus-4-5', settings, usage, items, hasEarlier: true, prompts
+    permissionMode: 'default', model: 'claude-opus-4-5', settings,
+    usage: { ...usage, models: [{ name: 'Fable', used: 22, resetsAt: 1790600000000 }] }, items, hasEarlier: true, prompts
   }
   // §8.20: the task pill's rows.
   const tasks = [
@@ -600,14 +601,14 @@ function chatMessages(): unknown {
   }
   // A Codex chat: its agent, its own modes, and Pi-style named effort.
   const codexView = {
-    ...view, tabId: 'tab-codex', title: 'Codex', agent: 'codex', permissionMode: 'ask', model: 'gpt-6.1-sol',
+    ...view, usage, tabId: 'tab-codex', title: 'Codex', agent: 'codex', permissionMode: 'ask', model: 'gpt-6.1-sol',
     settings: {
       modelName: 'GPT-6.1-Sol', models: [{ value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' }], efforts: ['low', 'high'],
       modes: [{ value: 'read-only', label: 'Read only', description: 'Ask before any change' }, { value: 'ask', label: 'Ask' }]
     }
   }
   const piView = {
-    ...view, tabId: 'tab-pi', title: 'Pi', agent: 'pi', permissionMode: undefined,
+    ...view, usage, tabId: 'tab-pi', title: 'Pi', agent: 'pi', permissionMode: undefined,
     settings: { models: [], efforts: ['off', 'minimal'], effortLabel: 'Thinking', modes: [] }
   }
   const params = (op: string, value: unknown): { op: string; json: string; expected: unknown } =>
