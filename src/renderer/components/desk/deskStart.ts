@@ -7,6 +7,7 @@ import { availablePromptAgents, pickPromptAgent } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
 import { autopilotSupported } from '../../../shared/autopilot'
 import { fuzzyMatch } from '../../palette/fuzzy'
+import { composeTarget } from './deskInbox'
 import { LOOP_DEFAULT_ROUNDS, LOOP_DEFAULT_TARGET, LOOP_JUDGES, normalizeLoopSettings, type LoopSettings } from '../../../shared/loop'
 
 /** The Autopilot chip: off by default every time (decision 7), "+ Codex review" or "Loop" inside it. */
@@ -226,12 +227,17 @@ export interface WhereOption {
 }
 
 /**
- * Where a picked row aims the compose box: a stream row its stream, a project
- * row its main stream (the row that was highlighted), never the stream last
- * fired into, which the bare project would fall back to.
+ * The stream a where row aims at: a stream row its stream, a project row the
+ * project's last stream (the one last fired into there, else the one it was
+ * last left in), else `main`. The row shows it, so ↵ goes where it says.
  */
-export function whereScope(option: WhereOption): DeskScope {
-  const stream = option.stream ?? findMainStream(option.project)
+export function whereStream(option: WhereOption, last: DeskScope | null): Stream | undefined {
+  return option.stream ?? composeTarget([option.project], { projectId: option.project.id }, last)?.stream ?? findMainStream(option.project)
+}
+
+/** Where a picked row aims the compose box: always a stream, so no later fallback moves it. */
+export function whereScope(option: WhereOption, last: DeskScope | null): DeskScope {
+  const stream = whereStream(option, last)
   return stream ? { projectId: option.project.id, streamId: stream.id } : { projectId: option.project.id }
 }
 

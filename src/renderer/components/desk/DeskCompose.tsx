@@ -8,7 +8,7 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { composeTarget } from './deskInbox'
 import { deskEvents } from './deskEvents'
-import { autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, whereScope, writeLastWhere, type WhereOption } from './deskStart'
+import { autopilotAvailable, busyChoices, busyInSameFolder, canQueueStart, effectiveBusyChoice, type BusyChoice, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, whereScope, whereStream, writeLastWhere, type WhereOption } from './deskStart'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import SameFolderWarning from './SameFolderWarning'
@@ -106,7 +106,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   /** Aim at the option and take its `@word` out of the text. */
   const pick = (option: WhereOption | undefined): void => {
     if (!option || !mention) return
-    setOverride(whereScope(option))
+    setOverride(whereScope(option, readLastWhere()))
     const rest = text.slice(caret).replace(/^ /, '')
     const head = text.slice(0, mention.start)
     edit(head + rest, head.length)
@@ -277,6 +277,8 @@ function WhereMenu({ anchor, options, cursor, filtered, theme, onHover, onPick, 
     window.addEventListener('mousedown', onDismiss)
     return () => window.removeEventListener('mousedown', onDismiss)
   }, [anchor, onDismiss])
+  // Read once per open: the stream a project row aims at, shown on it.
+  const last = useMemo(() => (anchor ? readLastWhere() : null), [anchor])
   if (!anchor) return null
 
   return (
@@ -292,6 +294,7 @@ function WhereMenu({ anchor, options, cursor, filtered, theme, onHover, onPick, 
       {options.length === 0 && <div className="px-2.5 py-1.5 text-sm text-text-muted">No project or stream matches</div>}
       {options.map((option, index) => {
         const selected = index === cursor
+        const aimed = option.stream ? undefined : whereStream(option, last)
         return option.stream ? (
           <button key={option.key} type="button" data-where-index={index} className={`flex w-full items-center gap-2 ${filtered ? 'pl-2.5' : 'pl-[34px]'} pr-2.5 py-1 rounded-md border-0 text-sm cursor-pointer text-left font-mono ${selected ? 'bg-sel text-text' : 'bg-transparent text-text-muted'}`} onMouseMove={() => onHover(index)} onClick={() => onPick(option)}>
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">{filtered ? `${option.project.name} › ${option.stream.name}` : `› ${option.stream.name}`}</span>
@@ -300,6 +303,7 @@ function WhereMenu({ anchor, options, cursor, filtered, theme, onHover, onPick, 
           <button key={option.key} type="button" data-where-index={index} className={`flex w-full items-center gap-2 px-2.5 py-1.5 rounded-md border-0 text-base text-text cursor-pointer text-left ${selected ? 'bg-sel' : 'bg-transparent'}`} onMouseMove={() => onHover(index)} onClick={() => onPick(option)}>
             <ProjectTileBadge project={option.project} theme={theme} size={16} />
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">{option.project.name}</span>
+            {aimed && !aimed.isMain && <span className="ml-auto shrink-0 max-w-[45%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-sm text-text-muted">› {aimed.name}</span>}
           </button>
         )
       })}
