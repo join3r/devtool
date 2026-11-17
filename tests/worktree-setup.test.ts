@@ -13,6 +13,7 @@ import {
   parseWorktreeConfig,
   readWorktreeConfig,
   runWorktreeSetup,
+  staleDepsLinks,
   suggestWorktreeConfig,
   WORKTREE_CONFIG_FILE,
   type WorktreeSetupRequest
@@ -472,5 +473,114 @@ describe('FileSetupApprovals', () => {
     expect(store.isApproved('/repo/.git', 'aaa')).toBe(false)
     store.approve('/repo/.git', 'aaa')
     expect(store.isApproved('/repo/.git', 'aaa')).toBe(true)
+  })
+})
+
+describe('node_modules links follow the lockfile', () => {
+  const runner = new LocalGitRunner()
+  let repo: string
+
+  /** A package-lock.json asking for these versions (`?` suffix: optional). */
+  function lockText(versions: Record<string, string>): string {
+    const packages: Record<string, unknown> = { '': { name: 'app' } }
+    for (const [name, version] of Object.entries(versions)) {
+      packages[`node_modules/${name}`] = version.endsWith('?') ? { version: version.slice(0, -1), optional: true } : { version }
+    }
+    return JSON.stringify({ name: 'app', lockfileVersion: 3, packages }, null, 2)
+  }
+
+  /** An npm-installed node_modules in `dir` holding these versions. */
+  function install(dir: string, versions: Record<string, string>): void {
+    fs.mkdirSync(path.join(dir, 'node_modules'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'node_modules', '.package-lock.json'), lockText(versions))
+  }
+
+  function commitLock(dir: string, versions: Record<string, string>): void {
+    fs.writeFileSync(path.join(dir, 'package-lock.json'), lockText(versions))
+    git(dir, 'add', 'package-lock.json')
+    git(dir, 'commit', '-qm', 'lock')
+  }
+
+  const setup = (sourceRoot: string, worktreeRoot: string) =>
+    runWorktreeSetup({ sourceRoot, worktreeRoot, branch: 'b', runner, env: { ...process.env } as Record<string, string> })
+
+  beforeEach(() => {
+    repo = canonicalFilePath(fs.mkdtempSync(path.join(os.tmpdir(), 'wt-deps-')))
+    initGitRepo(repo)
+    writeConfig(repo, { symlink: ['node_modules'] })
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-qm', 'config')
+    commitLock(repo, { a: '1.0.0', b: '2.0.0' })
+    install(repo, { a: '1.0.0', b: '2.0.0' })
+  })
+
+  afterEach(() => {
+    try { git(repo, 'worktree', 'prune') } catch { /* ignore */ }
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('links when the lockfiles match and the source is installed from it', async () => {
+    const wt = addWorktree(repo, 'same')
+    const result = await setup(repo, wt)
+    expect(result.status).toBe('ok')
+    expect(fs.realpathSync(path.join(wt, 'node_modules'))).toBe(fs.realpathSync(path.join(repo, 'node_modules')))
+  })
+
+  it('does not link a stream whose lockfile moved on', async () => {
+    const wt = addWorktree(repo, 'upgrade')
+    commitLock(wt, { a: '1.1.0', b: '2.0.0' })
+    const result = await setup(repo, wt)
+    expect(result.status).toBe('ok')
+    expect(fs.existsSync(path.join(wt, 'node_modules'))).toBe(false)
+    expect(result.log).toContain('package-lock.json differs from the source checkout\'s')
+  })
+
+  it('does not link a source whose packages do not match its own lockfile', async () => {
+    install(repo, { a: '0.9.0', b: '2.0.0' })
+    const wt = addWorktree(repo, 'stale-source')
+    const result = await setup(repo, wt)
+    expect(fs.existsSync(path.join(wt, 'node_modules'))).toBe(false)
+    expect(result.log).toContain('a is 0.9.0, the lockfile wants 1.0.0')
+  })
+
+  it('ignores optional packages another platform would install', async () => {
+    commitLock(repo, { a: '1.0.0', b: '2.0.0', 'native-win': '1.0.0?' })
+    const wt = addWorktree(repo, 'optional')
+    await setup(repo, wt)
+    expect(fs.lstatSync(path.join(wt, 'node_modules')).isSymbolicLink()).toBe(true)
+  })
+
+  it('replaces an old stale link and reports it through staleDepsLinks', async () => {
+    // A stream set up from main before its upgrade, then a task off it.
+    const old = canonicalFilePath(fs.mkdtempSync(path.join(os.tmpdir(), 'wt-old-')))
+    try {
+      install(old, { a: '1.0.0', b: '2.0.0' })
+      const stream = addWorktree(repo, 'stream')
+      commitLock(stream, { a: '1.1.0', b: '2.0.0' })
+      fs.symlinkSync(path.join(old, 'node_modules'), path.join(stream, 'node_modules'), 'junction')
+      expect(staleDepsLinks(stream)).toEqual(['node_modules: 1 at another version (a is 1.0.0, the lockfile wants 1.1.0)'])
+
+      const result = await setup(repo, stream)
+      expect(result.log).toContain('removed the old link')
+      expect(fs.existsSync(path.join(stream, 'node_modules'))).toBe(false)
+      expect(staleDepsLinks(stream)).toEqual([])
+
+      // Once the stream has its own install, its tasks link it.
+      install(stream, { a: '1.1.0', b: '2.0.0' })
+      const task = addWorktree(repo, 'stream--task', 'stream')
+      await setup(stream, task)
+      expect(fs.realpathSync(path.join(task, 'node_modules'))).toBe(fs.realpathSync(path.join(stream, 'node_modules')))
+    } finally {
+      fs.rmSync(old, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves a real node_modules folder alone even when it is stale', async () => {
+    const wt = addWorktree(repo, 'own')
+    install(wt, { a: '0.1.0', b: '2.0.0' })
+    const result = await setup(repo, wt)
+    expect(result.log).toContain('already in the worktree, left alone')
+    expect(fs.lstatSync(path.join(wt, 'node_modules')).isDirectory()).toBe(true)
   })
 })

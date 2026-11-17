@@ -232,6 +232,34 @@ describe('TaskWorktreeManager', () => {
     expect(states.has('t1')).toBe(false)
   })
 
+  it('sets a stream with a stale node_modules link up again before its task links it', async () => {
+    autoSetup = true
+    const lock = (version: string) => JSON.stringify({ lockfileVersion: 3, packages: { '': {}, 'node_modules/a': { version } } })
+    // Stands in for `npm ci`: an install that records what it put in.
+    const config = { symlink: ['node_modules'], setup: ['[ -e node_modules ] || { mkdir node_modules && cp package-lock.json node_modules/.package-lock.json; }'] }
+    const stream = streamWorkspace.worktreePath
+    writeConfig(repo, config)
+    writeConfig(stream, config)
+    fs.writeFileSync(path.join(repo, 'package-lock.json'), lock('1.0.0'))
+    fs.mkdirSync(path.join(repo, 'node_modules'))
+    fs.writeFileSync(path.join(repo, 'node_modules', '.package-lock.json'), lock('1.0.0'))
+    // The stream upgraded `a` but still links main's packages.
+    fs.writeFileSync(path.join(stream, 'package-lock.json'), lock('1.1.0'))
+    git(stream, 'add', 'package-lock.json', '.devtool')
+    git(stream, 'commit', '-q', '-m', 'upgrade a')
+    fs.symlinkSync(path.join(repo, 'node_modules'), path.join(stream, 'node_modules'), 'junction')
+    setProjects([project([fixtureTask({ id: 't1', name: 'Upgrade', tabs: { left: [tab('a')] } })])])
+
+    const result = await manager.ensureTaskWorktree('p1', 't1')
+
+    expect(result.status).toBe('ready')
+    expect(fs.lstatSync(path.join(stream, 'node_modules')).isDirectory()).toBe(true)
+    const task = taskOf('t1')!.workspace!.worktreePath
+    expect(fs.realpathSync(path.join(task, 'node_modules'))).toBe(fs.realpathSync(path.join(stream, 'node_modules')))
+    // main's own packages are untouched.
+    expect(fs.readFileSync(path.join(repo, 'node_modules', '.package-lock.json'), 'utf8')).toBe(lock('1.0.0'))
+  })
+
   it('runs setup commands without asking when setup is automatic', async () => {
     autoSetup = true
     writeConfig(streamWorkspace.worktreePath, { setup: ['touch ran.txt'] })

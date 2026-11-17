@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import type { PendingWorktreeSetup } from '../shared/types'
+import { isNodeModulesEntry, lockfileDifferences, nodeModulesState } from './deps-check'
 import { gitOutput, LocalGitRunner, type GitRunner } from './git-runner'
 import { findGitBashExe, getShellEnv } from './shell-env'
 import type { SetupApprovals } from './worktree-setup-approvals'
@@ -396,7 +397,18 @@ function placeEntry(kind: 'symlink' | 'copy', entry: string, roots: SetupRoots):
 
   const linkedDestDir = symlinkedComponent(roots.worktreeRoot, entry)
   if (linkedDestDir) return refuse(`${linkedDestDir} in the worktree is a symlink`)
-  if (lexists(dest)) return { message: `${kind} ${entry}: already in the worktree, left alone` }
+  const notes: string[] = []
+  if (kind === 'symlink' && isNodeModulesEntry(entry)) {
+    const unlinked = dropStaleDepsLink(entry, roots)
+    if (unlinked.error !== undefined) return unlinked
+    if (unlinked.message) notes.push(unlinked.message)
+    const why = lexists(dest) ? null : unshareableDeps(entry, real, roots)
+    if (why) {
+      notes.push(`symlink ${entry}: not linked, ${why}; the worktree needs its own install`)
+      return { message: notes.join('\n') }
+    }
+  }
+  if (lexists(dest)) return { message: [...notes, `${kind} ${entry}: already in the worktree, left alone`].join('\n') }
   try {
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     const parent = fs.realpathSync.native(path.dirname(dest))
@@ -407,13 +419,80 @@ function placeEntry(kind: 'symlink' | 'copy', entry: string, roots: SetupRoots):
       // Link to the real folder, so a task worktree doesn't chain through the stream's link.
       // Junctions need no privileges on Windows; the type is ignored elsewhere.
       fs.symlinkSync(real, dest, fs.statSync(real).isDirectory() ? 'junction' : 'file')
-      return { message: `symlink ${entry} -> ${real}` }
+      return { message: [...notes, `symlink ${entry} -> ${real}`].join('\n') }
     }
     fs.cpSync(real, dest, { recursive: true })
     return { message: `copy ${entry}` }
   } catch (err) {
     return { error: `Could not ${kind === 'symlink' ? 'link' : 'copy'} ${entry}: ${err instanceof Error ? err.message : String(err)}` }
   }
+}
+
+/**
+ * Why the source's `node_modules` (resolving to `real`) is not one to share
+ * with the worktree, or null when it is: the worktree's lockfile differs from
+ * the source's (a stream that upgraded a dependency), or the source's
+ * `node_modules` does not hold what its own lockfile asks for (installed
+ * before a lockfile change landed, or itself a link to an older checkout's).
+ */
+function unshareableDeps(entry: string, real: string, roots: SetupRoots): string | null {
+  const dir = path.posix.dirname(entry)
+  const sourceDir = path.join(roots.sourceRoot, dir)
+  const worktreeDir = path.join(roots.worktreeRoot, dir)
+  if (path.resolve(sourceDir) !== path.resolve(worktreeDir)) {
+    const differ = lockfileDifferences(sourceDir, worktreeDir)
+    if (differ.length) return `${differ.join(', ')} differs from the source checkout's`
+  }
+  const state = nodeModulesState(sourceDir, real)
+  return state.state === 'stale' ? `the source checkout's does not match its lockfile: ${state.reason}` : null
+}
+
+/**
+ * A `node_modules` link already in the worktree (an earlier setup's) that no
+ * longer matches the worktree's lockfile goes, so the setup can link a better
+ * one or install. A real folder is never touched.
+ */
+function dropStaleDepsLink(entry: string, roots: SetupRoots): Placed | { message?: undefined; error?: undefined } {
+  const dest = path.join(roots.worktreeRoot, entry)
+  let isLink: boolean
+  try {
+    isLink = fs.lstatSync(dest).isSymbolicLink()
+  } catch {
+    return {}
+  }
+  if (!isLink) return {}
+  const state = nodeModulesState(path.join(roots.worktreeRoot, path.posix.dirname(entry)), dest)
+  if (state.state !== 'stale') return {}
+  try {
+    fs.unlinkSync(dest)
+  } catch (err) {
+    return { error: `Could not remove the stale ${entry} link: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  return { message: `symlink ${entry}: removed the old link, it does not match the lockfile: ${state.reason}` }
+}
+
+/**
+ * The worktree's `node_modules` links (from `.devtool/worktree.json`) that do
+ * not match its lockfile, with why. A task about to branch off a stream checks
+ * the stream's worktree with this: a stream set up before DevTool compared
+ * lockfiles links `main`'s packages even after its own lockfile moved on.
+ */
+export function staleDepsLinks(worktreeRoot: string): string[] {
+  const loaded = readWorktreeConfig(worktreeRoot)
+  if (!loaded.ok) return []
+  const stale: string[] = []
+  for (const entry of loaded.config.symlink) {
+    if (!isNodeModulesEntry(entry)) continue
+    const dest = path.join(worktreeRoot, entry)
+    try {
+      if (!fs.lstatSync(dest).isSymbolicLink()) continue
+    } catch {
+      continue
+    }
+    const state = nodeModulesState(path.join(worktreeRoot, path.posix.dirname(entry)), dest)
+    if (state.state === 'stale') stale.push(`${entry}: ${state.reason}`)
+  }
+  return stale
 }
 
 /** The first existing folder between `root` and `root/entry` (exclusive) that is a symlink, if any. */

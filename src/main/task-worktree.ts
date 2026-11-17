@@ -17,7 +17,7 @@ import type {
 import { findStreamOfTask, findTaskInProject, mapTaskInProject, needsTaskWorktree, streamGivesTaskWorktrees, taskWorktreesSupported } from '../shared/streams'
 import { taskBranchName } from '../shared/branch-name'
 import type { WorkspaceManager } from './workspace-manager'
-import type { WorktreeSetupResult } from './worktree-setup'
+import { staleDepsLinks, type WorktreeSetupResult } from './worktree-setup'
 
 /**
  * A task's own worktree, made lazily: the first time something is about to
@@ -107,6 +107,8 @@ export class TaskWorktreeManager {
   private readonly publishTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** Forks still to get their worktree: the folder whose commit and uncommitted work they start from. */
   private readonly forkSources = new Map<string, string>()
+  /** A stream worktree's `node_modules` being set up again, by worktree path. */
+  private readonly streamRefreshes = new Map<string, Promise<void>>()
 
   constructor(private readonly deps: TaskWorktreeDeps) {}
 
@@ -298,6 +300,44 @@ export class TaskWorktreeManager {
     return { worktreePath, branchName, baseBranch: branchName, relativeProjectPath: '' }
   }
 
+  /**
+   * A stream worktree whose `node_modules` link no longer matches its lockfile
+   * (set up from `main` before the stream upgraded a dependency, or before
+   * DevTool compared lockfiles) gets its setup again from the project's
+   * checkout first: the stale link goes and the setup installs the stream's
+   * own, so the new task links packages that match. `main` is never
+   * reinstalled; a task off a stale `main` installs its own instead.
+   */
+  private refreshStreamDeps(found: Located, base: WorkspaceConfig, taskId: string): Promise<void> {
+    if (!found.stream.workspace || found.stream.isMain) return Promise.resolve()
+    // One refresh per stream at a time: tasks started together wait for the same install.
+    const key = base.worktreePath
+    const previous = this.streamRefreshes.get(key) ?? Promise.resolve()
+    const next = previous.then(() => this.refreshStreamDepsNow(found, base, taskId))
+    this.streamRefreshes.set(key, next)
+    return next.finally(() => {
+      if (this.streamRefreshes.get(key) === next) this.streamRefreshes.delete(key)
+    })
+  }
+
+  private async refreshStreamDepsNow(found: Located, base: WorkspaceConfig, taskId: string): Promise<void> {
+    const stale = staleDepsLinks(base.worktreePath)
+    if (stale.length === 0) return
+    this.appendLog(taskId, `The stream's ${stale.join('; ')}. Setting the stream up again.\n`)
+    try {
+      const sourceRoot = await this.deps.git.repoRoot(found.project.directory)
+      const setup = await this.deps.git.runSetup({
+        sourceRoot,
+        worktreeRoot: base.worktreePath,
+        branch: base.branchName,
+        onOutput: (text) => this.appendLog(taskId, text)
+      })
+      this.deps.log?.(`task worktree stream=${found.stream.id} deps refreshed setup=${setup.status}`)
+    } catch (err) {
+      this.deps.log?.(`task worktree stream=${found.stream.id} deps refresh error=${errorMessage(err)}`)
+    }
+  }
+
   /** {@link create} off the stream's base, or the failure to find one. */
   private async createOffBase(found: Located, options: EnsureTaskWorktreeOptions): Promise<TaskWorktreeResult> {
     let base: WorkspaceConfig | null
@@ -326,6 +366,7 @@ export class TaskWorktreeManager {
     const taskId = task.id
 
     this.setState(taskId, { phase: 'creating' })
+    await this.refreshStreamDeps(found, base, taskId)
     let created: Awaited<ReturnType<TaskWorktreeGit['create']>>
     try {
       const branches = await this.deps.git.listBranches(project.directory)
@@ -397,6 +438,7 @@ export class TaskWorktreeManager {
     try {
       base = await this.baseOf(project, stream)
       if (!base) throw new Error(stream.isMain ? 'The project folder is not a git repository' : 'The task\'s stream has no worktree')
+      await this.refreshStreamDeps(found, base, task.id)
       restored = await this.deps.git.restore(project.directory, recorded.worktreePath, recorded.branchName)
     } catch (err) {
       const error = errorMessage(err)
