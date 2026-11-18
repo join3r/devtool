@@ -121,7 +121,8 @@ function landingEnv(next: TaskLandingResult, landing?: TaskLanding, options: { p
     landTask: async (projectId, taskId) => { calls.push(`land ${projectId}/${taskId}`); return settle(next) },
     fixWithAgent: async (_p, taskId) => { calls.push(`fix ${taskId}`); return settle(next) },
     abortLanding: async (_p, taskId) => { calls.push(`abort ${taskId}`); return settle(next) },
-    retryLanding: async (_p, taskId) => { calls.push(`retry ${taskId}`); return settle(next) }
+    retryLanding: async (_p, taskId) => { calls.push(`retry ${taskId}`); return settle(next) },
+    setAsideAndRetry: async (_p, taskId) => { calls.push(`set-aside ${taskId}`); return settle(next) }
   }
   const working = new Set<string>()
   const d: CloseTaskDeps = {
@@ -284,7 +285,9 @@ describe('landTask (SPEC.md §8.15)', () => {
     expect(findTaskInProject(abort.peek().projects[0], 't1')?.landing).toBeUndefined()
     const retry = landingEnv({ status: 'landed' }, { state: 'blocked', files: ['a.ts'] })
     expect(await landTask({ peek: retry.peek, landing: retry.landing }, { taskId: 't1', action: 'retry' })).toEqual({ ok: true, result: { status: 'landed', closed: true } })
-    expect([...fix.calls, ...abort.calls, ...retry.calls]).toEqual(['fix t1', 'abort t1', 'retry t1'])
+    const aside = landingEnv({ status: 'landed' }, { state: 'blocked', files: ['a.ts'], untracked: 1 })
+    expect(await landTask({ peek: aside.peek, landing: aside.landing }, { taskId: 't1', action: 'set-aside' })).toEqual({ ok: true, result: { status: 'landed', closed: true } })
+    expect([...fix.calls, ...abort.calls, ...retry.calls, ...aside.calls]).toEqual(['fix t1', 'abort t1', 'retry t1', 'set-aside t1'])
   })
 
   it('answers a retry that stops again with the landing, and a failure as internal', async () => {

@@ -163,6 +163,11 @@ export interface TaskLanding {
   files?: string[]
   /** `blocked`: git's error. `conflict`: set when the agent's fix ran into a stream that had moved on. */
   message?: string
+  /**
+   * `blocked`: how many of `files` are untracked in the stream's worktree (work
+   * never committed there). DevTool can move those aside and retry.
+   */
+  untracked?: number
 }
 
 export type TaskLandingIntent = 'close' | 'land' | 'update'
@@ -182,7 +187,7 @@ export type TaskLandingResult =
   | { status: 'updated' }
   | { status: 'nothing' }
   | { status: 'conflict'; files: string[] }
-  | { status: 'blocked'; files: string[]; message: string }
+  | { status: 'blocked'; files: string[]; message: string; untracked?: number }
   | { status: 'working' }
   | { status: 'fixing' }
   | { status: 'aborted' }

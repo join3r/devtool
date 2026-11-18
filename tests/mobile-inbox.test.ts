@@ -423,6 +423,8 @@ describe('buildInbox', () => {
     expect(wire.message).toHaveLength(1000)
     expect(wire.message?.endsWith('…')).toBe(true)
     expect(wireLanding({ state: 'landing', files: [], message: ' ' })).toEqual({ state: 'landing' })
+    expect(wireLanding({ state: 'blocked', files: ['a'], untracked: 1 })).toEqual({ state: 'blocked', files: ['a'], fileCount: 1, untracked: 1 })
+    expect(wireLanding({ state: 'blocked', files: ['a'], untracked: 0 })).toEqual({ state: 'blocked', files: ['a'], fileCount: 1 })
   })
 
   it('sends each task of a stream as its own wire task, naming its stream', () => {

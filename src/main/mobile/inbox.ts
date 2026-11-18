@@ -145,6 +145,7 @@ export function wireLanding(landing: TaskLanding): WireLanding {
   }
   const message = landing.message?.trim()
   if (message) out.message = message.length > TaskLandingLimits.message ? `${message.slice(0, TaskLandingLimits.message - 1)}…` : message
+  if (landing.state === 'blocked' && landing.untracked && landing.untracked > 0) out.untracked = landing.untracked
   return out
 }
 

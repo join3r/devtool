@@ -17,6 +17,7 @@ function runningText(op: LandingOp, streamName: string): string {
   switch (op) {
     case 'update': return `Updating from ${streamName}…`
     case 'retry': return 'Retrying…'
+    case 'set-aside': return 'Moving the files aside and retrying…'
     case 'abort': return 'Aborting…'
     case 'fix': return 'Asking the agent to fix it…'
     case 'keep':
@@ -39,7 +40,8 @@ function FileList({ files }: { files: string[] }): React.ReactElement {
  * Above a task's panes while its landing into the stream runs or has stopped
  * (`Task.landing`), and for the last landing call's result. A conflict offers
  * Ask agent to fix / I'll fix it (a terminal in the worktree) / Retry / Abort;
- * a blocked stream offers Retry / Abort.
+ * a blocked stream offers Retry / Abort, and Move aside and retry when files
+ * in the way are untracked there.
  */
 export default function TaskLandingBanner({ project, stream, task }: { project: Project; stream: Stream; task: Task }): React.ReactElement | null {
   const op = useLandingOp(task.id)
@@ -57,7 +59,7 @@ export default function TaskLandingBanner({ project, stream, task }: { project: 
   let buttons: React.ReactNode = null
   let alert = false
 
-  if (op && op !== 'retry' && op !== 'abort' && op !== 'fix') {
+  if (op && op !== 'retry' && op !== 'set-aside' && op !== 'abort' && op !== 'fix') {
     title = runningText(op, streamName)
   } else if (landing?.state === 'conflict') {
     alert = true
@@ -98,13 +100,25 @@ export default function TaskLandingBanner({ project, stream, task }: { project: 
     title = files.length > 0
       ? `${streamName} has local changes in ${plural(files.length, 'file')} this landing touches`
       : `Couldn't land into ${streamName}`
-    detail = files.length > 0
-      ? `Commit or stash them in ${streamName}'s worktree, then Retry.`
-      : <pre className="m-0 mt-1 max-h-24 overflow-auto text-xs font-mono text-text-muted whitespace-pre-wrap break-words">{landing.message}</pre>
+    const untracked = landing.untracked ?? 0
+    detail = untracked > 0
+      ? untracked === files.length
+        ? `They are untracked there (never committed), and the task brings in files at the same paths. Move them aside to land, or commit them in ${streamName} first.`
+        : `${plural(untracked, 'file')} of them ${untracked === 1 ? 'is' : 'are'} untracked there and can be moved aside; commit or stash the others, then Retry.`
+      : files.length > 0
+        ? `Commit or stash them in ${streamName}'s worktree, then Retry.`
+        : <pre className="m-0 mt-1 max-h-24 overflow-auto text-xs font-mono text-text-muted whitespace-pre-wrap break-words">{landing.message}</pre>
     buttons = (
       <>
         <LinkBtn danger disabled={busy} onClick={() => void actions.abort(project, task)}>Abort</LinkBtn>
-        <PrimaryButton disabled={busy} onClick={() => void actions.retry(project, task)}>Retry</PrimaryButton>
+        {untracked > 0
+          ? (
+            <>
+              <LinkBtn disabled={busy} onClick={() => void actions.retry(project, task)}>Retry</LinkBtn>
+              <PrimaryButton disabled={busy} onClick={() => void actions.setAside(project, task)}>Move aside and retry</PrimaryButton>
+            </>
+          )
+          : <PrimaryButton disabled={busy} onClick={() => void actions.retry(project, task)}>Retry</PrimaryButton>}
       </>
     )
   } else if (landing?.state === 'landing') {

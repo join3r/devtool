@@ -186,8 +186,11 @@ export class WorkspaceManager {
   /**
    * A repo fresh from `git init` (New project makes one) has its branch but no
    * commit, so `worktree add -b <name> <base>` has nothing to start from. When
-   * `baseBranch` is that unborn branch, give it an empty first commit. Without
-   * a git identity, the commit is made as DevTool.
+   * `baseBranch` is that unborn branch, give it a first commit holding what the
+   * folder already has (`.gitignore` respected, `.worktrees/` left out), so a
+   * task's worktree starts from that work instead of an empty tree and its
+   * landing doesn't trip over the same files lying untracked in the folder.
+   * Without a git identity, the commit is made as DevTool.
    */
   private async ensureFirstCommit(repoRoot: string, baseBranch: string): Promise<void> {
     const opts = { cwd: repoRoot, timeoutMs: 5000 }
@@ -197,8 +200,10 @@ export class WorkspaceManager {
     if (head.code !== 0 || head.stdout.trim() !== baseBranch) return
     const born = await this.runner.run(['rev-parse', '--verify', '--quiet', 'HEAD'], opts)
     if (born.code === 0) return
+    const added = await this.runner.run(['add', '-A', '--', '.', ':(exclude).worktrees'], { cwd: repoRoot, timeoutMs: 60_000 })
+    if (added.code !== 0) await this.runner.run(['reset', '-q'], opts)
     const commit = ['commit', '--allow-empty', '--no-verify', '-m', 'Initial commit']
-    if ((await this.runner.run(commit, opts)).code === 0) return
+    if ((await this.runner.run(commit, { cwd: repoRoot, timeoutMs: 60_000 })).code === 0) return
     await this.git(repoRoot, ['-c', 'user.name=DevTool', '-c', 'user.email=devtool@localhost', '-c', 'commit.gpgsign=false', ...commit])
   }
 

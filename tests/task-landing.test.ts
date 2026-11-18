@@ -415,6 +415,43 @@ describe('TaskLandingManager', () => {
     expect(taskOf('t1')?.landing).toBeUndefined()
   })
 
+  it('moves untracked stream files in the way aside, then lands', async () => {
+    const aside = fs.mkdtempSync(path.join(os.tmpdir(), 'task-land-aside-'))
+    try {
+      const ws = taskWorktree('t1')
+      write(ws.worktreePath, 'app/main.swift', 'task\n')
+      write(ws.worktreePath, 'a.txt', 'task\n')
+      write(streamPath, 'app/main.swift', 'never committed\n')
+      write(streamPath, 'a.txt', 'stream wip\n')
+      write(streamPath, 'other.txt', 'mine\n')
+      setTasks([task('t1', 'Port the app', ws)], { deps: { setAsideDir: aside } })
+
+      const result = await manager.landTask('p1', 't1')
+      expect(result).toMatchObject({ status: 'blocked', untracked: 1 })
+      expect(taskOf('t1')?.landing).toMatchObject({ state: 'blocked', untracked: 1 })
+
+      // The tracked change in a.txt still blocks; the untracked file is set aside.
+      const again = await manager.setAsideAndRetry('p1', 't1')
+      expect(again).toMatchObject({ status: 'blocked' })
+      expect(again).not.toHaveProperty('untracked')
+      const [first] = fs.readdirSync(aside)
+      expect(fs.readFileSync(path.join(aside, first, 'app', 'main.swift'), 'utf8')).toBe('never committed\n')
+      expect(read(streamPath, 'other.txt')).toBe('mine\n')
+
+      git(streamPath, 'checkout', '--', 'a.txt')
+      expect(await manager.retryLanding('p1', 't1')).toEqual({ status: 'landed' })
+      expect(read(streamPath, 'app/main.swift')).toBe('task\n')
+    } finally {
+      fs.rmSync(aside, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to set aside when the landing is not blocked', async () => {
+    const ws = taskWorktree('t1')
+    setTasks([task('t1', 'Nothing', ws)])
+    expect(await manager.setAsideAndRetry('p1', 't1')).toEqual({ status: 'failed', error: 'The landing is not blocked' })
+  })
+
   it('carries the stream\'s changes in other files along', async () => {
     const ws = taskWorktree('t1')
     write(ws.worktreePath, 'a.txt', 'task\n')

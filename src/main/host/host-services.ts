@@ -477,6 +477,7 @@ export class HostServices {
       },
       onState: (taskId, landing) => this.clients.broadcast('task-landing-state', taskId, landing),
       onResumed: (projectId, taskId, intent, result) => this.autopilot.landingResumed(projectId, taskId, intent, result),
+      setAsideDir: path.join(configDir, 'set-aside'),
       log: (message) => this.logDebug(message)
     })
     this.autopilot = new AutopilotRunner({

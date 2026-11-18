@@ -25,6 +25,17 @@ import Testing
         }
     }
 
+    @Test func blockedByUntrackedFilesCanBeSetAside() throws {
+        let landing = try TaskLanding.parse(try JSONValue.parse(#"{"state":"blocked","files":["a.swift"],"fileCount":1,"untracked":1}"#))
+        #expect(landing.untracked == 1)
+        #expect(landing.canSetAside)
+        #expect(try TaskLanding.parse(landing.json) == landing)
+        let tracked = try TaskLanding.parse(try JSONValue.parse(#"{"state":"blocked","files":["a.swift"],"untracked":0}"#))
+        #expect(tracked.untracked == nil)
+        #expect(!tracked.canSetAside)
+        #expect(try TaskLandParams.parse(try JSONValue.parse(#"{"taskId":"t","action":"set-aside"}"#)).action == .setAside)
+    }
+
     @Test func closeAnswersWithTheLanding() throws {
         let result = try TaskCloseResult.parse(try JSONValue.parse(#"{"closed":false,"landing":{"state":"conflict","intent":"close","files":["a.ts"],"fileCount":3}}"#))
         #expect(result == .landing(TaskLanding(state: .conflict, intent: .close, files: ["a.ts"], fileCount: 3)))

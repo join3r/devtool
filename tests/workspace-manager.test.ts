@@ -92,6 +92,13 @@ describe('WorkspaceManager', () => {
       const fresh = canonicalFilePath(fs.mkdtempSync(path.join(os.tmpdir(), 'ws-fresh-')))
       try {
         execFileSync('git', ['init', '-b', 'master', fresh])
+        // Work already in the folder goes into that commit; ignored files and .worktrees/ don't.
+        fs.writeFileSync(path.join(fresh, 'app.swift'), 'print(1)\n')
+        fs.writeFileSync(path.join(fresh, '.gitignore'), 'build/\n')
+        fs.mkdirSync(path.join(fresh, 'build'))
+        fs.writeFileSync(path.join(fresh, 'build', 'out.o'), 'x')
+        fs.mkdirSync(path.join(fresh, '.worktrees', 'stale'), { recursive: true })
+        fs.writeFileSync(path.join(fresh, '.worktrees', 'stale', 'f'), 'x')
         // No identity on purpose: the commit must still be made.
         const env = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', EMAIL: '', GIT_AUTHOR_EMAIL: '', GIT_COMMITTER_EMAIL: '' }
         const local = new LocalGitRunner()
@@ -101,6 +108,9 @@ describe('WorkspaceManager', () => {
         expect(fs.existsSync(result.worktreePath)).toBe(true)
         const count = execFileSync('git', ['-C', fresh, 'rev-list', '--count', 'master']).toString().trim()
         expect(count).toBe('1')
+        const files = execFileSync('git', ['-C', fresh, 'ls-tree', '-r', '--name-only', 'master']).toString().trim().split('\n')
+        expect(files.sort()).toEqual(['.gitignore', 'app.swift'])
+        expect(fs.existsSync(path.join(result.worktreePath, 'app.swift'))).toBe(true)
       } finally {
         fs.rmSync(fresh, { recursive: true, force: true })
       }

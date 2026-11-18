@@ -611,6 +611,9 @@ const api = {
     ipcRenderer.invoke('task-land', projectId, taskId, options),
   taskLandingRetry: (projectId: string, taskId: string): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-landing-retry', projectId, taskId),
+  /** A landing blocked by untracked files in the stream's worktree: move them aside (`setAside` = where), then retry. */
+  taskLandingSetAside: (projectId: string, taskId: string): Promise<TaskLandingResult & { setAside?: string }> =>
+    ipcRenderer.invoke('task-landing-set-aside', projectId, taskId),
   taskLandingAbort: (projectId: string, taskId: string): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-landing-abort', projectId, taskId),
   /** Ask the task's agent to resolve the conflict; the landing resumes once it goes idle with the rebase done. */

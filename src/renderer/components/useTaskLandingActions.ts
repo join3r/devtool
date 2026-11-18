@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext'
 import { findStreamOfTask, findTaskInProject } from '../../shared/streams'
 import type { Project, Task, TaskLandingResult } from '../../shared/types'
 import { tabIdsOfTask } from '../hooks/appState/projectsData'
+import { confirmAction } from '../confirmAction'
 import {
   markTaskClosing,
   refreshStreamAhead,
@@ -44,6 +45,7 @@ export function useTaskLandingActions(): {
   land: (project: Project, task: Task) => Promise<void>
   update: (project: Project, task: Task) => Promise<void>
   retry: (project: Project, task: Task) => Promise<void>
+  setAside: (project: Project, task: Task) => Promise<void>
   abort: (project: Project, task: Task) => Promise<void>
   fix: (project: Project, task: Task) => Promise<void>
   fixByHand: (project: Project, task: Task) => void
@@ -87,6 +89,41 @@ export function useTaskLandingActions(): {
     }
   }, [confirmDiscardDirty, settle])
 
+  /**
+   * A landing blocked by untracked files in the stream's worktree: after a
+   * confirm, main moves them into DevTool's set-aside folder and retries.
+   */
+  const setAside = useCallback(async (project: Project, task: Task) => {
+    const streamName = findStreamOfTask(project, task.id)?.name ?? 'the stream'
+    const count = task.landing?.untracked ?? 0
+    const what = count === 1 ? '1 untracked file' : `${count} untracked files`
+    const ok = await confirmAction(
+      `Move ${what} out of ${streamName}'s folder and retry?\n\n`
+        + `They were never committed there, and "${task.name}" brings in files at the same paths. `
+        + 'DevTool moves them into its set-aside folder (in its config folder, under set-aside/), so nothing is deleted.',
+      { confirmLabel: 'Move aside and retry' }
+    )
+    if (!ok) return
+    const closing = (task.landing?.intent ?? 'close') === 'close'
+    if (closing && await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return
+    const release = closing ? markTaskClosing(task.id) : null
+    try {
+      let movedTo: string | undefined
+      const result = await runLandingOp(task.id, 'set-aside', async () => {
+        const answer = await window.api.taskLandingSetAside(project.id, task.id)
+        movedTo = answer.setAside
+        return answer
+      })
+      if (closing && (result.status === 'landed' || result.status === 'nothing')) return
+      settle(project, task, 'set-aside', result)
+      if (movedTo && (result.status === 'landed' || result.status === 'nothing' || result.status === 'blocked')) {
+        setLandingNotice(task.id, { tone: 'info', text: `Moved ${what} to ${movedTo}.` })
+      }
+    } finally {
+      release?.()
+    }
+  }, [confirmDiscardDirty, settle])
+
   /** A terminal at the task's worktree root, where the rebase stopped. */
   const fixByHand = useCallback((project: Project, task: Task) => {
     const current = findTaskInProject(projects.find(p => p.id === project.id), task.id) ?? task
@@ -95,5 +132,5 @@ export function useTaskLandingActions(): {
     addTab(project.id, task.id, 'focused', 'terminal', { cwd: root })
   }, [addTab, projects])
 
-  return { land, update, retry, abort, fix, fixByHand }
+  return { land, update, retry, setAside, abort, fix, fixByHand }
 }

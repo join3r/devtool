@@ -219,7 +219,8 @@
         "intent": { "enum": ["close", "land", "update"], "description": "What was asked for; absent = close." },
         "files": { "type": "array", "items": { "type": "string" }, "description": "The conflicted files, or the stream's files in the way (blocked): the first 20." },
         "fileCount": { "type": "integer", "minimum": 1, "description": "How many files in all; present with files." },
-        "message": { "type": "string", "maxLength": 1000, "description": "Git's reason (blocked)." }
+        "message": { "type": "string", "maxLength": 1000, "description": "Git's reason (blocked)." },
+        "untracked": { "type": "integer", "minimum": 1, "description": "blocked: how many files in the way are untracked in the stream's worktree; task.land set-aside moves them (SPEC.md §8.15)." }
       }
     },
     "tab": {

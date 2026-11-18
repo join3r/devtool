@@ -16,7 +16,7 @@ import { findStreamOfTask, streamTakesLandings, taskWorktreesSupported } from '.
  *  - how far each task's stream is ahead of it ("0.5.0 +3"), polled cheaply.
  */
 
-export type LandingOp = 'close' | 'keep' | 'discard' | 'land' | 'update' | 'retry' | 'abort' | 'fix'
+export type LandingOp = 'close' | 'keep' | 'discard' | 'land' | 'update' | 'retry' | 'set-aside' | 'abort' | 'fix'
 
 export interface LandingNotice {
   tone: 'info' | 'error'

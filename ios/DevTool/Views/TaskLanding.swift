@@ -34,6 +34,7 @@ struct TaskLandingBanner: View {
 
     @State private var running: TaskLandParams.Action?
     @State private var notice: Notice?
+    @State private var confirmingSetAside = false
 
     struct Notice: Equatable {
         let text: String
@@ -59,6 +60,11 @@ struct TaskLandingBanner: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .animation(.snappy, value: task.landing)
+            .confirmationDialog("Move the untracked files aside?", isPresented: $confirmingSetAside, titleVisibility: .visible) {
+                Button("Move aside and retry") { perform(.setAside) }
+            } message: {
+                Text("They were never committed in \(streamName), and the task brings in files at the same paths. The desktop moves them into its set-aside folder, so nothing is deleted.")
+            }
             .task(id: notice) {
                 guard let notice, !notice.isError else { return }
                 try? await Task.sleep(for: .seconds(6))
@@ -103,6 +109,8 @@ struct TaskLandingBanner: View {
         switch landing.state {
         case .conflict: "Ask the agent to resolve it, or resolve it on the desktop and retry."
         case .fixing: "The landing goes on once the agent has resolved it."
+        case .blocked where landing.canSetAside:
+            "Files there were never committed, and the task brings in the same paths. Move them aside (nothing is deleted) to land."
         case .blocked: "Commit or stash those changes in \(streamName) on the desktop, then retry."
         case .landing: landing.intent == .update ? nil : "\(task.branch ?? "The task's branch") goes into \(streamName) as one commit."
         case .unknown: nil
@@ -143,7 +151,7 @@ struct TaskLandingBanner: View {
             let disabled = model.isOffline(ref.desktopId) || running != nil
             HStack(spacing: 8) {
                 ForEach(actions, id: \.self) { action in
-                    button(action, primary: action == actions.first && landing.state == .conflict)
+                    button(action, primary: action == actions.first && (landing.state == .conflict || action == .setAside))
                         .disabled(disabled)
                 }
             }
@@ -172,6 +180,7 @@ struct TaskLandingBanner: View {
     static func actions(_ landing: TaskLanding) -> [TaskLandParams.Action] {
         switch landing.state {
         case .conflict: [.fixWithAgent, .retry, .abort]
+        case .blocked where landing.canSetAside: [.setAside, .retry, .abort]
         case .fixing, .blocked: [.retry, .abort]
         case .landing, .unknown: []
         }
@@ -182,10 +191,20 @@ struct TaskLandingBanner: View {
         case .fixWithAgent: "Ask agent to fix"
         case .retry: "Retry"
         case .abort: "Abort"
+        case .setAside: "Move aside and retry"
         }
     }
 
     private func run(_ action: TaskLandParams.Action) {
+        guard running == nil else { return }
+        if action == .setAside {
+            confirmingSetAside = true
+            return
+        }
+        perform(action)
+    }
+
+    private func perform(_ action: TaskLandParams.Action) {
         guard running == nil else { return }
         running = action
         notice = nil

@@ -973,7 +973,9 @@ public actor MockDesktopConnection: DesktopConnection {
             fixes.removeValue(forKey: task.id)?.cancel()
             setLanding(nil, taskId: task.id)
             return TaskLandResult(status: .aborted)
-        case .retry where landing.state == .blocked:
+        case .setAside where !landing.canSetAside:
+            throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "The landing is not blocked")
+        case .retry where landing.state == .blocked, .setAside:
             setLanding(nil, taskId: task.id)
             if landing.intent == .land { return TaskLandResult(status: .landed) }
             _ = try removeTask(TaskCloseParams(taskId: task.id, stopWorking: true))

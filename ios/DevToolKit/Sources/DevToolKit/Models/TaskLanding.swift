@@ -65,13 +65,17 @@ public struct TaskLanding: Codable, Sendable, Equatable {
     public var fileCount: Int?
     /// Git's reason (`blocked`).
     public var message: String?
+    /// `blocked`: how many files in the way are untracked in the stream's
+    /// worktree, which `task.land` `set-aside` moves away (§8.15).
+    public var untracked: Int?
 
-    public init(state: State, intent: Intent? = nil, files: [String] = [], fileCount: Int? = nil, message: String? = nil) {
+    public init(state: State, intent: Intent? = nil, files: [String] = [], fileCount: Int? = nil, message: String? = nil, untracked: Int? = nil) {
         self.state = state
         self.intent = intent
         self.files = files
         self.fileCount = fileCount
         self.message = message
+        self.untracked = untracked
     }
 
     public init(from decoder: any Decoder) throws {
@@ -81,7 +85,11 @@ public struct TaskLanding: Codable, Sendable, Equatable {
         files = try c.decodeIfPresent([String].self, forKey: .files) ?? []
         fileCount = try c.decodeIfPresent(Int.self, forKey: .fileCount)
         message = try c.decodeIfPresent(String.self, forKey: .message)
+        untracked = try c.decodeIfPresent(Int.self, forKey: .untracked)
     }
+
+    /// Blocked by untracked files a `set-aside` can move away.
+    public var canSetAside: Bool { state == .blocked && (untracked ?? 0) > 0 }
 
     /// Every file, counted, even past the 20 listed.
     public var count: Int { max(fileCount ?? files.count, files.count) }
@@ -126,7 +134,8 @@ extension TaskLanding {
             intent: intent,
             files: files,
             fileCount: try o.optInt("fileCount").map { Int($0) },
-            message: try o.optStr("message")
+            message: try o.optStr("message"),
+            untracked: try o.optInt("untracked").map { Int($0) }.flatMap { $0 > 0 ? $0 : nil }
         )
     }
 
@@ -137,6 +146,7 @@ extension TaskLanding {
         if !files.isEmpty { o["files"] = .array(files.map(JSONValue.string)) }
         if let fileCount { o["fileCount"] = .int(Int64(fileCount)) }
         if let message { o["message"] = .string(message) }
+        if let untracked { o["untracked"] = .int(Int64(untracked)) }
         return .object(o)
     }
 }
@@ -150,6 +160,8 @@ public struct TaskLandParams: Sendable, Equatable {
         case abort
         /// Pick the landing up again.
         case retry
+        /// Move the stream worktree's untracked files in the way aside, then retry.
+        case setAside = "set-aside"
     }
 
     public var taskId: String

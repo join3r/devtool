@@ -335,7 +335,7 @@
       "required": ["taskId", "action"],
       "properties": {
         "taskId": { "type": "string" },
-        "action": { "enum": ["fix-with-agent", "abort", "retry"] }
+        "action": { "enum": ["fix-with-agent", "abort", "retry", "set-aside"] }
       }
     },
     "taskLandResult": {

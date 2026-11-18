@@ -33,7 +33,7 @@ import { isVisibleOnMobile, wireLanding } from './inbox'
 type Outcome<T> = { ok: true; result: T } | { ok: false; code: string; message: string }
 
 /** The landing calls the phone can make (`TaskLandingManager`). */
-export type PhoneLanding = Pick<TaskLandingManager, 'landTask' | 'fixWithAgent' | 'abortLanding' | 'retryLanding'>
+export type PhoneLanding = Pick<TaskLandingManager, 'landTask' | 'fixWithAgent' | 'abortLanding' | 'retryLanding' | 'setAsideAndRetry'>
 
 export interface CloseTaskDeps {
   peek(): ProjectsData
@@ -175,8 +175,8 @@ export async function closeTask(deps: CloseTaskDeps, params: TaskCloseParams, ph
 }
 
 /**
- * `task.land` (SPEC.md §8.15): the landing banner's Ask agent to fix, Abort and
- * Retry, for a task with a worktree of its own. A Retry that finishes a close
+ * `task.land` (SPEC.md §8.15): the landing banner's Ask agent to fix, Abort,
+ * Retry and Move aside and retry, for a task with a worktree of its own. A Retry that finishes a close
  * has archived the task (`closed: true`).
  */
 export async function landTask(deps: { peek(): ProjectsData; landing: PhoneLanding }, params: TaskLandParams): Promise<Outcome<TaskLandResult>> {
@@ -188,7 +188,9 @@ export async function landTask(deps: { peek(): ProjectsData; landing: PhoneLandi
     ? deps.landing.fixWithAgent(project.id, task.id)
     : params.action === 'abort'
       ? deps.landing.abortLanding(project.id, task.id)
-      : deps.landing.retryLanding(project.id, task.id))
+      : params.action === 'set-aside'
+        ? deps.landing.setAsideAndRetry(project.id, task.id)
+        : deps.landing.retryLanding(project.id, task.id))
   const data = deps.peek()
   switch (result.status) {
     case 'landed':

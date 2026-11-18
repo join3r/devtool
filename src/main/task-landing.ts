@@ -33,6 +33,8 @@ import type { WorkspaceManager } from './workspace-manager'
  *    or abort, which puts the branch back as it was.
  *  - `blocked`: the stream's worktree has local changes in files the landing
  *    touches; git refused the fast-forward. Retry once they are committed.
+ *    Untracked ones (work never committed there, often what the task itself
+ *    took in) can be moved aside by {@link TaskLandingManager.setAsideAndRetry}.
  *
  * Conflicts are told by the `.git` state files (`rebase-merge/`,
  * `rebase-apply/`), never by git's output. DevTool's own commits, rebases and
@@ -82,6 +84,12 @@ export interface TaskLandingDeps {
   log?(message: string): void
   /** Rebase-and-fast-forward rounds before giving up on a stream that keeps moving. */
   maxAttempts?: number
+  /**
+   * Where {@link TaskLandingManager.setAsideAndRetry} moves untracked files in
+   * the way (a folder per call inside it). Default: `devtool-set-aside` in the
+   * repo's git dir.
+   */
+  setAsideDir?: string
 }
 
 interface Located {
@@ -106,7 +114,7 @@ type Rebased = { status: 'ok' } | { status: 'conflict' } | { status: 'failed'; e
 type FastForward =
   | { status: 'ok' }
   | { status: 'moved' }
-  | { status: 'blocked'; files: string[]; message: string }
+  | { status: 'blocked'; files: string[]; message: string; untracked: number }
 
 /** Kept out of DevTool's own git: hooks, and an editor for `rebase --continue`. */
 const NO_HOOKS = ['-c', 'core.hooksPath=/dev/null'] as const
@@ -323,6 +331,27 @@ export class TaskLandingManager {
       this.stopWatching(taskId)
       return this.resume(at, landing.intent ?? 'close')
     })
+  }
+
+  /**
+   * A landing `blocked` by untracked files in the stream's worktree: moves the
+   * ones the task brings in aside ({@link TaskLandingDeps.setAsideDir}), then
+   * retries. Files tracked and changed there still block; those are the
+   * user's to commit or stash. `setAside` is the folder they went to.
+   */
+  setAsideAndRetry(projectId: string, taskId: string, options: { byAgent?: boolean } = {}): Promise<TaskLandingResult & { setAside?: string }> {
+    let setAside: string | undefined
+    return this.enqueue(projectId, taskId, async at => {
+      const landing = at.task.landing
+      if (landing?.state !== 'blocked') return failed('The landing is not blocked')
+      if (!options.byAgent && this.agentWorking(at.task)) return { status: 'working' }
+      const moved = await this.setAsideUntracked(at)
+      if (moved.files.length > 0) {
+        setAside = moved.dir
+        this.deps.log?.(`task landing task=${taskId} set aside ${moved.files.length} untracked file(s) in ${moved.dir}`)
+      }
+      return this.resume(at, landing.intent ?? 'close')
+    }).then(result => setAside ? { ...result, setAside } : result)
   }
 
   /** Undoes a stopped rebase (`rebase --abort`) and clears the landing. The task stays as it was. */
@@ -542,8 +571,9 @@ export class TaskLandingManager {
         continue
       }
       if (ff.status === 'blocked') {
-        this.setLanding(at.task.id, { state: 'blocked', intent, files: ff.files, message: ff.message })
-        return { status: 'blocked', files: ff.files, message: ff.message }
+        const untracked = ff.untracked > 0 ? { untracked: ff.untracked } : {}
+        this.setLanding(at.task.id, { state: 'blocked', intent, files: ff.files, message: ff.message, ...untracked })
+        return { status: 'blocked', files: ff.files, message: ff.message, ...untracked }
       }
       this.deps.log?.(`task landing task=${at.task.id} landed into ${at.target.branchName}`)
       const landed = await this.streamTip(at).catch(() => '')
@@ -610,7 +640,7 @@ export class TaskLandingManager {
     const head = await this.deps.runner.run(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: streamRoot })
     if (head.stdout.trim() !== branch) {
       const where = at.stream.workspace ? 'The stream\'s worktree' : 'The project folder'
-      return { status: 'blocked', files: [], message: `${where} is not on ${branch}` }
+      return { status: 'blocked', files: [], message: `${where} is not on ${branch}`, untracked: 0 }
     }
     const merged = await this.deps.runner.run(
       [...NO_HOOKS, 'merge', '--ff-only', '--no-verify-signatures', `refs/heads/${at.own.branchName}`],
@@ -619,9 +649,41 @@ export class TaskLandingManager {
     if (merged.code === 0) return { status: 'ok' }
     if ((await this.streamTip(at)) !== pinned) return { status: 'moved' }
     // Not moved, so git refused over the worktree: name the files in the way.
-    const dirty = new Set(porcelainEntries(await this.git(streamRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).map(entry => entry.path))
+    const entries = porcelainEntries(await this.git(streamRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all']))
+    const dirty = new Set(entries.map(entry => entry.path))
+    const untracked = new Set(entries.filter(entry => entry.code === '??').map(entry => entry.path))
     const landing = splitNul(await this.git(streamRoot, ['diff', '--name-only', '-z', pinned, `refs/heads/${at.own.branchName}`]))
-    return { status: 'blocked', files: landing.filter(file => dirty.has(file)), message: gitErrorText(['merge'], merged) }
+    const files = landing.filter(file => dirty.has(file))
+    return { status: 'blocked', files, message: gitErrorText(['merge'], merged), untracked: files.filter(file => untracked.has(file)).length }
+  }
+
+  /**
+   * The stream worktree's untracked files the task's branch brings in, moved
+   * into a new folder under {@link TaskLandingDeps.setAsideDir} with their
+   * paths kept. Returns that folder and what went into it.
+   */
+  private async setAsideUntracked(at: Located): Promise<{ dir: string; files: string[] }> {
+    const streamRoot = at.target.worktreePath
+    const entries = porcelainEntries(await this.git(streamRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all']))
+    const untracked = new Set(entries.filter(entry => entry.code === '??').map(entry => entry.path))
+    const incoming = splitNul(await this.git(streamRoot, ['diff', '--name-only', '-z', `refs/heads/${at.target.branchName}...refs/heads/${at.own.branchName}`]))
+    const files = incoming.filter(file => untracked.has(file))
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const base = this.deps.setAsideDir ?? path.join((await this.git(streamRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim(), 'devtool-set-aside')
+    const dir = path.join(base, `${path.basename(path.resolve(streamRoot))}-${stamp}`)
+    for (const file of files) {
+      const from = path.join(streamRoot, file)
+      const to = path.join(dir, file)
+      fs.mkdirSync(path.dirname(to), { recursive: true })
+      try {
+        fs.renameSync(from, to)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+        fs.cpSync(from, to, { verbatimSymlinks: true })
+        fs.rmSync(from, { force: true })
+      }
+    }
+    return { dir, files }
   }
 
   /**

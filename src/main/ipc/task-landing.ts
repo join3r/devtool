@@ -34,6 +34,9 @@ export function registerTaskLandingHandlers(ipc: IpcRegistrar, deps: TaskLanding
   ipc.handle('task-landing-retry', [safeId, safeId], (_event, projectId, taskId) =>
     deps.taskLanding.retryLanding(projectId, taskId))
 
+  ipc.handle('task-landing-set-aside', [safeId, safeId], (_event, projectId, taskId) =>
+    deps.taskLanding.setAsideAndRetry(projectId, taskId))
+
   ipc.handle('task-landing-abort', [safeId, safeId], (_event, projectId, taskId) =>
     deps.taskLanding.abortLanding(projectId, taskId))
 

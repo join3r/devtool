@@ -270,7 +270,7 @@ actor FakeRelay: WebSocketConnector {
                     switch parsed.action {
                     case .fixWithAgent: result = TaskLandResult(status: .fixing, landing: TaskLanding(state: .fixing, files: ["a.ts"], fileCount: 1))
                     case .abort: result = TaskLandResult(status: .aborted)
-                    case .retry: result = TaskLandResult(status: .landed, closed: true)
+                    case .retry, .setAside: result = TaskLandResult(status: .landed, closed: true)
                     }
                     return app(.resOk(id: id, result: result.json), to: from)
                 }

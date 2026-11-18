@@ -162,17 +162,20 @@ export interface TaskLanding {
   fileCount?: number
   /** Git's reason (`blocked`), at most 1000 characters. */
   message?: string
+  /** `blocked`: how many of the files in the way are untracked in the stream's worktree, which `set-aside` moves away. */
+  untracked?: number
 }
 
 /**
  * `task.land` (SPEC.md §8.15): a stopped landing's buttons. `fix-with-agent` asks the
  * task's agent to resolve the conflict, `abort` undoes the rebase (the task stays
- * open), `retry` picks the landing up again.
+ * open), `retry` picks the landing up again, `set-aside` moves a blocked landing's
+ * untracked files out of the stream's worktree first.
  */
 export const TASK_LAND_OP = 'task.land'
 /** The handshake feature (§8.1) a desktop lists when it answers `task.land` and sends `landing` and a task's `branch` (§4.4). */
 export const TASK_LAND_FEATURE = 'task.land'
-export const TASK_LAND_ACTIONS = ['fix-with-agent', 'abort', 'retry'] as const
+export const TASK_LAND_ACTIONS = ['fix-with-agent', 'abort', 'retry', 'set-aside'] as const
 export type TaskLandAction = (typeof TASK_LAND_ACTIONS)[number]
 /** What a `task.land` came to (§8.15). */
 export const TASK_LAND_STATUSES = ['landed', 'updated', 'nothing', 'aborted', 'fixing', 'conflict', 'blocked', 'working'] as const
@@ -1508,6 +1511,8 @@ export function parseTaskLanding(value: unknown): TaskLanding {
   if (fileCount !== undefined) landing.fileCount = fileCount
   const message = optStr(o, 'message')
   if (message !== undefined) landing.message = message
+  const untracked = optInt(o, 'untracked')
+  if (untracked !== undefined && untracked > 0) landing.untracked = untracked
   return landing
 }
 
