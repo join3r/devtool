@@ -23,7 +23,44 @@ export interface SecretRequest {
   file: string
   /** A value for `name` is saved for this project: the prompt offers it. */
   saved: boolean
+  /**
+   * Remember can keep it: false on a DevTool server, which has no keychain.
+   * Absent (an older host) means it can.
+   */
+  canRemember?: boolean
   createdAt: number
+}
+
+/** The window channel a DevTool server pushes its open requests on; its desktop folds them into its own. */
+export const SERVER_SECRET_REQUESTS_CHANNEL = 'server-secret-requests-changed'
+
+/**
+ * Open requests as another host sent them (a server's push or answer), shapes
+ * checked. Anything malformed is left out.
+ */
+export function parseSecretRequests(value: unknown): SecretRequest[] {
+  if (!Array.isArray(value)) return []
+  const out: SecretRequest[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue
+    const r = item as Record<string, unknown>
+    const strings = ['id', 'projectId', 'taskId', 'tabId', 'name', 'reason', 'file'] as const
+    if (!strings.every(key => typeof r[key] === 'string')) continue
+    if (!validSecretName(r.name as string)) continue
+    out.push({
+      id: r.id as string,
+      projectId: r.projectId as string,
+      taskId: r.taskId as string,
+      tabId: r.tabId as string,
+      name: r.name as string,
+      reason: (r.reason as string).slice(0, SECRET_REASON_MAX),
+      file: r.file as string,
+      saved: r.saved === true,
+      canRemember: r.canRemember !== false,
+      createdAt: typeof r.createdAt === 'number' ? r.createdAt : 0
+    })
+  }
+  return out
 }
 
 /** A window's answer to a request. */

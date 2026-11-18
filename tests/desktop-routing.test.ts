@@ -5,7 +5,7 @@ import path from 'path'
 import { DesktopRouting, type RoutingHub } from '../src/main/servers/desktop-routing'
 import type { ServerEvent } from '../src/main/servers/server-hub'
 import type { IpcContext, IpcRegistrar } from '../src/main/ipc/registrar'
-import type { Project, ProjectsData } from '../src/shared/types'
+import type { Project, ProjectsData, Tab } from '../src/shared/types'
 import type { ServersState } from '../src/shared/servers'
 import { fixtureProject } from './helpers/streams-fixtures'
 import type { DecodedImage, ImageCodec } from '../src/main/mobile/chat-image'
@@ -24,7 +24,7 @@ afterEach(() => {
 
 type Handler = (ctx: IpcContext, ...args: unknown[]) => unknown
 
-function setup(options: { images?: ImageCodec; serverProjects?: Project[]; worktreeStates?: Record<string, unknown>; outputStyle?: OutputStyle } = {}) {
+function setup(options: { images?: ImageCodec; serverProjects?: Project[]; worktreeStates?: Record<string, unknown>; outputStyle?: OutputStyle; secretRequests?: unknown } = {}) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-routing-'))
   dirs.push(configDir)
   const serverData: ProjectsData = {
@@ -50,6 +50,8 @@ function setup(options: { images?: ImageCodec; serverProjects?: Project[]; workt
       if (ch === 'get-agent-activity') return {}
       if (ch === 'task-worktree-states') return options.worktreeStates ?? {}
       if (ch === 'pty-spawn') return { cols: 80, rows: 24, scrollback: '$ ', exitCode: null }
+      if (ch === 'secret-requests-get') return options.secretRequests ?? []
+      if (ch === 'secret-answer') return { ok: true }
       return undefined
     }
   }
@@ -73,7 +75,9 @@ function setup(options: { images?: ImageCodec; serverProjects?: Project[]; workt
   let style = options.outputStyle ?? 'standard'
   const styleListeners = new Set<(style: OutputStyle) => void>()
   const setStyle = (next: OutputStyle) => { style = next; for (const listener of styleListeners) listener(next) }
+  const foreignSecrets: Array<[string, unknown]> = []
   routing.attachHost({
+    serverSecretRequests: { setForeign: (serverId, list) => { foreignSecrets.push([serverId, list]) } },
     getProjectsData: () => localData,
     onProjectsChanged: () => () => {},
     outputStyle: { get: () => style, onChange: (listener) => { styleListeners.add(listener); return () => styleListeners.delete(listener) } }
@@ -90,8 +94,9 @@ function setup(options: { images?: ImageCodec; serverProjects?: Project[]; workt
   wrapped.handle('pty-spawn', [], (() => 'spawned here') as never)
   wrapped.handle('chat-attach', [], (() => 'attached here') as never)
   wrapped.handle('chat-send', [], (() => 'sent here') as never)
+  wrapped.handle('secret-answer', [], (() => 'answered here') as never)
   const emit = (event: ServerEvent) => { for (const listener of eventListeners) listener(event) }
-  return { routing, hub, calls, sent, broadcast, handlers, emit, setStyle }
+  return { routing, hub, calls, sent, broadcast, handlers, emit, setStyle, foreignSecrets }
 }
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -120,6 +125,34 @@ describe('DesktopRouting', () => {
     // The server's own broadcasts of its settings never reach the windows.
     t.emit({ serverId: 'srvA', client: '*', ch: 'config-updated', args: [{}] })
     expect(t.broadcast.filter(b => b[0] === 'config-updated')).toEqual([])
+  })
+
+  it('shows a server task\'s secret prompts with the local ones and sends the answer back to that server', async () => {
+    const tab = { id: 'srv-tab', type: 'claude-chat', title: 'Claude' } as Tab
+    const request = (id: string, tabId: string) => ({ id, projectId: 'srv-p', taskId: 'srv-t', tabId, name: 'API_KEY', reason: 'mail', file: '.env', saved: false, canRemember: false, createdAt: 5 })
+    const t = setup({
+      serverProjects: [fixtureProject({ id: 'srv-p', directory: '/home/srv/app', tasks: [{ id: 'srv-t', tabs: { left: [tab] } }] })],
+      // A request for a tab the server doesn't own is left out.
+      secretRequests: [request('r1', 'srv-tab'), request('r2', 'local-tab'), { id: 'bad' }, { ...request('r3', 'srv-tab'), projectId: 'local-p', taskId: 'local-t' }]
+    })
+    t.routing.attachHub(t.hub)
+    await flush()
+    await flush()
+    // One naming a local task is put back on the task its tab is in.
+    expect(t.foreignSecrets).toEqual([['srvA', [request('r1', 'srv-tab'), request('r3', 'srv-tab')]]])
+
+    t.emit({ serverId: 'srvA', client: '*', ch: 'server-secret-requests-changed', args: [[]] })
+    expect(t.foreignSecrets.at(-1)).toEqual(['srvA', []])
+    // Never forwarded to the windows as it is.
+    expect(t.broadcast.filter(b => String(b[0]).includes('secret'))).toEqual([])
+
+    const ctx: IpcContext = { clientId: 'win:1', isFocused: () => true }
+    const answer = { kind: 'value', value: 's3cret', remember: false }
+    expect(await t.handlers.get('secret-answer')!(ctx, 'r1', answer, 'srv-tab')).toEqual({ ok: true })
+    // The server gets only the request id and the answer.
+    expect(t.calls.find(c => c.ch === 'secret-answer')).toMatchObject({ serverId: 'srvA', args: ['r1', answer] })
+    expect(await t.handlers.get('secret-answer')!(ctx, 'r9', answer, 'local-tab')).toBe('answered here')
+    expect(await t.handlers.get('secret-answer')!(ctx, 'r9', answer)).toBe('answered here')
   })
 
   it('sends the response style to a server when it comes online and again when it changes', async () => {

@@ -125,7 +125,7 @@ import { SecretStore } from '../secrets/secret-store'
 import { SecretRequests, type SecretOutcome } from '../secrets/secret-requests'
 import { checkSecretFile, writeSecretFile } from '../secrets/secret-file'
 import { registerSecretHandlers } from '../ipc/secrets'
-import { redactDeep, redactSecrets } from '../../shared/secrets'
+import { redactDeep, redactSecrets, SERVER_SECRET_REQUESTS_CHANNEL, type SecretRequest } from '../../shared/secrets'
 import { agentModeFor, callerClaudeMode, delegatedMode, handleMcpMessage, liveTaskState, unrestrictedCaller, lastReplyFromTranscript, type RequestSecretInput, type DevtoolMcpDeps, type DevtoolMcpEndpoint, type StartTaskInput, type StartTaskResult } from '../devtool-mcp'
 import { autopilotActive, autopilotSupported, stoppedAutopilot } from '../../shared/autopilot'
 import { statusTabs, taskStatus } from '../../shared/inbox-state'
@@ -330,6 +330,16 @@ export class HostServices {
   private readonly secretStore: SecretStore
   /** Open `request_secret` prompts, and the values given this run (for redaction). */
   private readonly secretRequests: SecretRequests
+  /** Each online server's open prompts (DesktopRouting), shown with this desktop's own. */
+  private readonly foreignSecretRequests = new Map<string, SecretRequest[]>()
+  /** What DesktopRouting tells about its servers' `request_secret` prompts. */
+  readonly serverSecretRequests = {
+    setForeign: (serverId: string, list: SecretRequest[] | null): void => {
+      if (list && list.length > 0) this.foreignSecretRequests.set(serverId, list)
+      else if (!this.foreignSecretRequests.delete(serverId)) return
+      this.broadcastSecretRequests()
+    }
+  }
   /** Local projects whose folder is gone, for the phone's inbox (SPEC.md §4.4). */
   private readonly missingFolders = new MissingFolderWatch(() => this.projectsStore.peek().projects)
   private missingFoldersUnsub: (() => void) | null = null
@@ -381,7 +391,11 @@ export class HostServices {
     this.secretRequests = new SecretRequests({
       store: this.secretStore,
       write: (dir, file, name, value) => writeSecretFile(dir, file, name, value, this.gitRunner),
-      onChange: (list) => this.clients.broadcast('secret-requests-changed', list),
+      // A server's windows are its desktops: they fold its prompts into their own.
+      onChange: (list) => {
+        if (this.isServer) this.clients.broadcast(SERVER_SECRET_REQUESTS_CHANNEL, list)
+        else this.broadcastSecretRequests()
+      },
       // The tab waits on you: its status and the Inbox say so, as for a permission prompt.
       onOpen: (request) => this.handleHook('activity', request.tabId, { hook_event_name: 'DevtoolSecretRequested', tool_use_id: `secret:${request.id}`, name: request.name }),
       onClose: (request) => this.handleHook('activity', request.tabId, { hook_event_name: 'DevtoolPromptResolved', tool_use_id: `secret:${request.id}` }),
@@ -1401,15 +1415,26 @@ export class HostServices {
     }
   }
 
+  /** The open prompts every window lists: this desktop's own and its servers'. */
+  private allSecretRequests(): SecretRequest[] {
+    const own = this.secretRequests.list()
+    if (this.foreignSecretRequests.size === 0) return own
+    return [...own, ...[...this.foreignSecretRequests.values()].flat()].sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  private broadcastSecretRequests(): void {
+    this.clients.broadcast('secret-requests-changed', this.allSecretRequests())
+  }
+
   /**
    * `request_secret` (`devtool-mcp.ts`): a masked prompt in the windows (the
    * task's view and the Inbox), answered into a file in the task's folder.
-   * Only on a desktop, for projects on this machine: a server has no window of
-   * its own, and the value must not travel further than it has to.
+   * On a DevTool server the windows are its desktops' (they show the prompt and
+   * send the answer back over the link); Remember is off there, as a server has
+   * no keychain. SSH projects are refused: the file would be on another machine.
    */
   private async requestSecretForAgent(input: RequestSecretInput, signal?: AbortSignal): Promise<SecretOutcome | { status: 'error'; error: string }> {
     const { project, task } = input
-    if (this.isServer) return { status: 'error', error: 'This task runs on a DevTool server, where DevTool can\'t ask for secrets yet. Ask the user to put it in place on that machine.' }
     if (project.ssh || project.host) return { status: 'error', error: 'DevTool asks for secrets only for projects on this machine.' }
     const dir = taskDirectory(project, task)
     const problem = await checkSecretFile(dir, input.file, this.gitRunner)
@@ -2203,7 +2228,7 @@ export class HostServices {
     })
     registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })
     registerSecretHandlers(ipc, {
-      requests: this.secretRequests,
+      requests: { list: () => this.allSecretRequests(), answer: (id, answer) => this.secretRequests.answer(id, answer) },
       store: this.secretStore,
       // A saved value is offered again by name; keep it out of the chat too once it is read.
       projectExists: (projectId) => this.projectsStore.peek().projects.some(p => p.id === projectId)

@@ -232,9 +232,11 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'output-style-set': 'local',
   // a task's title from its first prompt (ipc/task-names.ts): this desktop's claude names it
   'task-name-suggest': 'local',
-  // an agent's request_secret prompts and remembered secrets (ipc/secrets.ts): asked only for projects on this desktop
+  // an agent's request_secret prompts (ipc/secrets.ts): this desktop's list already holds its servers'
+  // (DesktopRouting folds them in); an answer goes to the host of the request's tab (the third argument).
   'secret-requests-get': 'local',
-  'secret-answer': 'local',
+  'secret-answer': { by: [{ tab: 2 }], remote: 'custom' },
+  // remembered secrets: only this desktop has a keychain
   'secrets-list': 'local',
   'secrets-delete': 'local',
 
@@ -337,6 +339,8 @@ export const SERVER_PRIVATE_EVENTS: readonly string[] = [
   'server-task-usage-changed',
   'ssh-status-changed',
   'ssh-tunnel-status-changed',
-  // A server refuses request_secret; only a desktop's own prompts are shown.
-  'secret-requests-changed'
+  // A desktop's own windows' list; a server sends its prompts as server-secret-requests-changed.
+  'secret-requests-changed',
+  // DesktopRouting folds it into this desktop's list.
+  'server-secret-requests-changed'
 ]

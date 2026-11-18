@@ -14,6 +14,7 @@ import { SERVER_PLAN_LIMITS_CHANNEL, SERVER_TASK_USAGE_CHANNEL } from '../../sha
 import type { PlanAccount } from '../../shared/plan-limits'
 import { parseMachineUsage, type MachineUsage } from '../../shared/task-usage'
 import { OUTPUT_STYLE_SET_CHANNEL, type OutputStyle } from '../../shared/output-style'
+import { parseSecretRequests, SERVER_SECRET_REQUESTS_CHANNEL, type SecretRequest } from '../../shared/secrets'
 
 /** The part of ServerHub the desktop's routing uses. */
 export interface RoutingHub {
@@ -31,6 +32,8 @@ export interface RoutedHost {
   planLimits?: { setForeign(serverId: string, label: string, accounts: PlanAccount[] | null): void }
   /** CPU and memory per tab, which holds each online server's too. */
   taskUsage?: { setForeign(serverId: string, label: string, usage: MachineUsage | null): void }
+  /** The open `request_secret` prompts, which hold each online server's too. */
+  serverSecretRequests?: { setForeign(serverId: string, list: SecretRequest[] | null): void }
   /** Settings → AI → Response style, which every server gets too. */
   outputStyle?: { get(): OutputStyle; onChange(listener: (style: OutputStyle) => void): () => void }
 }
@@ -92,7 +95,9 @@ export class DesktopRouting {
           deps.images ? fitChatImagesForLink(args[2] as ChatImage[] | undefined, deps.images) : args[2],
           // The send mode, only when given: a server from before it refuses a fourth argument.
           ...(args[3] !== undefined ? [args[3]] : [])
-        ])
+        ]),
+        // The tab only picked the server; it answers by request id.
+        'secret-answer': (serverId, ctx, args) => this.callServer(serverId, ctx, 'secret-answer', [args[0], args[1]])
       }
     })
     this.reindex()
@@ -143,6 +148,7 @@ export class DesktopRouting {
     hub.onEvent((event) => {
       if (event.ch === SERVER_PLAN_LIMITS_CHANNEL) this.setServerPlanLimits(event.serverId, event.args[0])
       if (event.ch === SERVER_TASK_USAGE_CHANNEL) this.setServerTaskUsage(event.serverId, event.args[0])
+      if (event.ch === SERVER_SECRET_REQUESTS_CHANNEL) this.setServerSecretRequests(event.serverId, event.args[0])
       this.router.deliver(event)
     })
     // ServerProjects first: a server that comes online is asked for its projects
@@ -175,12 +181,15 @@ export class DesktopRouting {
     this.online = now
     // A server that is away shows no numbers rather than its last ones.
     for (const serverId of went) this.host?.taskUsage?.setForeign(serverId, '', null)
+    // Its prompts can't be answered while it is away; it still holds them, and they come back with it.
+    for (const serverId of went) this.host?.serverSecretRequests?.setForeign(serverId, null)
     this.serverNames = new Map(state.servers.map(s => [s.id, s.name || `server ${s.id.slice(0, 6)}`]))
     for (const serverId of came) {
       void this.refreshActivity(serverId)
       void this.refreshWorktreeStates(serverId)
       void this.refreshPlanLimits(serverId)
       void this.refreshTaskUsage(serverId)
+      void this.refreshSecretRequests(serverId)
       void this.pushOutputStyle(serverId)
     }
     // An offline server's logins stay as last read; an unpaired one's go.
@@ -205,6 +214,45 @@ export class DesktopRouting {
     const usage = parseMachineUsage(value)
     if (!usage || !this.online.has(serverId)) return
     this.host?.taskUsage?.setForeign(serverId, this.serverNames.get(serverId) ?? `server ${serverId.slice(0, 6)}`, usage)
+  }
+
+  /** A server's open `request_secret` prompts (its push or its answer); only its own tabs', only while online. */
+  private setServerSecretRequests(serverId: string, value: unknown): void {
+    if (!this.online.has(serverId)) return
+    const list: SecretRequest[] = []
+    for (const request of parseSecretRequests(value)) {
+      if (!this.index.tabOf(request.tabId, serverId)) continue
+      // The project and task come from where the tab is in that server's own data,
+      // never from the server's word: a prompt must not show on a local task.
+      const owner = this.serverTabOwner(serverId, request.tabId)
+      if (owner) list.push({ ...request, projectId: owner.projectId, taskId: owner.taskId })
+    }
+    this.host?.serverSecretRequests?.setForeign(serverId, list)
+  }
+
+  /** The project and task a server's tab is in, from that server's projects. */
+  private serverTabOwner(serverId: string, tabId: string): { projectId: string; taskId: string } | null {
+    for (const project of this.projects.foreignProjects()) {
+      if (project.host !== serverId || !this.index.projectOf(project.id, serverId)) continue
+      for (const stream of project.streams) {
+        for (const task of stream.tasks) {
+          if (!this.index.taskOf(task.id, serverId)) continue
+          if (task.panes.some(pane => pane.tabs.some(tab => tab.id === tabId))) return { projectId: project.id, taskId: task.id }
+        }
+      }
+    }
+    return null
+  }
+
+  /** A server came (back) online: prompts it opened meanwhile. It pushes only changes. */
+  private async refreshSecretRequests(serverId: string): Promise<void> {
+    const hub = this.hub
+    if (!hub) return
+    try {
+      this.setServerSecretRequests(serverId, await hub.call(serverId, MAIN_CLIENT_ID, 'secret-requests-get'))
+    } catch (err) {
+      this.deps.log(`servers secretRequestsRefresh server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   /**

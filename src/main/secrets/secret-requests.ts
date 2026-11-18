@@ -87,6 +87,7 @@ export class SecretRequests {
           reason: input.reason,
           file: input.file,
           saved: this.deps.store.has(input.projectId, input.name),
+          canRemember: this.deps.store.canSave(),
           createdAt: this.deps.now?.() ?? Date.now()
         }
         const created: Pending = {

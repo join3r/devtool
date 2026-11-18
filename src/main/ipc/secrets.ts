@@ -26,7 +26,8 @@ const answer = v.union(
  */
 export function registerSecretHandlers(ipc: IpcRegistrar, deps: SecretIpcDeps): void {
   ipc.handle('secret-requests-get', [], () => deps.requests.list())
-  ipc.handle('secret-answer', [id, answer], (_ctx, requestId, reply) => deps.requests.answer(requestId, reply as SecretAnswer))
+  // The third argument, the request's tab, only routes it: a server task's prompt is answered on its server.
+  ipc.handle('secret-answer', [id, answer, v.optional(id)], (_ctx, requestId, reply) => deps.requests.answer(requestId, reply as SecretAnswer))
   ipc.handle('secrets-list', [id], (_ctx, projectId): { secrets: SavedSecretInfo[]; canSave: boolean } => ({
     secrets: deps.projectExists(projectId) ? deps.store.list(projectId) : [],
     canSave: deps.store.canSave()

@@ -578,9 +578,12 @@ const api = {
     ipcRenderer.on('secret-requests-changed', handler)
     return () => ipcRenderer.removeListener('secret-requests-changed', handler)
   },
-  /** The user's answer: the typed value, the saved one, or no. An error keeps the prompt open. */
-  secretAnswer: (requestId: string, answer: SecretAnswer): Promise<{ ok: true; rememberFailed?: boolean } | { ok: false; error: string }> =>
-    ipcRenderer.invoke('secret-answer', requestId, answer),
+  /**
+   * The user's answer: the typed value, the saved one, or no. An error keeps the
+   * prompt open. `tabId` (the request's) sends it to the host the tab runs on.
+   */
+  secretAnswer: (requestId: string, answer: SecretAnswer, tabId?: string): Promise<{ ok: true; rememberFailed?: boolean } | { ok: false; error: string }> =>
+    tabId === undefined ? ipcRenderer.invoke('secret-answer', requestId, answer) : ipcRenderer.invoke('secret-answer', requestId, answer, tabId),
   /** A project's remembered secrets, names only, and whether this machine can remember any. */
   secretsList: (projectId: string): Promise<{ secrets: { name: string; savedAt: number }[]; canSave: boolean }> =>
     ipcRenderer.invoke('secrets-list', projectId),

@@ -182,7 +182,7 @@ describe('SecretRequests', () => {
     const { requests, writes, opened, closed, changes } = setup()
     const pending = requests.request(input)
     const [open] = requests.list()
-    expect(open).toMatchObject({ name: 'KEY', reason: 'tests', file: '.env', taskId: 't1', saved: false })
+    expect(open).toMatchObject({ name: 'KEY', reason: 'tests', file: '.env', taskId: 't1', saved: false, canRemember: true })
     expect(JSON.stringify(open)).not.toContain('sk-')
     expect(opened).toEqual(['KEY'])
     expect(await requests.answer(open.id, { kind: 'value', value: 'sk-live-123456789', remember: false })).toEqual({ ok: true })
@@ -205,6 +205,14 @@ describe('SecretRequests', () => {
     expect(requests.list()[0].saved).toBe(true)
     await requests.answer(requests.list()[0].id, { kind: 'saved' })
     expect(await second).toMatchObject({ status: 'provided', fromSaved: true })
+  })
+
+  it('offers no Remember where nothing can be kept (a DevTool server)', async () => {
+    const requests = new SecretRequests({ store: new SecretStore(dir, fakeEncryptor(false)), write: async () => ({ excluded: true }), onChange: () => {} })
+    const pending = requests.request(input)
+    expect(requests.list()[0]).toMatchObject({ canRemember: false, saved: false })
+    await requests.answer(requests.list()[0].id, { kind: 'decline' })
+    expect(await pending).toEqual({ status: 'declined' })
   })
 
   it('knows remembered values again after a restart', () => {

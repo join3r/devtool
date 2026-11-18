@@ -21,7 +21,7 @@ export default function SecretPrompt({ request, compact = false }: { request: Se
     setBusy(true)
     setError(null)
     try {
-      const result = await window.api.secretAnswer(request.id, answer)
+      const result = await window.api.secretAnswer(request.id, answer, request.tabId)
       if (!result.ok) setError(result.error)
       else setValue('')
     } catch (err) {
@@ -84,7 +84,7 @@ export default function SecretPrompt({ request, compact = false }: { request: Se
         >Save</button>
       </form>
       <div className="flex items-center gap-4 text-xs text-text-muted flex-wrap">
-        <label className="flex items-center gap-1.5 cursor-pointer">
+        {request.canRemember !== false && <label className="flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
             className="accent-(--color-accent)"
@@ -94,7 +94,7 @@ export default function SecretPrompt({ request, compact = false }: { request: Se
             data-testid="secret-prompt-remember"
           />
           Remember for this project
-        </label>
+        </label>}
         {request.saved && <LinkBtn disabled={busy} onClick={() => void send({ kind: 'saved' })}>Use saved</LinkBtn>}
         <LinkBtn danger disabled={busy} onClick={() => void send({ kind: 'decline' })}>Decline</LinkBtn>
         <span className="text-text-subtle">Goes to <span className="font-mono">{request.file}</span>, kept out of git and the chat.</span>
