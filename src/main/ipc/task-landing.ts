@@ -1,4 +1,4 @@
-import type { StreamMergeFixResult, StreamMergeResult } from '../../shared/types'
+import type { StreamMergeFixResult, StreamMergeResult, StreamPushResult, StreamPushStatus } from '../../shared/types'
 import type { TaskLandingManager } from '../task-landing'
 import type { IpcRegistrar } from './registrar'
 import { safeId } from './schemas'
@@ -12,6 +12,10 @@ export interface TaskLandingIpcDeps {
   mergeStream(projectId: string, streamId: string): Promise<StreamMergeResult>
   /** A Claude task in the stream's worktree that merges the base branch in and resolves the conflicts (`stream-merge-fix.ts`). */
   fixStreamMerge(projectId: string, streamId: string, files: string[]): Promise<StreamMergeFixResult>
+  /** Push the stream's branch to its remote (`stream-push.ts`). */
+  pushStream(projectId: string, streamId: string): Promise<StreamPushResult>
+  /** Unpushed commits of the stream's branch, as last fetched; null when it can't tell. */
+  streamPushStatus(projectId: string, streamId: string): Promise<StreamPushStatus | null>
 }
 
 const landOptions = v.object({
@@ -63,4 +67,10 @@ export function registerTaskLandingHandlers(ipc: IpcRegistrar, deps: TaskLanding
 
   ipc.handle('stream-merge-fix', [safeId, safeId, v.array(v.string(), { max: 1000 })], (_event, projectId, streamId, files) =>
     deps.fixStreamMerge(projectId, streamId, files))
+
+  ipc.handle('stream-push', [safeId, safeId], (_event, projectId, streamId) =>
+    deps.pushStream(projectId, streamId))
+
+  ipc.handle('stream-push-status', [safeId, safeId], (_event, projectId, streamId) =>
+    deps.streamPushStatus(projectId, streamId))
 }

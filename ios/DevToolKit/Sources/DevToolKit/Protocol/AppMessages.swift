@@ -263,6 +263,8 @@ public enum DesktopFeature {
     public static let streamRunCommands = "stream.run.commands"
     /// The desktop answers `stream.commands.get`, `.set` and `.suggest` (§8.21).
     public static let streamCommands = "stream.commands"
+    /// The desktop answers `stream.push.status` and `stream.push` (§8.29).
+    public static let streamPush = "stream.push"
     /// The desktop answers `tokens.usage` (§8.22).
     public static let tokensUsage = "tokens.usage"
     /// Tasks carry `parentTaskId`, `children` and `waiting`, and `task.close`

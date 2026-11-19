@@ -5,6 +5,7 @@ import { useApp } from '../../context/AppContext'
 import { pinnedItemKey, type PinnedItem, type Project, type Task } from '../../../shared/types'
 import { canLandTask, useLandingOp } from '../../taskLanding'
 import { useTaskLandingActions } from '../useTaskLandingActions'
+import { canPushStream } from '../menus/EntityMenus'
 import { findStreamOfTask } from '../../../shared/streams'
 import { autopilotActive, autopilotLine } from '../../../shared/autopilot'
 import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
@@ -136,7 +137,7 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
  * The header's ✓ Done, the one light button on the screen: lands the task and
  * closes it, like Done on its inbox row (`useDeskDone`). A task with a worktree
  * of its own also gets Done's ▾ (decision 4 of the redesign): Land and keep
- * working · Update from stream · Close and keep branch · Discard.
+ * working · Land and push · Update from stream · Close and keep branch · Discard.
  */
 export function DeskDoneButton({ project, task }: { project: Project; task: Task }): React.ReactElement {
   const closeTaskFlow = useCloseTask()
@@ -183,10 +184,12 @@ export function DeskDoneButton({ project, task }: { project: Project; task: Task
       <DoneMenu
         anchor={menu}
         streamName={stream?.name ?? 'the stream'}
+        canPush={canPushStream(project)}
         onClose={() => setMenu(null)}
         onPick={(choice) => {
           setMenu(null)
           if (choice === 'land') void landingActions.land(project, task)
+          else if (choice === 'land-push') void landingActions.landAndPush(project, task)
           else if (choice === 'update') void landingActions.update(project, task)
           else if (choice === 'keep') void done(project.id, task.id, 'keep')
           else {
@@ -200,11 +203,13 @@ export function DeskDoneButton({ project, task }: { project: Project; task: Task
   )
 }
 
-type DoneChoice = 'land' | 'update' | 'keep' | 'discard'
+type DoneChoice = 'land' | 'land-push' | 'update' | 'keep' | 'discard'
 
-function DoneMenu({ anchor, streamName, onPick, onClose }: {
+function DoneMenu({ anchor, streamName, canPush, onPick, onClose }: {
   anchor: MenuAnchor | null
   streamName: string
+  /** Offer Land and push: the project's streams can be pushed (`canPushStream`). */
+  canPush: boolean
   onPick: (choice: DoneChoice) => void
   onClose: () => void
 }): React.ReactElement | null {
@@ -223,6 +228,7 @@ function DoneMenu({ anchor, streamName, onPick, onClose }: {
   if (!anchor) return null
   const items: { id: DoneChoice; label: string; hint: string; danger?: boolean }[] = [
     { id: 'land', label: 'Land and keep working', hint: `Into ${streamName}; the task stays open` },
+    ...(canPush ? [{ id: 'land-push' as const, label: 'Land and push', hint: `Into ${streamName}, then push ${streamName}; the task stays open` }] : []),
     { id: 'update', label: 'Update from stream', hint: `Take in what ${streamName} gained` },
     { id: 'keep', label: 'Close and keep branch', hint: 'Nothing lands; the branch stays' },
     { id: 'discard', label: 'Discard…', hint: 'Worktree and branch go', danger: true }

@@ -99,6 +99,12 @@ struct ProjectView: View {
                 default: break
                 }
             }
+            // Where each stream's branch stands, for Push (§8.29): on appear, when
+            // streams come or go, and back online. Not polled.
+            .task(id: PushStatusKey(streamIds: project.streams.map(\.id), online: !offline)) {
+                guard !offline else { return }
+                await model.loadPushStatuses(projectId: project.id, streamIds: project.streams.map(\.id), desktopId: ref.desktopId)
+            }
             .navigationDestination(item: $logs) { target in
                 StreamLogsView(target: target)
             }
@@ -282,6 +288,7 @@ struct ProjectView: View {
                 }
                 .disabled(offline)
             }
+            pushButton(stream, project: project)
             // `main`'s commands are the project's, in the toolbar's menu.
             if canEditCommands, !stream.isMain {
                 Button("Commands…", systemImage: "terminal") {
@@ -289,6 +296,20 @@ struct ProjectView: View {
                 }
                 .disabled(offline)
             }
+        }
+    }
+
+    /// Push to origin (§8.29), "↑3" while the remote lacks commits: only once
+    /// `stream.push.status` named a remote to push to.
+    @ViewBuilder
+    private func pushButton(_ stream: InboxStream, project: InboxProject) -> some View {
+        if model.supports(DesktopFeature.streamPush, on: ref.desktopId),
+           let label = model.pushStatus(streamId: stream.id, desktopId: ref.desktopId)?.pushLabel {
+            let pushing = model.isPushing(streamId: stream.id, desktopId: ref.desktopId)
+            Button(pushing ? "Pushing…" : label, systemImage: "arrow.up.circle") {
+                Task { await model.pushStream(projectId: project.id, streamId: stream.id, desktopId: ref.desktopId) }
+            }
+            .disabled(offline || pushing)
         }
     }
 
@@ -709,4 +730,10 @@ struct QueueRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens the queued prompt")
     }
+}
+
+/// What re-asks `stream.push.status` on the project screen.
+private struct PushStatusKey: Equatable {
+    var streamIds: [String]
+    var online: Bool
 }

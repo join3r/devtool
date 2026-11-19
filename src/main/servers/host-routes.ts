@@ -214,6 +214,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-landing-preview': project0,
   'stream-merge': project0,
   'stream-merge-fix': project0,
+  'stream-push': project0,
+  'stream-push-status': project0,
   // Project Home's queue (ipc/prompt-queue.ts)
   'prompt-queue-run': project0,
   // schedules (ipc/schedules.ts): a server project's schedules are its server's to run
@@ -314,6 +316,7 @@ export const SERVER_EVENTS: Readonly<Record<string, ServerEventScope>> = {
   'task-landing-state': 'server-task',
   'archive-changed': 'server-project',
   'stream-run-state': 'server-project',
+  'stream-pushed': 'server-project',
   'tasks-removed': 'removal',
   'tabs-removed': 'removal',
   'tabs-restart': 'tab-list',

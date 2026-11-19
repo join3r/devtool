@@ -29,6 +29,8 @@ import { registerTaskForkHandlers } from '../ipc/task-fork'
 import { patchTabInTask } from '../../shared/panes'
 import { recordSetupArtifacts, TaskLandingManager } from '../task-landing'
 import { mergeStream } from '../stream-merge'
+import { pushStream, streamPushStatus } from '../stream-push'
+import { streamPushMessage } from '../../shared/stream-push'
 import { startStreamMergeFix } from '../stream-merge-fix'
 import { LocalGitRunner } from '../git-runner'
 import { MissingFolderWatch, ProjectDirError, appendNewProject, createProjectDir } from '../project-dirs'
@@ -166,6 +168,7 @@ import {
   STREAM_RUN_FEATURE,
   STREAM_RUN_TASK_FEATURE,
   STREAM_RUN_COMMANDS_FEATURE,
+  STREAM_PUSH_FEATURE,
   STREAM_COMMANDS_FEATURE,
   ChatLimits,
   PROJECT_NEW_FEATURE,
@@ -197,7 +200,8 @@ import type {
   WorkspaceDeleteResult,
   NotesRecord,
   HostTabStatus,
-  TabStatusValue
+  TabStatusValue,
+  StreamPushResult
 } from '../../shared/types'
 import type { ClientHub } from './client-hub'
 import type { HostEnv } from './host-env'
@@ -767,7 +771,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, TASK_FOLDER_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE, CHAT_FORK_FEATURE, CHAT_PLUGINS_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, CHAT_IMAGE_USER_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, TASK_BUSY_FEATURE, TASK_FOLDER_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, CHAT_QUEUE_FEATURE, CHAT_SEARCH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_PUSH_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE, SCHEDULES_FEATURE, TASK_CHILDREN_FEATURE, CHAT_FORK_FEATURE, CHAT_PLUGINS_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -929,6 +933,38 @@ export class HostServices {
             : { ok: false, code: AppErrorCode.Internal, message: outcome.error }
         }
       },
+      streamPush: {
+        status: async ({ projectId, streamId }) => {
+          const project = this.mobilePushableProject(projectId, streamId)
+          if (typeof project === 'object') return project
+          const status = await streamPushStatus({ projects: this.projectsStore, runner: this.gitRunner }, projectId, streamId)
+          if (!status) return { ok: false, code: AppErrorCode.Unsupported, message: 'This stream\'s folder is not on a git branch' }
+          return {
+            ok: true,
+            result: {
+              branch: status.branch,
+              ...(status.remote ? { remote: status.remote } : {}),
+              ...(status.upstream ? { upstream: status.upstream } : {}),
+              ahead: status.ahead,
+              behind: status.behind
+            }
+          }
+        },
+        push: async ({ projectId, streamId }) => {
+          const project = this.mobilePushableProject(projectId, streamId)
+          if (typeof project === 'object') return project
+          const result = await this.pushStream(projectId, streamId)
+          return {
+            ok: true,
+            result: {
+              status: result.status,
+              message: streamPushMessage(result),
+              ...(result.status === 'pushed' || result.status === 'nothing' ? { upstream: result.upstream } : {}),
+              ...(result.status === 'pushed' ? { commits: result.commits } : {})
+            }
+          }
+        }
+      },
       streamRuns: {
         states: (streamId) => this.streamRuns.statesOfStream(streamId),
         subscribe: (listener) => this.streamRuns.subscribe(listener),
@@ -961,6 +997,16 @@ export class HostServices {
   private mobileStreamExists(projectId: string, streamId: string): boolean {
     const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
     return !!project && isVisibleOnMobile(project) && project.streams.some(s => s.id === streamId)
+  }
+
+  /** `stream.push` and `.status`: an error to answer, or true when the stream can be pushed from here. */
+  private mobilePushableProject(projectId: string, streamId: string): true | { ok: false; code: string; message: string } {
+    if (!this.mobileStreamExists(projectId, streamId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    if (!project || isShellCommandProject(project) || project.ssh) {
+      return { ok: false, code: AppErrorCode.Unsupported, message: 'Pushing isn\'t available for this project' }
+    }
+    return true
   }
 
   /** The command a `stream.run` or `stream.logs` without `commandId` means: the stream's first, else its first run's. */
@@ -1130,6 +1176,20 @@ export class HostServices {
     const next = pruned.reduce((acc, { projectId, archive }) => syncArchiveCounts(acc, projectId, archive), data)
     if (next !== data) this.commitProjects(next)
     this.logDebug(`donePrune projects=${pruned.length} olderThanDays=${this.config.doneRetentionDays}`)
+  }
+
+  /**
+   * Push a stream's branch (`stream-push.ts`), for the stream menu and the
+   * phone. Windows hear `stream-pushed` so their unpushed counts refresh.
+   */
+  async pushStream(projectId: string, streamId: string): Promise<StreamPushResult> {
+    const result = await pushStream({
+      projects: this.projectsStore,
+      runner: this.gitRunner,
+      log: (message) => this.logDebug(message)
+    }, projectId, streamId)
+    this.clients.broadcast('stream-pushed', projectId, streamId)
+    return result
   }
 
   /**
@@ -2217,7 +2277,9 @@ export class HostServices {
         blocker: (project) => this.chatTaskBlocker(project),
         sendFirstPrompt: (projectId, taskId, tabId, prompt) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt),
         log: (message) => this.logDebug(message)
-      }, projectId, streamId, files)
+      }, projectId, streamId, files),
+      pushStream: (projectId, streamId) => this.pushStream(projectId, streamId),
+      streamPushStatus: (projectId, streamId) => streamPushStatus({ projects: this.projectsStore, runner: this.gitRunner }, projectId, streamId)
     })
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
     registerScheduleHandlers(ipc, {

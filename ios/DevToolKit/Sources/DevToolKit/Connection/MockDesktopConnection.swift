@@ -48,6 +48,10 @@ public actor MockDesktopConnection: DesktopConnection {
     private var runLogs: [String: String] = MockInbox.runLogs
     /// Commands saved by `stream.commands.set` (§8.21): "project:<id>" or "stream:<id>".
     private var savedCommands: [String: [InboxRunCommand]] = [:]
+    /// Streams pushed this session (§8.29): the remote has all their commits.
+    private var pushedStreams: Set<String> = []
+    /// Streams with a push under way; a second push answers `failed`.
+    private var pushingStreams: Set<String> = []
     /// How long `stream.commands.suggest` "reads the project".
     private let suggestDelay: Duration
 
@@ -326,6 +330,14 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             return try logs(parsed).json
+        case TaskOp.streamPushStatus, TaskOp.streamPush:
+            let parsed: StreamPushParams
+            do {
+                parsed = try StreamPushParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return op == TaskOp.streamPush ? try await push(parsed).json : try pushStatus(parsed).json
         case TaskOp.streamCommandsGet:
             let parsed: StreamCommandsParams
             do {
@@ -743,6 +755,47 @@ public actor MockDesktopConnection: DesktopConnection {
         }
         inbox.generatedAt = now
         continuation.yield(.inbox(inbox))
+    }
+
+    // MARK: Push (§8.29)
+
+    /// api-server's main is 3 commits ahead of origin/master, its 0.5.0 was never
+    /// pushed (2 commits), every other stream is up to date; a pushed stream is
+    /// up to date. The shell-command project answers `unsupported`.
+    private func pushStatus(_ params: StreamPushParams) throws -> StreamPushStatus {
+        if params.projectId == Self.shellProjectId {
+            throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "A shell-command project has no git branch to push.")
+        }
+        let (p, s) = try runStream(projectId: params.projectId, streamId: params.streamId)
+        let stream = inbox.projects[p].streams[s]
+        let branch = stream.isMain ? "master" : stream.branch ?? stream.name
+        let pushed = pushedStreams.contains(stream.id)
+        switch stream.id {
+        case "s-api-main" where !pushed:
+            return StreamPushStatus(branch: branch, remote: "origin", upstream: "origin/\(branch)", ahead: 3)
+        case "s-api-050" where !pushed:
+            return StreamPushStatus(branch: branch, remote: "origin", ahead: 2)
+        default:
+            return StreamPushStatus(branch: branch, remote: "origin", upstream: "origin/\(branch)")
+        }
+    }
+
+    /// `stream.push`: answers after git "talks to the remote" (about a second).
+    private func push(_ params: StreamPushParams) async throws -> StreamPushResult {
+        let status = try pushStatus(params)
+        guard !pushingStreams.contains(params.streamId) else {
+            return StreamPushResult(status: .failed, message: "A push of this stream is already running")
+        }
+        pushingStreams.insert(params.streamId)
+        defer { pushingStreams.remove(params.streamId) }
+        try? await Task.sleep(for: streamStep * 4)
+        let upstream = status.upstream ?? "origin/\(status.branch)"
+        guard status.ahead > 0 else {
+            return StreamPushResult(status: .nothing, message: "\(upstream) is up to date", upstream: upstream)
+        }
+        pushedStreams.insert(params.streamId)
+        let commits = status.ahead == 1 ? "1 commit" : "\(status.ahead) commits"
+        return StreamPushResult(status: .pushed, message: "Pushed \(commits) to \(upstream)", upstream: upstream, commits: status.ahead)
     }
 
     // MARK: Commands (§8.21)
@@ -1464,7 +1517,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.chatBash, DesktopFeature.chatQueue, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
             DesktopFeature.tokensUsage, DesktopFeature.chatSearch, DesktopFeature.schedules, DesktopFeature.taskChildren,
-            DesktopFeature.chatFork, DesktopFeature.chatPlugins,
+            DesktopFeature.chatFork, DesktopFeature.chatPlugins, DesktopFeature.streamPush,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

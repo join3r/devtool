@@ -343,6 +343,21 @@ extension DesktopConnection {
         return try decode(result, StreamLogsResult.parse)
     }
 
+    /// `stream.push.status` (§8.29): where the stream's branch stands against
+    /// its remote, as last fetched. Nothing is fetched, so it is quick.
+    public func streamPushStatus(projectId: String, streamId: String) async throws -> StreamPushStatus {
+        let result = try await request(TaskOp.streamPushStatus, params: StreamPushParams(projectId: projectId, streamId: streamId).json)
+        return try decode(result, StreamPushStatus.parse)
+    }
+
+    /// `stream.push` (§8.29): push the stream's branch. The desktop answers once
+    /// git has finished, at most two minutes; a failed push is still a result.
+    public func streamPush(projectId: String, streamId: String) async throws -> StreamPushResult {
+        let result = try await request(TaskOp.streamPush, params: StreamPushParams(projectId: projectId, streamId: streamId).json,
+                                       timeout: .seconds(150))
+        return try decode(result, StreamPushResult.parse)
+    }
+
     /// `stream.commands.get` (§8.21): the project's own commands (`streamId`
     /// nil) or a stream's own, with the project's as `inherited`.
     public func streamCommands(projectId: String, streamId: String? = nil) async throws -> StreamCommandsResult {

@@ -14,6 +14,12 @@ interface Props {
   onFileClick: (filePath: string) => void
   /** Reveal in Finder: only for folders on this computer (not a DevTool server's). */
   canReveal?: boolean
+  /**
+   * The folder is a task's own worktree: its root repo is on the task's branch,
+   * which reaches the remote by landing into its stream and pushing the stream
+   * (the stream menu's Push), so it has no Push here.
+   */
+  inTaskWorktree?: boolean
 }
 
 const BADGE_CLASSES = {
@@ -37,7 +43,7 @@ const EMPTY_ROOT: GitRepoStatus = { path: '', staged: [], unstaged: [], untracke
  * before; one with nested repos (or only nested repos) gets a header per repo,
  * each with its own Pull/Push and commit box.
  */
-export default function GitStatus({ gitStatus, projectDir, projectId, onFileClick, canReveal = true }: Props) {
+export default function GitStatus({ gitStatus, projectDir, projectId, onFileClick, canReveal = true, inTaskWorktree = false }: Props) {
   const repos = gitStatus ? gitStatus.repos : [EMPTY_ROOT]
   if (repos.length === 0) {
     return <div className="flex items-center justify-center p-6 text-text-muted text-base">Not a git repository</div>
@@ -55,6 +61,7 @@ export default function GitStatus({ gitStatus, projectDir, projectId, onFileClic
           projectId={projectId}
           onFileClick={onFileClick}
           canReveal={canReveal}
+          canPush={!(inTaskWorktree && repo.path === '')}
         />
       ))}
     </div>
@@ -69,9 +76,10 @@ interface RepoPanelProps {
   projectId?: string
   onFileClick: (filePath: string) => void
   canReveal: boolean
+  canPush: boolean
 }
 
-function RepoPanel({ repo, title, projectDir, projectId, onFileClick, canReveal }: RepoPanelProps) {
+function RepoPanel({ repo, title, projectDir, projectId, onFileClick, canReveal, canPush }: RepoPanelProps) {
   const [repoCollapsed, setRepoCollapsed] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -253,7 +261,7 @@ function RepoPanel({ repo, title, projectDir, projectId, onFileClick, canReveal 
       <div className="p-2 border-b border-hair flex flex-col gap-1.5">
         <div className="flex items-center gap-3 px-0.5">
           <LinkBtn onClick={handlePull} disabled={busy} title="Git Pull">{busy ? '…' : 'Pull'}</LinkBtn>
-          <LinkBtn onClick={handlePush} disabled={busy} title="Git Push">Push</LinkBtn>
+          {canPush && <LinkBtn onClick={handlePush} disabled={busy} title="Git Push">Push</LinkBtn>}
           {hasUnstagedOrUntracked && (
             <span className="ml-auto">
               <LinkBtn onClick={handleStageAll} disabled={busy} title="Stage all unstaged and untracked files">

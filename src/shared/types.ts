@@ -219,6 +219,36 @@ export type StreamMergeResult =
   | { status: 'blocked'; files: string[]; message: string }
   | { status: 'failed'; error: string }
 
+/**
+ * Where a stream's branch stands against its remote (`stream-push.ts`). The
+ * counts compare with the remote-tracking refs as last fetched; nothing is
+ * fetched to work them out.
+ */
+export interface StreamPushStatus {
+  /** The stream's branch: its worktree's, or what the project folder has checked out for `main`. */
+  branch: string
+  /** The remote a push goes to; null when the repo has none. */
+  remote: string | null
+  /** `origin/master`; null before the branch was ever pushed (the first push sets it). */
+  upstream: string | null
+  /** Commits on the branch the remote doesn't have. */
+  ahead: number
+  /** Commits on the upstream the branch doesn't have (as last fetched). */
+  behind: number
+}
+
+/** Pushing a stream's branch (`stream-push.ts`). Never forced. */
+export type StreamPushResult =
+  | { status: 'pushed'; branch: string; remote: string; upstream: string; commits: number }
+  /** The remote has every commit already. */
+  | { status: 'nothing'; branch: string; upstream: string }
+  /** The remote has commits the branch doesn't: take them in first. */
+  | { status: 'rejected'; message: string }
+  /** git couldn't log in (no key, no stored credentials); it never prompts. */
+  | { status: 'auth'; message: string }
+  | { status: 'no-remote' }
+  | { status: 'failed'; error: string }
+
 /** Asking Claude to resolve a closing stream's merge conflict (`stream-merge-fix.ts`): the task it started. */
 export type StreamMergeFixResult =
   | { ok: true; taskId: string }

@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseChatForkParams, parseChatForkResult, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseChatPluginsParams, parseChatPluginsResult, parseChatPluginsChangeParams, parseChatPluginsChangeResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseChatForkParams, parseChatForkResult, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamPushParams, parseStreamPushStatusResult, parseStreamPushResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatQueueParams, parseChatSearchParams, parseChatSearchResult, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseChatPluginsParams, parseChatPluginsResult, parseChatPluginsChangeParams, parseChatPluginsChangeResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult, parseScheduleUpdateParams, parseScheduleUpdateResult, parseScheduleRunParams, parseScheduleRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -955,6 +955,32 @@ function chatMessages(): unknown {
       invalid: {
         params: [text({ projectId: 'p1' }), text({ streamId: 's-main' }), text({ projectId: 'p1', streamId: 's-main', commandId: '' }), 'null'],
         results: [text({}), text({ text: 7 }), '[]']
+      }
+    },
+    // §8.29: `stream.push.status` and `stream.push` push a stream's branch to its remote.
+    streamPush: {
+      params: [
+        text({ projectId: 'p1', streamId: 's-main' }),
+        text({ projectId: 'p1', streamId: 's-050', force: true })
+      ].map((json) => ({ json, expected: parseStreamPushParams(JSON.parse(json)) })),
+      statusResults: [
+        text({ branch: 'master', remote: 'origin', upstream: 'origin/master', ahead: 3, behind: 0 }),
+        text({ branch: '0.5.0', remote: 'origin', ahead: 2, behind: 0 }),
+        text({ branch: 'master', ahead: 0, behind: 0 }),
+        text({ branch: 'master', remote: '', upstream: '', ahead: 0, behind: 1 })
+      ].map((json) => ({ json, expected: parseStreamPushStatusResult(JSON.parse(json)) })),
+      results: [
+        text({ status: 'pushed', message: 'Pushed 3 commits to origin/master', upstream: 'origin/master', commits: 3 }),
+        text({ status: 'nothing', message: 'origin/master is up to date', upstream: 'origin/master' }),
+        text({ status: 'rejected', message: 'origin/master has commits master doesn\'t. Take them in first (git pull), then push again.' }),
+        text({ status: 'auth', message: 'git couldn\'t log in to origin: Permission denied (publickey).' }),
+        text({ status: 'no-remote', message: 'This repository has no remote to push to' }),
+        text({ status: 'failed', message: 'The push to origin timed out' })
+      ].map((json) => ({ json, expected: parseStreamPushResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({ projectId: 'p1' }), text({ streamId: 's-main' }), text({ projectId: 'p1', streamId: 7 }), 'null'],
+        statusResults: [text({ branch: 'master', ahead: 1 }), text({ branch: 'master', ahead: -1, behind: 0 }), text({ ahead: 0, behind: 0 }), text({ branch: 'master', ahead: 1.5, behind: 0 }), '[]'],
+        results: [text({ status: 'forced', message: 'x' }), text({ status: 'pushed' }), text({ message: 'x' }), text({ status: 'pushed', message: 'x', commits: -1 }), 'null']
       }
     },
     // §8.21: `stream.commands.get`, `.set` and `.suggest` read, save and suggest a project's or a stream's commands.

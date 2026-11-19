@@ -25,6 +25,10 @@ import {
   parseStreamNewParams,
   parseStreamRunParams,
   parseStreamLogsParams,
+  parseStreamPushParams,
+  type StreamPushParams,
+  type StreamPushResult as MobileStreamPushResult,
+  type StreamPushStatusResult,
   parseStreamCommandsParams,
   parseStreamCommandsSetParams,
   type StreamCommandsParams,
@@ -281,6 +285,11 @@ export interface MobileServiceDeps {
     subscribe(listener: () => void): () => void
     control(params: StreamRunParams): Promise<{ ok: true } | { ok: false; code: string; message: string }>
     logs(params: StreamLogsParams): { ok: true; result: StreamLogsResult } | { ok: false; code: string; message: string }
+  }
+  /** `stream.push.status` and `stream.push` (SPEC.md §8.29). Without it both answer `unsupported`. */
+  streamPush?: {
+    status(params: StreamPushParams): Promise<{ ok: true; result: StreamPushStatusResult } | { ok: false; code: string; message: string }>
+    push(params: StreamPushParams): Promise<{ ok: true; result: MobileStreamPushResult } | { ok: false; code: string; message: string }>
   }
   /** `stream.commands.get`, `.set` and `.suggest` (SPEC.md §8.21). Without it the three answer `unsupported`. */
   streamCommands?: {
@@ -1036,6 +1045,22 @@ export class MobileService {
       this.answerLater(session, id, message.op, () => parseStreamLogsParams(message.params), async (params) => {
         const outcome = runs.logs(params)
         return outcome.ok ? { ok: true, result: outcome.result, log: `stream=${params.streamId} chars=${outcome.result.text.length}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.StreamPushStatus && this.deps.streamPush) {
+      const push = this.deps.streamPush
+      this.answerLater(session, id, message.op, () => parseStreamPushParams(message.params), async (params) => {
+        const outcome = await push.status(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `stream=${params.streamId} ahead=${outcome.result.ahead}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.StreamPush && this.deps.streamPush) {
+      const push = this.deps.streamPush
+      this.answerLater(session, id, message.op, () => parseStreamPushParams(message.params), async (params) => {
+        const outcome = await push.push(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `stream=${params.streamId} status=${outcome.result.status}` } : outcome
       })
       return
     }

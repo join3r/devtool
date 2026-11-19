@@ -12,6 +12,7 @@ import {
   type LandingNotice,
   type LandingOp
 } from '../taskLanding'
+import { pushStreamWithToast } from '../streamPush'
 
 /**
  * The line a landing call leaves on the task's banner, or null when the
@@ -43,6 +44,7 @@ export function landingResultNotice(result: TaskLandingResult, op: LandingOp, st
  */
 export function useTaskLandingActions(): {
   land: (project: Project, task: Task) => Promise<void>
+  landAndPush: (project: Project, task: Task) => Promise<void>
   update: (project: Project, task: Task) => Promise<void>
   retry: (project: Project, task: Task) => Promise<void>
   setAside: (project: Project, task: Task) => Promise<void>
@@ -59,21 +61,34 @@ export function useTaskLandingActions(): {
     if (result.status === 'conflict' || result.status === 'blocked' || result.status === 'failed') switchToTask(project.id, task.id)
   }, [switchToTask])
 
-  const run = useCallback(async (project: Project, task: Task, op: LandingOp, call: () => Promise<TaskLandingResult>) => {
-    settle(project, task, op, await runLandingOp(task.id, op, call))
+  const run = useCallback(async (project: Project, task: Task, op: LandingOp, call: () => Promise<TaskLandingResult>): Promise<TaskLandingResult> => {
+    const result = await runLandingOp(task.id, op, call)
+    settle(project, task, op, result)
+    return result
   }, [settle])
 
-  const land = useCallback((project: Project, task: Task) =>
-    run(project, task, 'land', () => window.api.taskLand(project.id, task.id, { keepWorktree: true })), [run])
+  const land = useCallback(async (project: Project, task: Task) => {
+    await run(project, task, 'land', () => window.api.taskLand(project.id, task.id, { keepWorktree: true }))
+  }, [run])
 
-  const update = useCallback((project: Project, task: Task) =>
-    run(project, task, 'update', () => window.api.taskUpdateFromStream(project.id, task.id)), [run])
+  /** Land and keep working, then push the stream it landed into; a landing that stops pushes nothing. */
+  const landAndPush = useCallback(async (project: Project, task: Task) => {
+    const result = await run(project, task, 'land', () => window.api.taskLand(project.id, task.id, { keepWorktree: true }))
+    const stream = findStreamOfTask(project, task.id)
+    if (stream && (result.status === 'landed' || result.status === 'nothing')) await pushStreamWithToast(project.id, stream.id)
+  }, [run])
 
-  const abort = useCallback((project: Project, task: Task) =>
-    run(project, task, 'abort', () => window.api.taskLandingAbort(project.id, task.id)), [run])
+  const update = useCallback(async (project: Project, task: Task) => {
+    await run(project, task, 'update', () => window.api.taskUpdateFromStream(project.id, task.id))
+  }, [run])
 
-  const fix = useCallback((project: Project, task: Task) =>
-    run(project, task, 'fix', () => window.api.taskLandingFix(project.id, task.id)), [run])
+  const abort = useCallback(async (project: Project, task: Task) => {
+    await run(project, task, 'abort', () => window.api.taskLandingAbort(project.id, task.id))
+  }, [run])
+
+  const fix = useCallback(async (project: Project, task: Task) => {
+    await run(project, task, 'fix', () => window.api.taskLandingFix(project.id, task.id))
+  }, [run])
 
   /** Picks the stopped landing up again; a close that lands now is archived by main, as closing would have been. */
   const retry = useCallback(async (project: Project, task: Task) => {
@@ -132,5 +147,5 @@ export function useTaskLandingActions(): {
     addTab(project.id, task.id, 'focused', 'terminal', { cwd: root })
   }, [addTab, projects])
 
-  return { land, update, retry, setAside, abort, fix, fixByHand }
+  return { land, landAndPush, update, retry, setAside, abort, fix, fixByHand }
 }

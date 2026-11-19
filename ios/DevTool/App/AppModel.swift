@@ -34,6 +34,12 @@ final class AppModel {
     var runError: String?
     /// Streams whose Run, Stop or Restart is in flight (`desktopId/streamId`), and which.
     private(set) var pendingRuns: [String: StreamRunParams.Action] = [:]
+    /// `stream.push.status` answers (§8.29), by `desktopId/streamId`; Push shows only with a `remote`.
+    private(set) var pushStatuses: [String: StreamPushStatus] = [:]
+    /// Streams whose push is in flight (`desktopId/streamId`).
+    private(set) var pushingStreams: Set<String> = []
+    /// What the last push came to, for the alert: its `message`, as it is.
+    var pushOutcome: PushOutcome?
 
     /// Push registration (SPEC.md §7.4); told about every established session.
     @ObservationIgnored weak var push: PushManager?
@@ -393,6 +399,52 @@ final class AppModel {
     func runLogs(projectId: String, streamId: String, commandId: String, desktopId: String) async throws -> StreamLogsResult {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
         return try await connection.runLogs(projectId: projectId, streamId: streamId, commandId: commandId)
+    }
+
+    // MARK: - Push (§8.29)
+
+    /// `stream.push.status` for each stream, all at once. A stream that fails
+    /// (`unsupported`: a shell-command project, a detached folder) loses its
+    /// Push rather than showing an error nobody asked for.
+    func loadPushStatuses(projectId: String, streamIds: [String], desktopId: String) async {
+        guard supports(DesktopFeature.streamPush, on: desktopId), let connection = connections[desktopId] else { return }
+        await withTaskGroup(of: (String, StreamPushStatus?).self) { group in
+            for streamId in streamIds {
+                group.addTask { (streamId, try? await connection.streamPushStatus(projectId: projectId, streamId: streamId)) }
+            }
+            for await (streamId, status) in group {
+                pushStatuses["\(desktopId)/\(streamId)"] = status
+            }
+        }
+    }
+
+    func pushStatus(streamId: String, desktopId: String) -> StreamPushStatus? {
+        pushStatuses["\(desktopId)/\(streamId)"]
+    }
+
+    func isPushing(streamId: String, desktopId: String) -> Bool {
+        pushingStreams.contains("\(desktopId)/\(streamId)")
+    }
+
+    /// `stream.push`: the result's `message` goes to `pushOutcome` whatever it
+    /// says (a failed push is still a result); then the status is asked again
+    /// for the new `ahead`. One push per stream at a time.
+    func pushStream(projectId: String, streamId: String, desktopId: String) async {
+        let key = "\(desktopId)/\(streamId)"
+        guard let connection = connections[desktopId] else {
+            pushOutcome = PushOutcome(failed: true, message: DesktopConnectionError.notConnected.localizedDescription)
+            return
+        }
+        guard !pushingStreams.contains(key) else { return }
+        pushingStreams.insert(key)
+        defer { pushingStreams.remove(key) }
+        do {
+            let result = try await connection.streamPush(projectId: projectId, streamId: streamId)
+            pushOutcome = PushOutcome(failed: result.isFailure, message: result.message)
+        } catch {
+            pushOutcome = PushOutcome(failed: true, message: error.localizedDescription)
+        }
+        pushStatuses[key] = try? await connection.streamPushStatus(projectId: projectId, streamId: streamId)
     }
 
     // MARK: - Commands (§8.21)
@@ -761,4 +813,11 @@ extension AppModel {
         let chatCache = InMemoryChatCacheStore([CachedChat(desktopId: mockOfflineId, view: transcript, savedAt: lastSeen)])
         return AppModel(factory: factory, store: store, chatCache: chatCache)
     }
+}
+
+/// A push's outcome for the alert (§8.29).
+struct PushOutcome: Equatable {
+    /// Not `pushed` or `nothing`, or no answer at all.
+    var failed: Bool
+    var message: String
 }

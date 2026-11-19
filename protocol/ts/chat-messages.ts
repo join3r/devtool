@@ -266,6 +266,26 @@ export interface StreamLogsParams { projectId: string; streamId: string; command
 export interface StreamLogsResult { text: string; truncated?: true }
 
 /**
+ * `stream.push.status` and `stream.push` (SPEC.md §8.29): pushing a stream's
+ * branch to its remote, as the desktop stream menu's Push. Never forced.
+ */
+export const STREAM_PUSH_STATUS_OP = 'stream.push.status'
+export const STREAM_PUSH_OP = 'stream.push'
+/** The handshake feature (§8.1) a desktop lists when it answers both. */
+export const STREAM_PUSH_FEATURE = 'stream.push'
+export interface StreamPushParams { projectId: string; streamId: string }
+/**
+ * Where the stream's branch stands, against the remote-tracking refs as last
+ * fetched. `remote` absent: the repo has none (nothing to push to). `upstream`
+ * absent: the branch was never pushed.
+ */
+export interface StreamPushStatusResult { branch: string; remote?: string; upstream?: string; ahead: number; behind: number }
+export const STREAM_PUSH_STATUSES = ['pushed', 'nothing', 'rejected', 'auth', 'no-remote', 'failed'] as const
+export type StreamPushStatusValue = (typeof STREAM_PUSH_STATUSES)[number]
+/** `message` is a line to show as it is; `upstream` comes with `pushed` and `nothing`, `commits` with `pushed`. */
+export interface StreamPushResult { status: StreamPushStatusValue; message: string; upstream?: string; commits?: number }
+
+/**
  * `stream.commands.get`, `.set` and `.suggest` (SPEC.md §8.21): the commands a
  * project or a stream runs (§8.19), as Project settings and a stream's Commands…
  * edit them, and Suggest with Claude. No `streamId` means the project's own list.
@@ -1902,6 +1922,38 @@ export function parseStreamLogsResult(value: unknown): StreamLogsResult {
   const o = obj(value, 'result')
   const out: StreamLogsResult = { text: str(o, 'text') }
   if (o.truncated === true) out.truncated = true
+  return out
+}
+
+/**
+ * `stream.push.status` and `stream.push` params (the desktop's side).
+ * Throws ProtocolError — `bad-request` — on a missing `projectId` or `streamId`.
+ */
+export function parseStreamPushParams(params: unknown): StreamPushParams {
+  const o = obj(params, 'params')
+  return { projectId: str(o, 'projectId'), streamId: str(o, 'streamId') }
+}
+
+/** `stream.push.status` result (the phone's side). An empty `remote` or `upstream` is absent. */
+export function parseStreamPushStatusResult(value: unknown): StreamPushStatusResult {
+  const o = obj(value, 'result')
+  const out: StreamPushStatusResult = { branch: str(o, 'branch'), ahead: int(o, 'ahead'), behind: int(o, 'behind') }
+  const remote = optStr(o, 'remote')
+  if (remote) out.remote = remote
+  const upstream = optStr(o, 'upstream')
+  if (upstream) out.upstream = upstream
+  return out
+}
+
+/** `stream.push` result (the phone's side). An unknown `status` is malformed. */
+export function parseStreamPushResult(value: unknown): StreamPushResult {
+  const o = obj(value, 'result')
+  const status = str(o, 'status')
+  if (!(STREAM_PUSH_STATUSES as readonly string[]).includes(status)) fail(`unknown status ${status}`)
+  const out: StreamPushResult = { status: status as StreamPushStatusValue, message: str(o, 'message') }
+  const upstream = optStr(o, 'upstream')
+  if (upstream) out.upstream = upstream
+  if (o.commits !== undefined) out.commits = int(o, 'commits')
   return out
 }
 

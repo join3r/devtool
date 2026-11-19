@@ -17,14 +17,16 @@ function emit(): void {
   for (const listener of [...listeners]) listener()
 }
 
-export function showToast(message: string, options: { action?: Toast['action'] } = {}): void {
+/** Shows a toast; its id (for {@link dismissToast}), or null when the same note is up already. */
+export function showToast(message: string, options: { action?: Toast['action'] } = {}): number | null {
   // The same note twice in a row reads as one.
-  if (toasts.some(toast => toast.message === message)) return
+  if (toasts.some(toast => toast.message === message)) return null
   const toast: Toast = { id: nextId++, message, action: options.action }
   toasts = [...toasts, toast]
   emit()
   // One with an action stays a little longer: there is something to do with it.
   setTimeout(() => dismissToast(toast.id), options.action ? TOAST_MS * 1.5 : TOAST_MS)
+  return toast.id
 }
 
 export function dismissToast(id: number): void {

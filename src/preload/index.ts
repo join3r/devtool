@@ -34,6 +34,8 @@ import type {
   TaskLandingPreview,
   StreamMergeFixResult,
   StreamMergeResult,
+  StreamPushResult,
+  StreamPushStatus,
   TaskForkResult,
   TaskLandingResult,
   TaskWorktreeResult,
@@ -404,6 +406,12 @@ const api = {
     ipcRenderer.on('stream-run-state', handler)
     return () => ipcRenderer.removeListener('stream-run-state', handler)
   },
+  /** A stream was pushed (from any window or the phone): its unpushed count changed. */
+  onStreamPushed: (callback: (projectId: string, streamId: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, projectId: string, streamId: string) => callback(projectId, streamId)
+    ipcRenderer.on('stream-pushed', handler)
+    return () => ipcRenderer.removeListener('stream-pushed', handler)
+  },
   subscribePtyData: (callback: (id: string, data: string) => void): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, id: string, data: string) => callback(id, data)
     ipcRenderer.on('pty-data', handler)
@@ -647,6 +655,12 @@ const api = {
   /** After a conflicting `streamMerge`: a Claude task in the stream's worktree merges the base branch in and resolves the conflicts. */
   streamMergeFix: (projectId: string, streamId: string, files: string[]): Promise<StreamMergeFixResult> =>
     ipcRenderer.invoke('stream-merge-fix', projectId, streamId, files),
+  /** Push the stream's branch to its remote; never forced, never prompts for credentials. */
+  streamPush: (projectId: string, streamId: string): Promise<StreamPushResult> =>
+    ipcRenderer.invoke('stream-push', projectId, streamId),
+  /** Unpushed commits of the stream's branch (as last fetched); null when it can't tell. */
+  streamPushStatus: (projectId: string, streamId: string): Promise<StreamPushStatus | null> =>
+    ipcRenderer.invoke('stream-push-status', projectId, streamId),
   onTaskLandingState: (callback: (taskId: string, landing: TaskLanding | null) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, taskId: string, landing: TaskLanding | null) => callback(taskId, landing)
     ipcRenderer.on('task-landing-state', handler)

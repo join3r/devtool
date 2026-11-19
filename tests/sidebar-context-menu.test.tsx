@@ -378,6 +378,29 @@ describe('Streams from the column and their menus', () => {
     await waitFor(() => expect(workspaceDelete).toHaveBeenLastCalledWith(expect.objectContaining({ force: true, keepBranch: true })))
   })
 
+  it('pushes a stream from its menu, showing what the remote lacks', async () => {
+    const api = window.api as unknown as Record<string, unknown>
+    api.streamPushStatus = vi.fn().mockResolvedValue({ branch: '0.5.0', remote: 'origin', upstream: 'origin/0.5.0', ahead: 3, behind: 0 })
+    const streamPush = vi.fn().mockResolvedValue({ status: 'pushed', branch: '0.5.0', remote: 'origin', upstream: 'origin/0.5.0', commits: 3 })
+    api.streamPush = streamPush
+    renderSidebar()
+    await row('Busy task')
+    const push = await within(await openStreamMenu('stream-busy')).findByTestId('stream-menu-push')
+    expect(push.textContent).toContain('Push to origin')
+    expect(push.textContent).toContain('↑3')
+    fireEvent.click(push)
+    await waitFor(() => expect(streamPush).toHaveBeenCalledWith('p1', 'stream-busy'))
+  })
+
+  it('offers no Push for a repo without a remote', async () => {
+    ;(window.api as unknown as Record<string, unknown>).streamPushStatus = vi.fn().mockResolvedValue({ branch: 'master', remote: null, upstream: null, ahead: 0, behind: 0 })
+    renderSidebar()
+    await row('Busy task')
+    const menu = await openStreamMenu(mainStreamId('p1'))
+    await waitFor(() => expect(window.api.streamPushStatus).toHaveBeenCalled())
+    expect(within(menu).queryByTestId('stream-menu-push')).toBeNull()
+  })
+
   it('adds a task to a stream from its menu', async () => {
     renderSidebar()
     await row('Busy task')

@@ -247,6 +247,7 @@ export function FileBrowserBody({ tab, active, pane = 'focused', onOpened }: {
           projectId={selectedProjectId ?? undefined}
           onFileClick={handleGitFileClick}
           canReveal={canReveal}
+          inTaskWorktree={!!selectedTask?.workspace}
         />
       ) : (
         <NotesList onOpened={onOpened} />

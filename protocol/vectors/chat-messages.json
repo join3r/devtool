@@ -2257,6 +2257,130 @@
       ]
     }
   },
+  "streamPush": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-main\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-main"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"force\":true}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-050"
+        }
+      }
+    ],
+    "statusResults": [
+      {
+        "json": "{\"branch\":\"master\",\"remote\":\"origin\",\"upstream\":\"origin/master\",\"ahead\":3,\"behind\":0}",
+        "expected": {
+          "branch": "master",
+          "ahead": 3,
+          "behind": 0,
+          "remote": "origin",
+          "upstream": "origin/master"
+        }
+      },
+      {
+        "json": "{\"branch\":\"0.5.0\",\"remote\":\"origin\",\"ahead\":2,\"behind\":0}",
+        "expected": {
+          "branch": "0.5.0",
+          "ahead": 2,
+          "behind": 0,
+          "remote": "origin"
+        }
+      },
+      {
+        "json": "{\"branch\":\"master\",\"ahead\":0,\"behind\":0}",
+        "expected": {
+          "branch": "master",
+          "ahead": 0,
+          "behind": 0
+        }
+      },
+      {
+        "json": "{\"branch\":\"master\",\"remote\":\"\",\"upstream\":\"\",\"ahead\":0,\"behind\":1}",
+        "expected": {
+          "branch": "master",
+          "ahead": 0,
+          "behind": 1
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"status\":\"pushed\",\"message\":\"Pushed 3 commits to origin/master\",\"upstream\":\"origin/master\",\"commits\":3}",
+        "expected": {
+          "status": "pushed",
+          "message": "Pushed 3 commits to origin/master",
+          "upstream": "origin/master",
+          "commits": 3
+        }
+      },
+      {
+        "json": "{\"status\":\"nothing\",\"message\":\"origin/master is up to date\",\"upstream\":\"origin/master\"}",
+        "expected": {
+          "status": "nothing",
+          "message": "origin/master is up to date",
+          "upstream": "origin/master"
+        }
+      },
+      {
+        "json": "{\"status\":\"rejected\",\"message\":\"origin/master has commits master doesn't. Take them in first (git pull), then push again.\"}",
+        "expected": {
+          "status": "rejected",
+          "message": "origin/master has commits master doesn't. Take them in first (git pull), then push again."
+        }
+      },
+      {
+        "json": "{\"status\":\"auth\",\"message\":\"git couldn't log in to origin: Permission denied (publickey).\"}",
+        "expected": {
+          "status": "auth",
+          "message": "git couldn't log in to origin: Permission denied (publickey)."
+        }
+      },
+      {
+        "json": "{\"status\":\"no-remote\",\"message\":\"This repository has no remote to push to\"}",
+        "expected": {
+          "status": "no-remote",
+          "message": "This repository has no remote to push to"
+        }
+      },
+      {
+        "json": "{\"status\":\"failed\",\"message\":\"The push to origin timed out\"}",
+        "expected": {
+          "status": "failed",
+          "message": "The push to origin timed out"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"projectId\":\"p1\"}",
+        "{\"streamId\":\"s-main\"}",
+        "{\"projectId\":\"p1\",\"streamId\":7}",
+        "null"
+      ],
+      "statusResults": [
+        "{\"branch\":\"master\",\"ahead\":1}",
+        "{\"branch\":\"master\",\"ahead\":-1,\"behind\":0}",
+        "{\"ahead\":0,\"behind\":0}",
+        "{\"branch\":\"master\",\"ahead\":1.5,\"behind\":0}",
+        "[]"
+      ],
+      "results": [
+        "{\"status\":\"forced\",\"message\":\"x\"}",
+        "{\"status\":\"pushed\"}",
+        "{\"message\":\"x\"}",
+        "{\"status\":\"pushed\",\"message\":\"x\",\"commits\":-1}",
+        "null"
+      ]
+    }
+  },
   "streamCommands": {
     "params": [
       {

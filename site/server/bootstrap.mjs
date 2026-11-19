@@ -623,6 +623,8 @@ var STREAM_NEW_OP = "stream.new";
 var PROJECT_NEW_OP = "project.new";
 var STREAM_RUN_OP = "stream.run";
 var STREAM_LOGS_OP = "stream.logs";
+var STREAM_PUSH_STATUS_OP = "stream.push.status";
+var STREAM_PUSH_OP = "stream.push";
 var STREAM_COMMANDS_GET_OP = "stream.commands.get";
 var STREAM_COMMANDS_SET_OP = "stream.commands.set";
 var STREAM_COMMANDS_SUGGEST_OP = "stream.commands.suggest";
@@ -669,6 +671,8 @@ var AppOp = {
   StreamNew: STREAM_NEW_OP,
   StreamRun: STREAM_RUN_OP,
   StreamLogs: STREAM_LOGS_OP,
+  StreamPushStatus: STREAM_PUSH_STATUS_OP,
+  StreamPush: STREAM_PUSH_OP,
   StreamCommandsGet: STREAM_COMMANDS_GET_OP,
   StreamCommandsSet: STREAM_COMMANDS_SET_OP,
   StreamCommandsSuggest: STREAM_COMMANDS_SUGGEST_OP,

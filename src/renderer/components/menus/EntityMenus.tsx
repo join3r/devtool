@@ -8,6 +8,7 @@ import { canMoveToServer } from '../../../shared/project-move'
 import { findStreamOfTask, findTaskInProject, taskMoveBlocker } from '../../../shared/streams'
 import { streamRunCrashed, streamRunTask } from '../../../shared/stream-run'
 import { openStreamRunCommands, useStreamRuns } from '../../streamRuns'
+import { pushStreamWithToast, unpushedHint, unpushedLine, useStreamPushStatus } from '../../streamPush'
 import { openEntityDialog, requestCloseStream } from '../../entityActions'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
@@ -103,6 +104,35 @@ export function StreamRunMenuItems({ project, streamId, onDone }: { project: Pro
   )
 }
 
+/** Whether a stream's branch can be pushed from DevTool: a git project on this computer or a DevTool server (not SSH yet). */
+export function canPushStream(project: Project): boolean {
+  return !isShellCommandProject(project) && !project.ssh
+}
+
+/**
+ * A stream menu's Push, with how many commits the remote lacks (as last
+ * fetched). Hidden while the count loads and for a repo with no remote.
+ */
+export function StreamPushMenuItem({ project, streamId, onDone }: { project: Project; streamId: string; onDone: () => void }): React.ReactElement | null {
+  const { status, pushing } = useStreamPushStatus(project.id, streamId)
+  if (!status?.remote) return null
+  const target = status.upstream ?? `${status.remote}/${status.branch}`
+  return (
+    <div className={sectionCls}>
+      <button
+        className={`${menuItemCls} flex items-center gap-6 justify-between`}
+        disabled={pushing}
+        title={unpushedLine(status) ?? `${status.branch} is up to date with ${target}`}
+        onClick={() => { onDone(); void pushStreamWithToast(project.id, streamId) }}
+        data-testid="stream-menu-push"
+      >
+        <span>{pushing ? 'Pushing…' : `Push to ${status.remote}`}</span>
+        <span className="text-text-subtle text-xs tabular-nums">{unpushedHint(status)}</span>
+      </button>
+    </div>
+  )
+}
+
 /** The top of a stream menu shown on its own: its name and branch, and which of its commands run. */
 export function StreamMenuHeader({ project, streamId }: { project: Project; streamId: string }): React.ReactElement | null {
   const stream = project.streams.find(s => s.id === streamId)
@@ -131,7 +161,7 @@ export function StreamMenuHeader({ project, streamId }: { project: Project; stre
 
 /**
  * A stream's menu: New task, its app (Run / Restart / Stop, logs, command),
- * Rename, Pin, Reveal, Close (never `main`).
+ * Push, Rename, Pin, Reveal, Close (never `main`).
  */
 export function StreamMenuItems({ project, streamId, onDone, onRenameInline, onCloseStream, newTaskLabel = 'New task' }: {
   project: Project
@@ -156,6 +186,7 @@ export function StreamMenuItems({ project, streamId, onDone, onRenameInline, onC
         <button className={menuItemCls} onClick={act(() => addEmptyTask(project.id, streamId))}>{newTaskLabel}</button>
       </div>
       {!isShellCommandProject(project) && <StreamRunMenuItems project={project} streamId={streamId} onDone={onDone} />}
+      {canPushStream(project) && <StreamPushMenuItem project={project} streamId={streamId} onDone={onDone} />}
       <button className={menuItemCls} onClick={act(() => {
         if (onRenameInline) onRenameInline()
         else openEntityDialog({ kind: 'rename', projectId: project.id, streamId })

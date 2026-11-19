@@ -76,6 +76,12 @@ struct RootView: View {
         } message: {
             Text(model.runError ?? "")
         }
+        .alert(model.pushOutcome?.failed == true ? "Couldn't push" : "Pushed",
+               isPresented: Binding(get: { model.pushOutcome != nil }, set: { if !$0 { model.pushOutcome = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.pushOutcome?.message ?? "")
+        }
         .alert("Couldn't change the queue", isPresented: Binding(get: { model.queueError != nil }, set: { if !$0 { model.queueError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {

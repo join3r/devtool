@@ -380,7 +380,9 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
   })
 
   ipc.handle('fb-git-push', [str, str, optSafeId], (_event, projectCwd, repo) => operation(async (cwd) => {
-    const { stdout, stderr } = await execFileAsync('git', ['push'], { cwd, timeout: 60000 })
+    // Never wait on a credential prompt nobody can see (as `stream-push.ts`).
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' }
+    const { stdout, stderr } = await execFileAsync('git', ['push'], { cwd, timeout: 60000, env })
     return { success: true, message: stdout.trim() || stderr.trim() || 'Push complete' }
   })(projectCwd, repo))
 }
